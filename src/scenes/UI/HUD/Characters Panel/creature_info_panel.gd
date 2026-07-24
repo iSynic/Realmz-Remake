@@ -269,7 +269,6 @@ func _rebuild_special_grid(skills : Array) -> void :
 		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		special_grid.add_child(name_lbl)
-
 		var val_str : String = str(entry[1])
 		var val_lbl := Label.new()
 		val_lbl.text = val_str

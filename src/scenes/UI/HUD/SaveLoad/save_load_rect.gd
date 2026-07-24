@@ -294,7 +294,7 @@ func load_game(campaignname : String, savename : String) :
 	if campaignname != prevCampaign :
 		await NodeAccess.__Resources().load_campaign_ressources(campaignname)
 #	GameState._state = GameGlobal.eGameStates.startGame  #to do  GameState.DoStartGame
-	#StateMachine.transition_to("Exploration/ExWalking", {"load_campaign_msg" : {"initialize_campaign" : false}} )
+
 	#map exploration, done after loading resources
 	var exploration_data : Dictionary = Utils.FileHandler.read_json_dic_from_file(save_path+"/map_exploration.json")
 	var maps_book = NodeAccess.__Resources().maps_book

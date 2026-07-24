@@ -7,6 +7,8 @@ extends NinePatchRect
 
 var pickedparty : Array = []
 
+var selectedCampaign : String = ''
+var selectedcampaign_onselect : GDScript
 
 @onready var charPickRect = $CharPickRect
 @onready var okButton : Button = $OKButton
@@ -16,6 +18,9 @@ func _ready():
 	charPickRect.my_menu = self
 	pass # Replace with function body.
 
+func _initialize() :
+	selectedCampaign = GameGlobal.currentcampaign
+	selectedcampaign_onselect = GameGlobal.currentcampaign_onload_script
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 #func _process(delta):
@@ -43,7 +48,7 @@ func set_ready(rdy : bool, party : Array) :
 
 
 func _on_CancelButton_pressed():
-	StateMachine.transition_to("Exploration/ExWalking")
+	StateMachine.transition_to("Exploration")
 	hide()
 
 
@@ -60,7 +65,7 @@ func _on_OKButton_pressed():
 		var path = Paths.profilesfolderpath+Paths.currentProfileFolderName+'/Characters/'+pc.name
 		pc.cur_campaign = "Free"
 		Utils.FileHandler.save_character(path, pc)
-	StateMachine.transition_to("Exploration/ExWalking")
+	StateMachine.transition_to("Exploration")
 	for pc in pickedparty :
 		pc.cur_campaign = GameGlobal.currentcampaign
 	GameGlobal.player_characters = pickedparty

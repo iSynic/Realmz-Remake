@@ -1,4 +1,5 @@
 extends NinePatchRect
+class_name CharPickRect
 
 
 # Declare member variables here. Examples:

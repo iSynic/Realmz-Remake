@@ -1,12 +1,12 @@
-[gd_scene load_steps=5 format=3 uid="uid://cjpb8ppwrbrtl"]
+[gd_scene format=3 uid="uid://cjpb8ppwrbrtl"]
 
-[ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="1_stone"]
-[ext_resource type="Script" path="res://scenes/UI/HUD/Bestiary/bestiary_rect.gd" id="2_script"]
+[ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="1_stone"]
+[ext_resource type="Script" uid="uid://btc54400i7s56" path="res://scenes/UI/HUD/Bestiary/bestiary_rect.gd" id="2_script"]
 [ext_resource type="PackedScene" uid="uid://cy33c86e0nsoa" path="res://scenes/UI/HUD/Bestiary/bestiary_button.tscn" id="3_btn"]
 [ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="4_font"]
 [ext_resource type="PackedScene" uid="uid://b2x4kchstat01" path="res://scenes/UI/HUD/Characters Panel/creature_info_panel.tscn" id="5_info"]
 
-[node name="BestiaryRect" type="NinePatchRect" node_paths=PackedStringArray("entrycontainer", "search_lineedit", "info_panel")]
+[node name="BestiaryRect" type="NinePatchRect" unique_id=1659033075 node_paths=PackedStringArray("entrycontainer", "search_lineedit", "info_panel")]
 offset_right = 832.0
 offset_bottom = 648.0
 texture = ExtResource("1_stone")
@@ -22,7 +22,7 @@ entrycontainer = NodePath("OuterMargin/HBox/ListRect/ListMargin/ListVBox/ListScr
 search_lineedit = NodePath("OuterMargin/HBox/ListRect/ListMargin/ListVBox/SearchLineEdit")
 info_panel = NodePath("OuterMargin/HBox/InfoPanel")
 
-[node name="OuterMargin" type="MarginContainer" parent="."]
+[node name="OuterMargin" type="MarginContainer" parent="." unique_id=1468748045]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -34,11 +34,11 @@ theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 16
 theme_override_constants/margin_bottom = 16
 
-[node name="HBox" type="HBoxContainer" parent="OuterMargin"]
+[node name="HBox" type="HBoxContainer" parent="OuterMargin" unique_id=1804291394]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="ListRect" type="NinePatchRect" parent="OuterMargin/HBox"]
+[node name="ListRect" type="NinePatchRect" parent="OuterMargin/HBox" unique_id=495940247]
 custom_minimum_size = Vector2(288, 0)
 layout_mode = 2
 texture = ExtResource("1_stone")
@@ -49,7 +49,7 @@ patch_margin_bottom = 11
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
 
-[node name="ListMargin" type="MarginContainer" parent="OuterMargin/HBox/ListRect"]
+[node name="ListMargin" type="MarginContainer" parent="OuterMargin/HBox/ListRect" unique_id=960748728]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -61,35 +61,35 @@ theme_override_constants/margin_top = 14
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 14
 
-[node name="ListVBox" type="VBoxContainer" parent="OuterMargin/HBox/ListRect/ListMargin"]
+[node name="ListVBox" type="VBoxContainer" parent="OuterMargin/HBox/ListRect/ListMargin" unique_id=1657396784]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="SearchHeader" type="Label" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox"]
+[node name="SearchHeader" type="Label" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox" unique_id=1845753414]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("4_font")
 theme_override_font_sizes/font_size = 18
 text = "Bestiary"
 
-[node name="SearchLineEdit" type="LineEdit" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox"]
+[node name="SearchLineEdit" type="LineEdit" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox" unique_id=1726481246]
 custom_minimum_size = Vector2(0, 28)
 layout_mode = 2
 placeholder_text = "Search..."
 
-[node name="ListScroll" type="ScrollContainer" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox"]
+[node name="ListScroll" type="ScrollContainer" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox" unique_id=1561894680]
 layout_mode = 2
 size_flags_vertical = 3
 follow_focus = true
 horizontal_scroll_mode = 0
 vertical_scroll_mode = 2
 
-[node name="EntryContainer" type="VBoxContainer" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox/ListScroll"]
+[node name="EntryContainer" type="VBoxContainer" parent="OuterMargin/HBox/ListRect/ListMargin/ListVBox/ListScroll" unique_id=236815063]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 0
 
-[node name="InfoPanel" parent="OuterMargin/HBox" instance=ExtResource("5_info")]
+[node name="InfoPanel" parent="OuterMargin/HBox" unique_id=12187936 instance=ExtResource("5_info")]
 layout_mode = 2
 stats_columns = 2
 skip_zero_stats = true

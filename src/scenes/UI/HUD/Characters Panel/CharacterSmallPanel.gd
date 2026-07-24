@@ -41,7 +41,7 @@ var paneltype : int = 0  #0=player character 1= NPC
 
 @onready var effect_sprite : Sprite2D = $"PortraitButton/EffectSprite"
 
-@onready var effect_sprite_timer : Timer = $"PortraitButton/EffectSprite/Timer"
+#@onready var effect_sprite_timer : Timer = $"PortraitButton/EffectSprite/Timer"
 
 @onready var bandead_sprite : Sprite2D = $PortraitButton/BanDeadSprite
 
@@ -298,7 +298,7 @@ func _on_portrait_button_pressed():
 	for s in skills_abs :
 		var v : float = character.get_stat(s)
 		if v != 0.0 :
-			special_skills.append([s.replace("_", " "), "%+g" % v])
+			special_skills.append([s.replace("_", " "), str(v)])
 	cdata["special_skills"] = special_skills
 
 	for s in character.stats :
@@ -306,4 +306,6 @@ func _on_portrait_button_pressed():
 	# Mutually exclusive with the bestiary — never overlap.
 	if UI.ow_hud.bestiaryRect.visible :
 		UI.ow_hud.bestiaryRect.hide()
+	
+	StateMachine.transition_to("Exploration/ExMenus", {"menu_name" : 'CharacterInfoMenu', "prev_state" : StateMachine._state_name})
 	UI.ow_hud.characterStatRect.show_for_character(cdata)

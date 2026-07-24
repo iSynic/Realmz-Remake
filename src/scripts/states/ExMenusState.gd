@@ -71,6 +71,11 @@ func enter(_msg : Dictionary = {} ) ->void :
 		"TempleMenu" :
 			cur_menu_name = menu_name
 			UI.ow_hud.temple_rect.show_temple_window()
+		"CharacterInfoMenu" :
+			cur_menu_name = menu_name
+		#"MultipleChoices" :
+			#cur_menu_name = menu_name
+			#UI.ow_hud.textRect.choicesContainer.show()
 	pass
 
 func exit() :
@@ -80,6 +85,9 @@ func exit() :
 	
 	picked_charapanels.clear()
 	need_to_pick_n = 0
+	
+	if cur_menu_name == "CharacterInfoMenu" :
+		UI.ow_hud.characterStatRect.hide()
 	
 	if cur_menu_name == "InventoryMenu" :
 		UI.ow_hud.inventoryRect.shopRect._on_LeaveShopButton_pressed()
@@ -99,6 +107,8 @@ func exit() :
 	if cur_menu_name == "TempleMenu" :
 		UI.ow_hud.temple_rect.close_temple_window()
 
+	#if cur_menu_name == "MultipleChoices" :
+		#UI.ow_hud.textRect.choicesContainer.hide()
 
 
 func _state_process(_delta : float) -> void :

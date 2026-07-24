@@ -1,13 +1,13 @@
 [gd_scene format=3 uid="uid://b2x4kchstat01"]
 
-[ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="1_stone"]
-[ext_resource type="Script" path="res://scenes/UI/HUD/Characters Panel/creature_info_panel.gd" id="2_script"]
+[ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="1_stone"]
+[ext_resource type="Script" uid="uid://cl1xiuyf5cvtf" path="res://scenes/UI/HUD/Characters Panel/creature_info_panel.gd" id="2_script"]
 [ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="3_font"]
-[ext_resource type="StyleBox" path="res://shared_assets/UI/button_normal_styleboxtexture.tres" id="4_btn_n"]
-[ext_resource type="StyleBox" path="res://shared_assets/UI/button_hover_styleboxtexture.tres" id="5_btn_h"]
-[ext_resource type="StyleBox" path="res://shared_assets/UI/button_pressed_styleboxtexture.tres" id="6_btn_p"]
+[ext_resource type="StyleBox" uid="uid://bn77hwn55wtsk" path="res://shared_assets/UI/button_normal_styleboxtexture.tres" id="4_btn_n"]
+[ext_resource type="StyleBox" uid="uid://8eudfxoe8j40" path="res://shared_assets/UI/button_hover_styleboxtexture.tres" id="5_btn_h"]
+[ext_resource type="StyleBox" uid="uid://wrrfixqq8c4o" path="res://shared_assets/UI/button_pressed_styleboxtexture.tres" id="6_btn_p"]
 
-[node name="CreatureInfoPanel" type="NinePatchRect" node_paths=PackedStringArray("portrait_texrect", "name_label", "subtitle_label", "hp_label", "sp_label", "stats_grid", "resists_grid", "tags_header", "tags_label", "special_grid", "abil_spacer", "abilities_header", "abilities_label", "descr_label", "close_button")]
+[node name="CreatureInfoPanel" type="NinePatchRect" unique_id=1030832444 node_paths=PackedStringArray("portrait_texrect", "name_label", "subtitle_label", "hp_label", "sp_label", "stats_grid", "resists_grid", "tags_header", "tags_label", "special_grid", "abil_spacer", "abilities_header", "abilities_label", "descr_label", "close_button")]
 size_flags_horizontal = 3
 size_flags_vertical = 3
 texture = ExtResource("1_stone")
@@ -34,7 +34,7 @@ abilities_label = NodePath("OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargi
 descr_label = NodePath("OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin/LoreVBox/DescrLabel")
 close_button = NodePath("OuterMargin/InfoVBox/HeaderRow/CloseButton")
 
-[node name="OuterMargin" type="MarginContainer" parent="."]
+[node name="OuterMargin" type="MarginContainer" parent="." unique_id=2069525078]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -46,16 +46,16 @@ theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 8
 
-[node name="InfoVBox" type="VBoxContainer" parent="OuterMargin"]
+[node name="InfoVBox" type="VBoxContainer" parent="OuterMargin" unique_id=1759446286]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="HeaderRow" type="HBoxContainer" parent="OuterMargin/InfoVBox"]
+[node name="HeaderRow" type="HBoxContainer" parent="OuterMargin/InfoVBox" unique_id=1469187030]
 custom_minimum_size = Vector2(0, 72)
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="PortraitFrame" type="NinePatchRect" parent="OuterMargin/InfoVBox/HeaderRow"]
+[node name="PortraitFrame" type="NinePatchRect" parent="OuterMargin/InfoVBox/HeaderRow" unique_id=1015884463]
 custom_minimum_size = Vector2(72, 72)
 layout_mode = 2
 texture = ExtResource("1_stone")
@@ -66,7 +66,7 @@ patch_margin_bottom = 11
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
 
-[node name="PortraitTexture" type="TextureRect" parent="OuterMargin/InfoVBox/HeaderRow/PortraitFrame"]
+[node name="PortraitTexture" type="TextureRect" parent="OuterMargin/InfoVBox/HeaderRow/PortraitFrame" unique_id=1218328232]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -83,13 +83,13 @@ mouse_filter = 2
 expand_mode = 1
 stretch_mode = 5
 
-[node name="HeroInfo" type="VBoxContainer" parent="OuterMargin/InfoVBox/HeaderRow"]
+[node name="HeroInfo" type="VBoxContainer" parent="OuterMargin/InfoVBox/HeaderRow" unique_id=1649720221]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 4
 
-[node name="NameLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo"]
+[node name="NameLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo" unique_id=759655452]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("3_font")
@@ -97,7 +97,7 @@ theme_override_font_sizes/font_size = 22
 text = "Character Name"
 clip_text = true
 
-[node name="SubtitleLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo"]
+[node name="SubtitleLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo" unique_id=2089390963]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("3_font")
@@ -105,43 +105,43 @@ theme_override_font_sizes/font_size = 14
 text = "Subtitle"
 clip_text = true
 
-[node name="BarsRow" type="HBoxContainer" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo"]
+[node name="BarsRow" type="HBoxContainer" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo" unique_id=1941522723]
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="HPLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo/BarsRow"]
+[node name="HPLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo/BarsRow" unique_id=1729649561]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.55, 0.55, 1)
 theme_override_font_sizes/font_size = 14
 text = "HP 100"
 
-[node name="SPLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo/BarsRow"]
+[node name="SPLabel" type="Label" parent="OuterMargin/InfoVBox/HeaderRow/HeroInfo/BarsRow" unique_id=927359437]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.75, 1, 1)
 theme_override_font_sizes/font_size = 14
 text = "SP 100"
 
-[node name="CloseButton" type="Button" parent="OuterMargin/InfoVBox/HeaderRow"]
+[node name="CloseButton" type="Button" parent="OuterMargin/InfoVBox/HeaderRow" unique_id=897131004]
 custom_minimum_size = Vector2(64, 28)
 layout_mode = 2
 size_flags_vertical = 0
 theme_override_colors/font_color = Color(1, 0.2, 0.2, 1)
-theme_override_colors/font_hover_color = Color(1, 0.4, 0.4, 1)
 theme_override_colors/font_pressed_color = Color(0.9, 0.2, 0.2, 1)
+theme_override_colors/font_hover_color = Color(1, 0.4, 0.4, 1)
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 16
 theme_override_styles/normal = ExtResource("4_btn_n")
-theme_override_styles/hover = ExtResource("5_btn_h")
 theme_override_styles/pressed = ExtResource("6_btn_p")
+theme_override_styles/hover = ExtResource("5_btn_h")
 text = "Close"
 
-[node name="BodyRow" type="HBoxContainer" parent="OuterMargin/InfoVBox"]
+[node name="BodyRow" type="HBoxContainer" parent="OuterMargin/InfoVBox" unique_id=1161333638]
 custom_minimum_size = Vector2(0, 240)
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="StatsPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BodyRow"]
+[node name="StatsPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BodyRow" unique_id=1417615089]
 layout_mode = 2
 size_flags_horizontal = 3
 texture = ExtResource("1_stone")
@@ -152,7 +152,7 @@ patch_margin_bottom = 11
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
 
-[node name="StatsMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel"]
+[node name="StatsMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel" unique_id=312221545]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -164,25 +164,25 @@ theme_override_constants/margin_top = 14
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 14
 
-[node name="StatsVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel/StatsMargin"]
+[node name="StatsVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel/StatsMargin" unique_id=1161735163]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="StatsHeader" type="Label" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel/StatsMargin/StatsVBox"]
+[node name="StatsHeader" type="Label" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel/StatsMargin/StatsVBox" unique_id=297920038]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 18
 text = "Stats"
 
-[node name="StatsGrid" type="GridContainer" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel/StatsMargin/StatsVBox"]
+[node name="StatsGrid" type="GridContainer" parent="OuterMargin/InfoVBox/BodyRow/StatsPanel/StatsMargin/StatsVBox" unique_id=2075103841]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/h_separation = 12
 theme_override_constants/v_separation = 2
 columns = 4
 
-[node name="ResistPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BodyRow"]
+[node name="ResistPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BodyRow" unique_id=1624653956]
 layout_mode = 2
 size_flags_horizontal = 3
 texture = ExtResource("1_stone")
@@ -193,7 +193,7 @@ patch_margin_bottom = 11
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
 
-[node name="ResistMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel"]
+[node name="ResistMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel" unique_id=580269456]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -205,31 +205,31 @@ theme_override_constants/margin_top = 14
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 14
 
-[node name="ResistVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel/ResistMargin"]
+[node name="ResistVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel/ResistMargin" unique_id=1823006521]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="ResistHeader" type="Label" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel/ResistMargin/ResistVBox"]
+[node name="ResistHeader" type="Label" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel/ResistMargin/ResistVBox" unique_id=422957691]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 18
 text = "Resistances"
 
-[node name="ResistsGrid" type="GridContainer" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel/ResistMargin/ResistVBox"]
+[node name="ResistsGrid" type="GridContainer" parent="OuterMargin/InfoVBox/BodyRow/ResistPanel/ResistMargin/ResistVBox" unique_id=704226204]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/h_separation = 8
 theme_override_constants/v_separation = 2
 columns = 3
 
-[node name="BottomRow" type="HBoxContainer" parent="OuterMargin/InfoVBox"]
+[node name="BottomRow" type="HBoxContainer" parent="OuterMargin/InfoVBox" unique_id=294298127]
 custom_minimum_size = Vector2(0, 240)
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="TagsAbilPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BottomRow"]
+[node name="TagsAbilPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BottomRow" unique_id=2079876446]
 layout_mode = 2
 size_flags_horizontal = 3
 texture = ExtResource("1_stone")
@@ -240,7 +240,7 @@ patch_margin_bottom = 11
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
 
-[node name="TAMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel"]
+[node name="TAMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel" unique_id=88886475]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -252,43 +252,43 @@ theme_override_constants/margin_top = 14
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 14
 
-[node name="TAVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin"]
+[node name="TAVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin" unique_id=475129343]
 layout_mode = 2
 theme_override_constants/separation = 2
 
-[node name="TagsHeader" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox"]
+[node name="TagsHeader" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox" unique_id=117095188]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 18
 text = "Tags"
 
-[node name="TagsValue" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox"]
+[node name="TagsValue" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox" unique_id=1582387872]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.92, 0.92, 0.92, 1)
 theme_override_font_sizes/font_size = 13
 text = "—"
 autowrap_mode = 3
 
-[node name="SpecialGrid" type="GridContainer" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox"]
+[node name="SpecialGrid" type="GridContainer" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox" unique_id=1777405086]
 visible = false
 layout_mode = 2
 theme_override_constants/h_separation = 16
 theme_override_constants/v_separation = 2
 columns = 2
 
-[node name="AbilSpacer" type="Control" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox"]
+[node name="AbilSpacer" type="Control" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox" unique_id=1083981784]
 custom_minimum_size = Vector2(0, 4)
 layout_mode = 2
 
-[node name="AbilitiesHeader" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox"]
+[node name="AbilitiesHeader" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox" unique_id=1624886342]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 18
 text = "Abilities"
 
-[node name="AbilitiesValue" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox"]
+[node name="AbilitiesValue" type="Label" parent="OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox" unique_id=1065269645]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_colors/font_color = Color(0.92, 0.92, 0.92, 1)
@@ -296,7 +296,7 @@ theme_override_font_sizes/font_size = 13
 text = "—"
 autowrap_mode = 3
 
-[node name="LorePanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BottomRow"]
+[node name="LorePanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BottomRow" unique_id=393415189]
 layout_mode = 2
 size_flags_horizontal = 3
 texture = ExtResource("1_stone")
@@ -307,7 +307,7 @@ patch_margin_bottom = 11
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
 
-[node name="LoreMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BottomRow/LorePanel"]
+[node name="LoreMargin" type="MarginContainer" parent="OuterMargin/InfoVBox/BottomRow/LorePanel" unique_id=301987208]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -319,18 +319,18 @@ theme_override_constants/margin_top = 14
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 14
 
-[node name="LoreVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin"]
+[node name="LoreVBox" type="VBoxContainer" parent="OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin" unique_id=1278273301]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="LoreHeader" type="Label" parent="OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin/LoreVBox"]
+[node name="LoreHeader" type="Label" parent="OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin/LoreVBox" unique_id=1026802149]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.96, 0, 1)
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 18
 text = "Lore"
 
-[node name="DescrLabel" type="Label" parent="OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin/LoreVBox"]
+[node name="DescrLabel" type="Label" parent="OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin/LoreVBox" unique_id=1171004441]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_colors/font_color = Color(0.92, 0.92, 0.92, 1)

@@ -1,4 +1,5 @@
 extends NinePatchRect
+class_name BestiaryRect
 
 # Creature browser. Hosts the creature list (left) plus a CreatureInfoPanel
 # (right) that handles the actual stat/resist/abilities/lore display. Selecting
@@ -70,7 +71,7 @@ func _on_visibility_changed() -> void :
 
 func _on_close_requested() -> void :
 	hide()
-	StateMachine.transition_to("Exploration/ExWalking")
+	#StateMachine.transition_to
 
 
 func _on_line_edit_text_changed(new_text : String) -> void :
