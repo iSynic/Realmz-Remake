@@ -1,0 +1,42 @@
+{
+  "diagnostics": [],
+  "recordCatalog": {
+    "alignments": [],
+    "counts": {}
+  },
+  "schemaVersion": 1,
+  "semanticDecoding": {
+    "dispatcherNoops": [],
+    "ed3Reachability": [
+      {
+        "actionCount": 1,
+        "classification": "reachable-macro",
+        "entityId": "macro:2",
+        "evidence": [
+          "link:53"
+        ],
+        "incomingRefs": 6,
+        "pathStatus": "source-backed-root",
+        "promotionRule": "Promoted from Data ED3 because a source-backed root reaches this record.",
+        "reachable": true,
+        "recordIndex": 2,
+        "rootType": "source-backed-root"
+      }
+    ]
+  },
+  "source": {
+    "files": [],
+    "origin": "authored"
+  },
+  "validation": {
+    "errors": [],
+    "ok": true,
+    "warnings": [
+      "5 managed media asset(s) are present; desktop export writes them to the Scenario resource fork.",
+      "Scrolling Text TEXT/styl export is runtime-suspect: recent Windows Realmz testing ignored styl formatting, and Mac Realmz 7.1.2 crashed after a Providence-authored Scrolling Text action step.",
+      "Landlook 6 has no decoded mapstats; tile attributes will be shown as unknown metadata.",
+      "Landlook 0 has no decoded mapstats; tile attributes will be shown as unknown metadata.",
+      "2 positive high map field value(s) carry Realmz state bands; edit them through AP/secret/path workflows or Raw/Advanced tile tools."
+    ]
+  }
+}

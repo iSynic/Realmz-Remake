@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "producer": {
+    "repository": "Realmz - Providence",
+    "commit": "c26443b85ee3a0e883bf0a8b1d46d27ccf9818ca",
+    "sourceFixture": "fixtures/scenario-seeds/authoritative-ownership-proof.seed.json"
+  },
+  "bundleDirectory": "providence_authoritative_export",
+  "readiness": {
+    "ready": true,
+    "progressionBlockers": 0,
+    "fidelityFallbacks": 0
+  },
+  "files": [
+    {
+      "path": "assets/managed/cicn-neg-100-363a140e3045.cicn",
+      "bytes": 1386,
+      "sha256": "363a140e30456fff0494279451ce06c639b93d142a7408a3e2ee1b7375a5621b"
+    },
+    {
+      "path": "assets/managed/pict-306-d08dae63460f.pict",
+      "bytes": 13782,
+      "sha256": "d08dae63460fc6584884c76be5301ac1d884ed83582fb1a8be5e65adc2e7a03c"
+    },
+    {
+      "path": "assets/managed/snd-321-fdd45aff3e3b.snd",
+      "bytes": 298,
+      "sha256": "fdd45aff3e3bca219ecc14f3ee1b01dfb5b2c313b559cb6e38a419b7d405045c"
+    },
+    {
+      "path": "assets/managed/text-neg-200-ee8506353a59.txt",
+      "bytes": 46,
+      "sha256": "ee8506353a59ede3b2420ff409f569546ce2258da18c968927d342a28289dd5c"
+    },
+    {
+      "path": "campaign.json",
+      "bytes": 2263,
+      "sha256": "a523907e74656e9495c5c6efefad3765b7206c0385a3279dbc37e16947dd1745"
+    },
+    {
+      "path": "classic/assets.json",
+      "bytes": 8218,
+      "sha256": "ec4f1d19d4ab75e6d734f705e3bc4dd799e7f46bb83549dc13de26d72b4c2c27"
+    },
+    {
+      "path": "classic/content.json",
+      "bytes": 13114,
+      "sha256": "a917f254030b9c3cadf5843dbdf19b0f101fccc02f57d3dcc151cae8d8155bef"
+    },
+    {
+      "path": "classic/encounters.json",
+      "bytes": 7262,
+      "sha256": "fdf4cc123e2fdc642975d336dce920352074b5327e04e773b3b3ca111fecba30"
+    },
+    {
+      "path": "classic/evidence.json",
+      "bytes": 1415,
+      "sha256": "d47ed4248e78f1691bc0b7d301a600796ec4279ff7a437273f81f020d472d2bd"
+    },
+    {
+      "path": "classic/maps.json",
+      "bytes": 1279105,
+      "sha256": "a01ab79e3a6c88479932bb3399c837f86e0be11ee1c1a7f8ace8754cb26d4f0f"
+    },
+    {
+      "path": "classic/rules.json",
+      "bytes": 9674,
+      "sha256": "ae6a376c4daab78a2a5365c925dda35444d23c670c78cbd8fb95360e0cbe0262"
+    },
+    {
+      "path": "classic/scenario.json",
+      "bytes": 2375,
+      "sha256": "3b5fe395969caf9402ea43b51d1df236a58c9707cde994c3daf524e43516d9e7"
+    },
+    {
+      "path": "classic/scripts.json",
+      "bytes": 3115,
+      "sha256": "c1b1945869a96272b335bc9fba6affca3af775c77a42f79e9f63f8f296e0fb42"
+    },
+    {
+      "path": "media/images/cicn-neg-100-31df32a766f9.png",
+      "bytes": 890,
+      "sha256": "31df32a766f9904c77c47dab9db9cc82811d14dd7091c6c3b604bac0f7df4a3c"
+    },
+    {
+      "path": "media/pictures/pict-306-8d2fafb24573.png",
+      "bytes": 43393,
+      "sha256": "8d2fafb24573fecb9da9d5c16460122eca823e1186c0706430be34a737038d21"
+    },
+    {
+      "path": "media/sounds/snd-321-827bab3b7d1c.wav",
+      "bytes": 300,
+      "sha256": "827bab3b7d1c45c535da4459e1e9544460c6c98a23be761f315f7159d2572c3b"
+    },
+    {
+      "path": "runtime.json",
+      "bytes": 326,
+      "sha256": "b4ae9ae161fd06806fa28a50b719179926087e79bbfe47b0d83f8d9f754873c0"
+    }
+  ]
+}
