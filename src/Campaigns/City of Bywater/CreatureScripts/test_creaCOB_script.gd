@@ -1,5 +1,4 @@
 extends Object
-class_name TestCreaCOBScript
 
 #const target_pos : Vector2i = Vector2i(51,87)
 
@@ -40,12 +39,20 @@ static func decide_action(crea : Creature) -> Array :
 			var spell_target_pos : Vector2 = target_pos
 			var sp_left = crea.get_stat("curSP")
 			var allspellsArray : Array = crea.get_all_spells()
+			if not crea.can_cast_spells():
+				allspellsArray.clear()
 			if allspellsArray.size()>0 :
 				allspellsArray.shuffle()
 			#var allitemspellsArray : Array = []  # array of [spellname : String, spellevel : int]
 			var allitemswspellsArray : Array = []
-			for i:Dictionary in crea.inventory :
-				if i.has("_on_combat_use_spell") and (i["charges_max"]==0 or i["charges"]>0 ) :
+			for i: ItemInstance in crea.inventory_instances():
+				var definition := NodeAccess.__Resources().get_item_definition(i)
+				if definition != null \
+						and not definition.spell_use("combat").is_empty() \
+						and (
+							definition.maximum_charges == 0
+							or i.charges > 0
+						):
 					allitemswspellsArray.append(i)
 			if allitemswspellsArray.size()>0 :
 				allitemswspellsArray.shuffle()
@@ -57,18 +64,21 @@ static func decide_action(crea : Creature) -> Array :
 			var want_use_spell : bool =  cast_chance>randint and allspellsArray.size()>0
 			var ignore_cost : bool = false
 			var used_an_item : bool = false
-			var item_used : Dictionary = {}
+			var item_used: ItemInstance = null
 			print("test crea script.gd want_use_item ? ", want_use_item, " , missile_chance :", missile_chance, '  , randint : ', randint)
 			if want_use_item :
 				#var weapon_spell_arr : Array =  crea.current_range_weapon["_on_combat_use_spell"]
 				item_used = allitemswspellsArray[0]
-				var item_spell_name : String = item_used["_on_combat_use_spell"][0]
+				var item_spell_use := (
+					NodeAccess.__Resources().item_spell_use(item_used, "combat")
+				)
+				var item_spell_name: String = item_spell_use[0]
 				selectedSpell = NodeAccess.__Resources().spells_book[item_spell_name]["script"]
-				selectedplvl  = item_used["_on_combat_use_spell"][1]
+				selectedplvl = item_spell_use[1]
 				ignore_cost = true
 				used_an_item = true
 			if want_use_spell :
-				selectedSpell = allspellsArray[0][0]["script"]
+				selectedSpell = allspellsArray[0]["script"]
 				selectedplvl  = randi_range(1,7)
 			if not (want_use_item or want_use_spell) :
 				print("test crea script.gd decideaction : "+crea.name+" wants to do nothing")
@@ -82,7 +92,7 @@ static func decide_action(crea : Creature) -> Array :
 	print("decideaction : "+crea.name+" can do nothing")
 	return [0, Vector2i.ZERO ]
 	
-static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_crea: Creature, used_an_item : bool, item_used : Dictionary) :
+static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_crea: Creature, used_an_item : bool, item_used: ItemInstance) :
 	var targ_range : int = AiFunctions.get_range_between_creas(caster, target_crea)
 	print(spell.name,plvl, ' ',spell.get_range(plvl, caster) , '<=>' ,targ_range)
 	if spell.get_range(plvl, caster) >= targ_range :
@@ -90,8 +100,7 @@ static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_
 		var affected_creas : Array = GameGlobal.map.targetingLayer.get_cbs_touching_tiles(affected_tiles)
 		if affected_creas.size()>0 :
 			print("Test_Crea_Script.gd : "+caster.name + "'s spell hits at least "+ target_crea.name )
-		var aoe_name = spell.get_aoe(plvl, caster)
-		var aoe_shape = GameGlobal.map.targetingLayer.get_aoe_from_name(aoe_name)
+		var aoe_shape = spell.get_aoe(plvl, caster)
 		return [1, spell, plvl, target_crea.position, aoe_shape, item_used,Vector2i(target_crea.position), affected_tiles, affected_creas]
 	return [0, Vector2i.ZERO ]
 		
