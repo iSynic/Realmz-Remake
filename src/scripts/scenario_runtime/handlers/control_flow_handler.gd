@@ -6,7 +6,7 @@ func _init() -> void:
 	configure(
 		"core.control-flow",
 		PackedInt32Array([
-			-23, -14, 0, 7, 8, 24, 25, 34, 35, 38, 39, 41, 42, 44, 46, 55,
+			-23, -14, 0, 24, 25, 34, 35, 38, 39, 41, 42, 44, 46, 55,
 			56, 58, 64, 67, 72, 76, 77, 78, 84, 85, 86, 98, 99, 107, 111, 112,
 		])
 	)
@@ -31,14 +31,6 @@ func execute_on_runtime(instruction: Dictionary, runtime: Object) -> Dictionary:
 			)
 		0:
 			return _invoke(runtime, "_continue_result")
-		7:
-			return _invoke(runtime, "_execute_action_data_patch", [record_id])
-		8:
-			return _invoke(
-				runtime,
-				"_execute_same_as_other_action_point",
-				[record_id]
-			)
 		24:
 			return _invoke(
 				runtime,

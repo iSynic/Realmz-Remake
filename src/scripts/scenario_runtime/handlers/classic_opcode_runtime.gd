@@ -28,6 +28,9 @@ const ControlFlowOpcodeRuntimeScript = preload(
 const ClassicExecutionStateScript = preload(
 	"res://scripts/scenario_runtime/classic_execution_state.gd"
 )
+const RulesStateOpcodeRuntimeScript = preload(
+	"res://scripts/scenario_runtime/handlers/classic_rules_state_opcode_runtime.gd"
+)
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
 const HANDLED_OPCODES := [
@@ -236,6 +239,7 @@ var _map_time_opcode_runtime: RefCounted
 var _encounter_opcode_runtime: RefCounted
 var _presentation_opcode_runtime: RefCounted
 var _control_flow_opcode_runtime: RefCounted
+var _rules_state_opcode_runtime: RefCounted
 
 
 func bind_execution_state(state: RefCounted) -> void:
@@ -267,6 +271,9 @@ func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeStat
 	if _control_flow_opcode_runtime == null:
 		_control_flow_opcode_runtime = ControlFlowOpcodeRuntimeScript.new()
 		_control_flow_opcode_runtime.configure(self)
+	if _rules_state_opcode_runtime == null:
+		_rules_state_opcode_runtime = RulesStateOpcodeRuntimeScript.new()
+		_rules_state_opcode_runtime.configure(self)
 	if compatibility_instruction_registry == null:
 		compatibility_instruction_registry = ScenarioInstructionRegistry.new()
 		if not CoreHandlerCatalogScript.register_all(
@@ -295,6 +302,8 @@ func classic_handler_runtime(handler_id: String) -> Object:
 		return _presentation_opcode_runtime
 	if handler_id == "core.control-flow":
 		return _control_flow_opcode_runtime
+	if handler_id == "core.rules-state":
+		return _rules_state_opcode_runtime
 	return self
 
 
@@ -933,22 +942,9 @@ func _execute_random_rectangle_bounds(extra_code_id: int) -> Dictionary:
 
 
 func _execute_action_data_patch(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Action data patch references missing Extra Code row %d" % extra_code_id
-		)
-	var source_id := int(values[2])
-	var source := bundle.get_extra_action_point(source_id)
-	if source.is_empty():
-		return _halt_with_error("Action data patch references missing Data ED3 row %d" % source_id)
-	match int(values[0]):
-		-1:
-			return _patch_encounter_result("simple", int(values[1]), int(values[4]), source)
-		-2:
-			return _patch_encounter_result("complex", int(values[1]), int(values[4]), source)
-		_:
-			return _patch_map_action_point(values, source)
+	return _rules_state_opcode_runtime._execute_action_data_patch(
+		extra_code_id
+	)
 
 
 func _execute_timed_encounter_mutation(extra_code_id: int) -> Dictionary:
@@ -958,22 +954,10 @@ func _execute_timed_encounter_mutation(extra_code_id: int) -> Dictionary:
 
 
 func _patch_map_action_point(values: Array, source: Dictionary) -> Dictionary:
-	var level_kind := runtime_state.level_type
-	var level_selector := int(values[3])
-	if level_selector != 0:
-		level_kind = "land" if level_selector == 1 else "dungeon"
-	var map_level := int(values[0])
-	var record_index := int(values[1])
-	var target := _effective_map_action_point(level_kind, map_level, record_index)
-	if target.is_empty():
-		return _halt_with_error("Missing %s map action point %d:%d" % [
-			level_kind,
-			map_level,
-			record_index,
-		])
-	target["actions"] = source.get("actions", []).duplicate(true)
-	runtime_state.set_action_point_override(str(target.get("id", "")), target)
-	return _continue_result()
+	return _rules_state_opcode_runtime._patch_map_action_point(
+		values,
+		source
+	)
 
 
 func _patch_encounter_result(
@@ -982,32 +966,12 @@ func _patch_encounter_result(
 	result_index: int,
 	source: Dictionary
 ) -> Dictionary:
-	if result_index < 0 or result_index > 3:
-		return _halt_with_error("Classic encounter result index must be between 0 and 3")
-	var encounter := bundle.get_encounter(encounter_kind, encounter_id)
-	if encounter.is_empty():
-		return _halt_with_error("Missing %s encounter record %d" % [
-			encounter_kind,
-			encounter_id,
-		])
-	if encounter_kind == "simple":
-		encounter = runtime_state.get_effective_simple_encounter(encounter)
-	else:
-		encounter = runtime_state.get_effective_complex_encounter(encounter)
-	var encounter_actions: Variant = encounter.get("actions", [])
-	var source_actions: Variant = source.get("actions", [])
-	if not (encounter_actions is Array) or not (source_actions is Array):
-		return _halt_with_error("Action data patch source or target has no action array")
-	encounter["actions"] = _replace_encounter_result_actions(
-		encounter_actions,
-		source_actions,
-		result_index
+	return _rules_state_opcode_runtime._patch_encounter_result(
+		encounter_kind,
+		encounter_id,
+		result_index,
+		source
 	)
-	if encounter_kind == "simple":
-		runtime_state.set_simple_encounter_override(encounter_id, encounter)
-	else:
-		runtime_state.set_complex_encounter_override(encounter_id, encounter)
-	return _continue_result()
 
 
 func _replace_encounter_result_actions(
@@ -1015,47 +979,17 @@ func _replace_encounter_result_actions(
 	source_actions: Array,
 	result_index: int
 ) -> Array:
-	var first_slot := result_index * 8
-	var actions: Array = []
-	for action_value: Variant in encounter_actions:
-		if not (action_value is Dictionary):
-			continue
-		var slot := int(action_value.get("slot", -1))
-		if slot < first_slot or slot >= first_slot + 8:
-			actions.append(action_value.duplicate(true))
-	for action_value: Variant in source_actions:
-		if not (action_value is Dictionary):
-			continue
-		var action: Dictionary = action_value.duplicate(true)
-		action["slot"] = first_slot + int(action.get("slot", 0))
-		actions.append(action)
-	actions.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return int(a.get("slot", -1)) < int(b.get("slot", -1))
-	)
-	return actions
+	return _rules_state_opcode_runtime \
+		._replace_encounter_result_actions(
+			encounter_actions,
+			source_actions,
+			result_index
+		)
 
 
 func _execute_same_as_other_action_point(record_index: int) -> Dictionary:
-	var target := _effective_map_action_point(
-		runtime_state.level_type,
-		runtime_state.level_index,
-		record_index
-	)
-	if target.is_empty():
-		return _halt_with_error("Missing same-map action point %d" % record_index)
-	var percent := int(active_action_point_header.get(
-		"percent",
-		current_trigger.get("percent", 0)
-	))
-	# Classic copies only the other door's CODE/ID slots, then re-enters moveon
-	# with the active door's header and percentage still in place.
-	var replacement := current_trigger.duplicate(true)
-	replacement["actions"] = target.get("actions", []).duplicate(true)
-	_set_cursor(replacement, 0)
-	if percent < 1 or _roll_percent() > percent:
-		_clear_control_flow()
-		return _completed_result("same-door-percent-miss")
-	return _continue_result()
+	return _rules_state_opcode_runtime \
+		._execute_same_as_other_action_point(record_index)
 
 
 func _execute_tile_mutation(extra_code_id: int) -> Dictionary:
