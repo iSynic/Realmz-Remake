@@ -14,9 +14,11 @@ const InventoryOpcodeRuntimeScript = preload(
 const CharacterOpcodeRuntimeScript = preload(
 	"res://scripts/scenario_runtime/handlers/classic_character_opcode_runtime.gd"
 )
+const MapTimeOpcodeRuntimeScript = preload(
+	"res://scripts/scenario_runtime/handlers/classic_map_time_opcode_runtime.gd"
+)
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
-const MAX_RANDOM_RECTANGLES := 20
 const EXECUTION_SNAPSHOT_SCHEMA_VERSION := 2
 const HANDLED_OPCODES := [
 	-23, -14,
@@ -146,6 +148,7 @@ var halted := false
 var _combat_opcode_runtime: RefCounted
 var _inventory_opcode_runtime: RefCounted
 var _character_opcode_runtime: RefCounted
+var _map_time_opcode_runtime: RefCounted
 
 
 func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeState) -> void:
@@ -160,6 +163,9 @@ func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeStat
 	if _character_opcode_runtime == null:
 		_character_opcode_runtime = CharacterOpcodeRuntimeScript.new()
 		_character_opcode_runtime.configure(self)
+	if _map_time_opcode_runtime == null:
+		_map_time_opcode_runtime = MapTimeOpcodeRuntimeScript.new()
+		_map_time_opcode_runtime.configure(self)
 	if compatibility_instruction_registry == null:
 		compatibility_instruction_registry = ScenarioInstructionRegistry.new()
 		if not CoreHandlerCatalogScript.register_all(
@@ -180,6 +186,8 @@ func classic_handler_runtime(handler_id: String) -> Object:
 		return _inventory_opcode_runtime
 	if handler_id == "core.character":
 		return _character_opcode_runtime
+	if handler_id == "core.map-time":
+		return _map_time_opcode_runtime
 	return self
 
 
@@ -637,42 +645,7 @@ func resume_forced_battle_at_slot(resume_slot: int) -> Dictionary:
 
 
 func resume_teleport() -> Dictionary:
-	if pending_teleport.is_empty():
-		return _error_result("No classic teleport is waiting to finish")
-	var teleport := pending_teleport
-	pending_teleport = {}
-	if not bool(teleport.get("recheckDestination", false)):
-		return run_until_yield()
-
-	var destination_triggers := runtime_state.get_effective_triggers_at(
-		bundle,
-		runtime_state.level_type,
-		runtime_state.level_index,
-		runtime_state.x,
-		runtime_state.y
-	)
-	if destination_triggers.is_empty():
-		if teleport.has("completionReason"):
-			var completion_reason := str(teleport["completionReason"])
-			_clear_control_flow()
-			return _completed_result(completion_reason)
-		return run_until_yield()
-	var destination: Variant = destination_triggers[0]
-	if not (destination is Dictionary):
-		return _halt_with_error("Classic teleport destination has an invalid action point")
-	var percent := int(destination.get("percent", 0))
-	if percent < 1 or _roll_percent() > percent:
-		_clear_control_flow()
-		return _completed_result("teleport-destination-percent-miss")
-
-	# newland() replaces the current door without pushing it. Existing GOSUB
-	# frames remain available if the destination explicitly returns to them.
-	origin_action_point = destination.duplicate(true)
-	active_action_point_header = destination.duplicate(true)
-	active_action_point_header.erase("actions")
-	suppress_action_point_destination = true
-	_set_cursor(destination, 0)
-	return run_until_yield()
+	return _map_time_opcode_runtime.resume_teleport()
 
 
 func resume_item_check(possessed: bool) -> Dictionary:
@@ -720,36 +693,15 @@ func resume_random_branch() -> Dictionary:
 
 
 func resume_back_up_party() -> Dictionary:
-	# Classic returns from newland immediately after reversing a land move, so
-	# neither later slots nor the action point's ordinary destination can run.
-	_clear_control_flow()
-	return _completed_result("back-up-party")
+	return _map_time_opcode_runtime.resume_back_up_party()
 
 
 func resume_time_mutation(response: Dictionary) -> Dictionary:
-	if pending_time_mutation.is_empty():
-		return _error_result("No classic time mutation is waiting for a response")
-	for field_name: String in ["scenarioDay", "scenarioHour", "scenarioMinute"]:
-		if not response.has(field_name):
-			return _error_result("Classic time mutation response is missing %s" % field_name)
-		execution_context[field_name] = int(response[field_name])
-	pending_time_mutation = {}
-	return run_until_yield()
+	return _map_time_opcode_runtime.resume_time_mutation(response)
 
 
 func resume_exploration_status(response: Dictionary) -> Dictionary:
-	if pending_exploration_status.is_empty():
-		return _error_result("No classic exploration-status action is waiting for a response")
-	if not response.has("skipRemaining"):
-		return _error_result(
-			"Classic exploration-status response is missing skipRemaining"
-		)
-	pending_exploration_status = {}
-	if bool(response["skipRemaining"]):
-		var actions: Variant = current_trigger.get("actions", [])
-		if actions is Array:
-			current_action_index = actions.size()
-	return run_until_yield()
+	return _map_time_opcode_runtime.resume_exploration_status(response)
 
 
 func _execute_action(action: Dictionary) -> Dictionary:
@@ -1212,22 +1164,7 @@ func _execute_health_effect(extra_code_id: int, command: String) -> Dictionary:
 
 
 func _execute_player_map(signed_map_id: int) -> Dictionary:
-	var map_id: int = abs(signed_map_id)
-	var map_record: Dictionary = bundle.get_player_map(map_id)
-	if map_record.is_empty():
-		return _halt_with_error("Missing player map record %d" % map_id)
-	runtime_state.set_map_owned(map_id)
-	return _yield_result("give_map", {
-		"mapId": map_id,
-		"display": signed_map_id < 0,
-		"mapRecord": map_record,
-		"currentPosition": {
-			"levelType": runtime_state.level_type,
-			"levelIndex": runtime_state.level_index,
-			"x": runtime_state.x,
-			"y": runtime_state.y,
-		},
-	})
+	return _map_time_opcode_runtime._execute_player_map(signed_map_id)
 
 
 func _execute_scrolling_text(resource_id: int) -> Dictionary:
@@ -1243,130 +1180,16 @@ func _execute_scrolling_text(resource_id: int) -> Dictionary:
 
 
 func _execute_random_rectangle_mutation(extra_code_id: int, dungeon: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Random rectangle mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var level_kind := "dungeon" if dungeon else "land"
-	var map_level := int(values[0])
-	var rect_index := int(values[1])
-	if rect_index < 0 or rect_index >= MAX_RANDOM_RECTANGLES:
-		return _halt_with_error("Random rectangle index must be between 0 and 19")
-	if bundle.get_random_level(level_kind, map_level).is_empty():
-		return _halt_with_error("Missing %s random-level record %d" % [
-			level_kind,
-			map_level,
-		])
-	var baseline := bundle.get_random_rectangle(level_kind, map_level, rect_index)
-	if baseline.is_empty():
-		baseline = {
-			"rectIndex": rect_index,
-			"percent": 0,
-			"battleRange": [0, 0],
-		}
-	var previous := runtime_state.get_random_rectangle(
-		level_kind,
-		map_level,
-		rect_index,
-		baseline
+	return _map_time_opcode_runtime._execute_random_rectangle_mutation(
+		extra_code_id,
+		dungeon
 	)
-	var rectangle: Dictionary = previous.duplicate(true)
-	rectangle["rectIndex"] = rect_index
-	rectangle["percent"] = int(values[2])
-	var battle_range := [0, 0]
-	var previous_range: Variant = previous.get("battleRange", [])
-	if previous_range is Array:
-		if previous_range.size() > 0:
-			battle_range[0] = int(previous_range[0])
-		if previous_range.size() > 1:
-			battle_range[1] = int(previous_range[1])
-	if int(values[3]) > -1:
-		battle_range[0] = int(values[3])
-	if int(values[4]) > -1:
-		battle_range[1] = int(values[4])
-	rectangle["battleRange"] = battle_range
-	runtime_state.set_random_rectangle(level_kind, map_level, rect_index, rectangle)
-	return _yield_result("set_random_encounter_rect", {
-		"extraCodeId": extra_code_id,
-		"levelType": level_kind,
-		"levelIndex": map_level,
-		"rectIndex": rect_index,
-		"previousRectangle": previous,
-		"rectangle": rectangle,
-	})
 
 
 func _execute_random_rectangle_bounds(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	var bounds_values := _extra_code_values(extra_code_id + 1)
-	if values.size() < 5 or bounds_values.size() < 4:
-		return _halt_with_error(
-			"Random rectangle bounds action requires consecutive Extra Code rows %d and %d"
-			% [extra_code_id, extra_code_id + 1]
-		)
-	var level_kind := "dungeon" if int(values[2]) != 0 else "land"
-	var map_level := int(values[0])
-	var rect_index := int(values[1])
-	var bounds_mode := int(values[4])
-	if rect_index < 0 or rect_index >= MAX_RANDOM_RECTANGLES:
-		return _halt_with_error("Random rectangle index must be between 0 and 19")
-	if bounds_mode < -1 or bounds_mode > 2:
-		return _halt_with_error(
-			"Random rectangle bounds action has invalid mode %d" % bounds_mode
-		)
-	if bundle.get_random_level(level_kind, map_level).is_empty():
-		return _halt_with_error("Missing %s random-level record %d" % [
-			level_kind,
-			map_level,
-		])
-	var baseline := bundle.get_random_rectangle(level_kind, map_level, rect_index)
-	if baseline.is_empty():
-		baseline = {
-			"rectIndex": rect_index,
-			"percent": 0,
-			"battleRange": [0, 0],
-			"left": 0,
-			"right": 0,
-			"top": 0,
-			"bottom": 0,
-		}
-	var previous := runtime_state.get_random_rectangle(
-		level_kind,
-		map_level,
-		rect_index,
-		baseline
+	return _map_time_opcode_runtime._execute_random_rectangle_bounds(
+		extra_code_id
 	)
-	var rectangle: Dictionary = previous.duplicate(true)
-	rectangle["rectIndex"] = rect_index
-	rectangle["percent"] = int(rectangle.get("percent", 0)) + int(values[3])
-	match bounds_mode:
-		0:
-			rectangle["left"] = int(bounds_values[0])
-			rectangle["right"] = int(bounds_values[1])
-			rectangle["top"] = int(bounds_values[2])
-			rectangle["bottom"] = int(bounds_values[3])
-		1:
-			rectangle["left"] = int(rectangle.get("left", 0)) + int(bounds_values[0])
-			rectangle["right"] = int(rectangle.get("right", 0)) + int(bounds_values[0])
-			rectangle["top"] = int(rectangle.get("top", 0)) + int(bounds_values[1])
-			rectangle["bottom"] = int(rectangle.get("bottom", 0)) + int(bounds_values[1])
-		2:
-			rectangle["left"] = int(rectangle.get("left", 0)) + int(bounds_values[0])
-			rectangle["right"] = int(rectangle.get("right", 0)) + int(bounds_values[1])
-			rectangle["top"] = int(rectangle.get("top", 0)) + int(bounds_values[2])
-			rectangle["bottom"] = int(rectangle.get("bottom", 0)) + int(bounds_values[3])
-	runtime_state.set_random_rectangle(level_kind, map_level, rect_index, rectangle)
-	return _yield_result("set_random_encounter_rect", {
-		"extraCodeId": extra_code_id,
-		"boundsExtraCodeId": extra_code_id + 1,
-		"levelType": level_kind,
-		"levelIndex": map_level,
-		"rectIndex": rect_index,
-		"previousRectangle": previous,
-		"rectangle": rectangle,
-		"boundsMode": bounds_mode,
-	})
 
 
 func _execute_action_data_patch(extra_code_id: int) -> Dictionary:
@@ -1389,35 +1212,9 @@ func _execute_action_data_patch(extra_code_id: int) -> Dictionary:
 
 
 func _execute_timed_encounter_mutation(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Timed encounter mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var encounter_id := int(values[0])
-	var encounter := bundle.get_timed_encounter(encounter_id)
-	if encounter.is_empty():
-		return _halt_with_error(
-			"Timed encounter mutation references missing encounter %d" % encounter_id
-		)
-	encounter = runtime_state.get_effective_timed_encounter(encounter)
-	if int(values[1]) > -1:
-		encounter["percent"] = int(values[1])
-	if int(values[2]) > -1:
-		encounter["increment"] = int(values[2])
-	if int(values[3]) != 0:
-		var scenario_day: Variant = execution_context.get("scenarioDay")
-		if not (scenario_day is int or scenario_day is float) \
-			or not is_equal_approx(float(scenario_day), float(int(scenario_day))) \
-			or int(scenario_day) < 0:
-			return _halt_with_error(
-				"Timed encounter reset requires a non-negative scenarioDay execution context"
-			)
-		encounter["day"] = int(scenario_day)
-	if int(values[4]) > -1:
-		encounter["day"] = int(encounter.get("day", 0)) + int(values[4])
-	runtime_state.set_timed_encounter_override(encounter_id, encounter)
-	return _continue_result()
+	return _map_time_opcode_runtime._execute_timed_encounter_mutation(
+		extra_code_id
+	)
 
 
 func _patch_map_action_point(values: Array, source: Dictionary) -> Dictionary:
@@ -1522,58 +1319,11 @@ func _execute_same_as_other_action_point(record_index: int) -> Dictionary:
 
 
 func _execute_tile_mutation(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error("Tile mutation references missing Extra Code row %d" % extra_code_id)
-	var level_kind := "dungeon" if int(values[4]) != 0 else "land"
-	var tile_x := int(values[2]) if level_kind == "dungeon" else int(values[1])
-	var tile_y := int(values[1]) if level_kind == "dungeon" else int(values[2])
-	var map_level := int(values[0])
-	var tile_value := int(values[3])
-	runtime_state.set_tile(level_kind, map_level, tile_x, tile_y, tile_value)
-	return _yield_result("set_map_tile", {
-		"extraCodeId": extra_code_id,
-		"levelType": level_kind,
-		"levelIndex": map_level,
-		"x": tile_x,
-		"y": tile_y,
-		"tileValue": tile_value,
-	})
+	return _map_time_opcode_runtime._execute_tile_mutation(extra_code_id)
 
 
 func _execute_trigger_mutation(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Trigger mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var range_start_with_sign := int(values[3])
-	var level_kind := runtime_state.level_type
-	if range_start_with_sign < 0:
-		level_kind = "dungeon"
-	elif range_start_with_sign > 0:
-		level_kind = "land"
-	var map_level := int(values[0])
-	var percent := int(values[2])
-	var trigger_ids: Array = []
-	var single_trigger_id := int(values[1])
-	if single_trigger_id != 0:
-		trigger_ids.append(single_trigger_id)
-	if range_start_with_sign != 0:
-		var range_start: int = abs(range_start_with_sign)
-		var range_end: int = abs(int(values[4]))
-		for trigger_id: int in range(range_start, range_end + 1):
-			if not trigger_ids.has(trigger_id):
-				trigger_ids.append(trigger_id)
-	for trigger_id: int in trigger_ids:
-		runtime_state.set_trigger_percent(level_kind, map_level, trigger_id, percent)
-	return _yield_result("set_trigger_percent", {
-		"extraCodeId": extra_code_id,
-		"levelType": level_kind,
-		"levelIndex": map_level,
-		"triggerIds": trigger_ids,
-		"percent": percent,
-	})
+	return _map_time_opcode_runtime._execute_trigger_mutation(extra_code_id)
 
 
 func _execute_random_text(extra_code_id: int) -> Dictionary:
@@ -1634,305 +1384,48 @@ func _execute_choice(extra_code_id: int, gosub: bool) -> Dictionary:
 
 
 func _execute_teleport(extra_code_id: int, recheck_destination: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error("Teleport action references missing Extra Code row %d" % extra_code_id)
-	runtime_state.set_position(int(values[0]), int(values[1]), int(values[2]))
-	active_action_point_header["landid"] = runtime_state.level_index
-	active_action_point_header["targetX"] = runtime_state.x
-	active_action_point_header["targetY"] = runtime_state.y
-	pending_teleport = {
-		"recheckDestination": recheck_destination,
-	}
-	return _yield_result("teleport", {
-		"extraCodeId": extra_code_id,
-		"levelType": runtime_state.level_type,
-		"levelIndex": runtime_state.level_index,
-		"x": runtime_state.x,
-		"y": runtime_state.y,
-		"soundId": int(values[3]),
-		"messageId": int(values[4]),
-		"message": bundle.get_message(int(values[4])),
-		"recheckDestination": recheck_destination,
-	})
+	return _map_time_opcode_runtime._execute_teleport(
+		extra_code_id,
+		recheck_destination
+	)
 
 
 func _execute_dungeon_move(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error("Dungeon Move action references missing Extra Code row %d" % extra_code_id)
-	var destination_type := "dungeon" if int(values[0]) == 0 else "land"
-	runtime_state.set_location(
-		destination_type,
-		int(values[1]),
-		int(values[2]),
-		int(values[3])
-	)
-	var payload := {
-		"extraCodeId": extra_code_id,
-		"levelType": runtime_state.level_type,
-		"levelIndex": runtime_state.level_index,
-		"x": runtime_state.x,
-		"y": runtime_state.y,
-		"recheckDestination": false,
-		"dungeonMove": true,
-	}
-	if destination_type == "dungeon":
-		runtime_state.set_dungeon_view(int(values[4]), int(values[4]) >= 0)
-		payload["heading"] = runtime_state.heading
-		payload["multiView"] = runtime_state.multi_view
-		payload["viewType"] = runtime_state.view_type
-
-	# Loading another map returns from newland immediately; later AP slots and
-	# any saved GOSUB frames do not resume after the host completes the transfer.
-	set_pending_continuation("dungeon-move", {"dungeonMove": true})
-	var result := _yield_result("teleport", payload)
-	_clear_control_flow()
-	return result
+	return _map_time_opcode_runtime._execute_dungeon_move(extra_code_id)
 
 
 func _execute_look_direction(requested_heading: int) -> Dictionary:
-	var randomized := requested_heading < 1 or requested_heading > 4
-	var new_heading := randi_range(1, 4) if randomized else requested_heading
-	runtime_state.set_heading(new_heading)
-	return _yield_result("set_view_direction", {
-		"heading": runtime_state.heading,
-		"requestedHeading": requested_heading,
-		"randomized": randomized,
-	})
+	return _map_time_opcode_runtime._execute_look_direction(
+		requested_heading
+	)
 
 
 func _execute_compass(enabled: bool) -> Dictionary:
-	var previous := runtime_state.compass_enabled
-	runtime_state.set_compass_enabled(enabled)
-	return _yield_result("set_view_mode", {
-		"compassEnabled": enabled,
-		"multiView": runtime_state.multi_view,
-		"viewType": runtime_state.view_type,
-		"warningId": (98 if enabled else 99) if previous != enabled else 0,
-		"redraw": "walls",
-	})
+	return _map_time_opcode_runtime._execute_compass(enabled)
 
 
 func _execute_map_view_mode(allow_map: bool) -> Dictionary:
-	var previous_multi_view := runtime_state.multi_view
-	var previous_view_type := runtime_state.view_type
-	if allow_map:
-		runtime_state.allow_full_map()
-	else:
-		runtime_state.require_3d_view()
-	return _yield_result("set_view_mode", {
-		"compassEnabled": runtime_state.compass_enabled,
-		"multiView": runtime_state.multi_view,
-		"viewType": runtime_state.view_type,
-		"previousViewType": previous_view_type,
-		"warningId": (
-			96 if allow_map and not previous_multi_view
-			else 97 if not allow_map and previous_multi_view
-			else 0
-		),
-		"redraw": "window" if not allow_map or runtime_state.view_type == 1 else "none",
-	})
+	return _map_time_opcode_runtime._execute_map_view_mode(allow_map)
 
 
 func _execute_darkland(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Set Darkland action references missing Extra Code row %d" % extra_code_id
-		)
-	var random_level := bundle.get_random_level(
-		runtime_state.level_type,
-		runtime_state.level_index
-	)
-	var fallback := 1 if bool(random_level.get("isDark", false)) else 0
-	var previous := runtime_state.get_darkland(
-		runtime_state.level_type,
-		runtime_state.level_index,
-		fallback
-	)
-	var darkness := int(values[0]) - 1
-	if int(values[1]) != 0 and previous == darkness:
-		_clear_control_flow()
-		return _completed_result("darkland-unchanged")
-	runtime_state.set_darkland(
-		runtime_state.level_type,
-		runtime_state.level_index,
-		darkness
-	)
-	return _yield_result("set_map_darkness", {
-		"extraCodeId": extra_code_id,
-		"levelType": runtime_state.level_type,
-		"levelIndex": runtime_state.level_index,
-		"previousDarkness": previous,
-		"darkness": darkness,
-		"dark": darkness != 0,
-	})
+	return _map_time_opcode_runtime._execute_darkland(extra_code_id)
 
 
 func _execute_landlook(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Change Land Look action references missing Extra Code row %d" % extra_code_id
-		)
-	var map_level := int(values[2])
-	var random_level := bundle.get_random_level("land", map_level)
-	if random_level.is_empty():
-		return _halt_with_error("Missing land random-level record %d" % map_level)
-	var previous_landlook := runtime_state.get_landlook(
-		"land",
-		map_level,
-		int(random_level.get("landlook", 0))
-	)
-	var previous_darkness := runtime_state.get_darkland(
-		"land",
-		map_level,
-		1 if bool(random_level.get("isDark", false)) else 0
-	)
-	var landlook := int(values[0])
-	var darkness := int(values[1])
-	runtime_state.set_landlook("land", map_level, landlook)
-	runtime_state.set_darkland("land", map_level, darkness)
-	return _yield_result("set_land_look", {
-		"extraCodeId": extra_code_id,
-		"levelType": "land",
-		"levelIndex": map_level,
-		"previousLandlook": previous_landlook,
-		"landlook": landlook,
-		"previousDarkness": previous_darkness,
-		"darkness": darkness,
-		"dark": darkness != 0,
-		"redraw": "center" if runtime_state.level_type == "land" else "none",
-	})
+	return _map_time_opcode_runtime._execute_landlook(extra_code_id)
 
 
 func _execute_position_shift(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Position shift references missing Extra Code row %d" % extra_code_id
-		)
-	var delta_x := int(values[1])
-	var delta_y := int(values[2])
-	var randomized := int(values[3]) != 0
-	if randomized:
-		if delta_x <= 0 or delta_y <= 0:
-			return _halt_with_error(
-				"Random position shift %d requires positive X and Y ranges" % extra_code_id
-			)
-		delta_x = randi_range(1, delta_x) * (-1 if randi_range(0, 1) == 0 else 1)
-		delta_y = randi_range(1, delta_y) * (-1 if randi_range(0, 1) == 0 else 1)
-
-	var map_id := "%s:%d" % [runtime_state.level_type, runtime_state.level_index]
-	var map_record := bundle.get_map(map_id)
-	var width := int(map_record.get("width", 0))
-	var height := int(map_record.get("height", 0))
-	var target_x := runtime_state.x + delta_x
-	var target_y := runtime_state.y + delta_y
-	if (
-		map_record.is_empty()
-		or width <= 0
-		or height <= 0
-		or target_x < 0
-		or target_y < 0
-		or target_x >= width
-		or target_y >= height
-	):
-		return _halt_with_error(
-			"Position shift %d leaves Classic map %s at %d,%d" % [
-				extra_code_id,
-				map_id,
-				target_x,
-				target_y,
-			]
-		)
-	var previous_position := Vector2i(runtime_state.x, runtime_state.y)
-	runtime_state.set_position(runtime_state.level_index, target_x, target_y)
-	return _yield_result("shift_party_position", {
-		"extraCodeId": extra_code_id,
-		"levelType": runtime_state.level_type,
-		"levelIndex": runtime_state.level_index,
-		"x": target_x,
-		"y": target_y,
-		"delta": Vector2i(delta_x, delta_y),
-		"fromPosition": previous_position,
-		"randomized": randomized,
-	})
+	return _map_time_opcode_runtime._execute_position_shift(extra_code_id)
 
 
 func _execute_saved_position(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Saved-position action references missing Extra Code row %d" % extra_code_id
-		)
-	match int(values[0]):
-		1:
-			runtime_state.save_party_position()
-			return _continue_result()
-		2:
-			var restored := runtime_state.restore_party_position()
-			if restored.is_empty():
-				return _continue_result()
-			# Classic rewrites the active AP destination after restoring so the
-			# enclosing action point cannot move the party a second time.
-			active_action_point_header["landid"] = runtime_state.level_index
-			active_action_point_header["targetX"] = runtime_state.x
-			active_action_point_header["targetY"] = runtime_state.y
-			suppress_action_point_destination = true
-			pending_teleport = {"recheckDestination": false}
-			return _yield_result("teleport", {
-				"extraCodeId": extra_code_id,
-				"levelType": runtime_state.level_type,
-				"levelIndex": runtime_state.level_index,
-				"x": runtime_state.x,
-				"y": runtime_state.y,
-				"soundId": 0,
-				"messageId": 0,
-				"message": {},
-				"recheckDestination": false,
-				"savedPositionRestore": true,
-			})
-		_:
-			return _halt_with_error(
-				"Saved-position action has invalid mode %d" % int(values[0])
-			)
+	return _map_time_opcode_runtime._execute_saved_position(extra_code_id)
 
 
 func _execute_time_mutation(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Game-time mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var mode := int(values[0])
-	if mode not in [1, 2]:
-		return _halt_with_error("Game-time mutation %d has invalid mode %d" % [
-			extra_code_id,
-			mode,
-		])
-	if (
-		mode == 1
-		and (
-			int(values[1]) < -1
-			or int(values[2]) < -1
-			or int(values[2]) > 23
-			or int(values[3]) < -1
-			or int(values[3]) > 59
-		)
-	):
-		return _halt_with_error(
-			"Set game-time row %d has an invalid day, hour, or minute" % extra_code_id
-		)
-	pending_time_mutation = {"extraCodeId": extra_code_id}
-	return _yield_result("alter_game_time", {
-		"extraCodeId": extra_code_id,
-		"mode": "set" if mode == 1 else "offset",
-		"day": int(values[1]),
-		"hour": int(values[2]),
-		"minute": int(values[3]),
-	})
+	return _map_time_opcode_runtime._execute_time_mutation(extra_code_id)
 
 
 func _execute_time_branch(extra_code_id: int, gosub: bool) -> Dictionary:
@@ -1966,26 +1459,9 @@ func _execute_time_branch(extra_code_id: int, gosub: bool) -> Dictionary:
 
 
 func _execute_exploration_status(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Exploration-status action references missing Extra Code row %d" % extra_code_id
-		)
-	for value_index: int in 3:
-		if int(values[value_index]) not in [0, 1, 2]:
-			return _halt_with_error(
-				"Exploration-status row %d has invalid field %d" % [
-					extra_code_id,
-					value_index,
-				]
-			)
-	pending_exploration_status = {"extraCodeId": extra_code_id}
-	return _yield_result("update_exploration_status", {
-		"extraCodeId": extra_code_id,
-		"boatTest": int(values[0]),
-		"campTest": int(values[1]),
-		"boatChange": int(values[2]),
-	})
+	return _map_time_opcode_runtime._execute_exploration_status(
+		extra_code_id
+	)
 
 
 func _remove_current_action_point() -> Dictionary:
