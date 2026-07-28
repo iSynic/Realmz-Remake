@@ -791,82 +791,28 @@ func _thief_messages(thief_encounter: Dictionary) -> Array:
 
 
 func _eliminate_current_simple_option(option_index: int) -> Dictionary:
-	if encounter_origins.is_empty():
-		return _halt_with_error("Simple option mutation has no active encounter")
-	var encounter_loop: Dictionary = encounter_origins[-1]
-	if str(encounter_loop.get("encounterKind", "")) != "simple":
-		return _halt_with_error("Simple option mutation is outside a simple encounter")
-	var encounter_id := int(encounter_loop.get("encounterId", -1))
-	var mutation_result := _eliminate_simple_encounter_option(encounter_id, option_index)
-	if not mutation_result.is_empty():
-		return mutation_result
-	# Opcode 35 reopens the current encounter immediately without using an attempt.
-	return _yield_encounter("simple", encounter_id, 0)
+	return _encounter_opcode_runtime._eliminate_current_simple_option(
+		option_index
+	)
 
 
 func _eliminate_simple_option_from_extra_code(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.size() < 2:
-		return _halt_with_error(
-			"Simple option mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var mutation_result := _eliminate_simple_encounter_option(
-		int(values[0]),
-		int(values[1])
-	)
-	return _continue_result() if mutation_result.is_empty() else mutation_result
+	return _encounter_opcode_runtime \
+		._eliminate_simple_option_from_extra_code(extra_code_id)
 
 
 func _eliminate_simple_encounter_option(encounter_id: int, option_index: int) -> Dictionary:
-	if option_index < 1 or option_index > 4:
-		return _halt_with_error("Simple encounter option index must be between 1 and 4")
-	var encounter := bundle.get_encounter("simple", encounter_id)
-	if encounter.is_empty():
-		return _halt_with_error("Missing simple encounter record %d" % encounter_id)
-	encounter = runtime_state.get_effective_simple_encounter(encounter)
-	var choice_results: Variant = encounter.get("choiceResults", [])
-	if not (choice_results is Array) or choice_results.size() < option_index:
-		return _halt_with_error("Simple encounter %d has no option %d" % [
+	return _encounter_opcode_runtime \
+		._eliminate_simple_encounter_option(
 			encounter_id,
-			option_index,
-		])
-	var updated_results: Array = choice_results.duplicate()
-	updated_results[option_index - 1] = 0
-	encounter["choiceResults"] = updated_results
-	runtime_state.set_simple_encounter_override(encounter_id, encounter)
-	return {}
+			option_index
+		)
 
 
 func _eliminate_complex_result(result_index: int) -> Dictionary:
-	if encounter_origins.is_empty():
-		return _halt_with_error("Complex result mutation has no active encounter")
-	var encounter_loop: Dictionary = encounter_origins[-1]
-	if str(encounter_loop.get("encounterKind", "")) != "complex":
-		return _halt_with_error("Complex result mutation is outside a complex encounter")
-	if result_index < 1 or result_index > 4:
-		return _halt_with_error("Complex result mutation index must be between 1 and 4")
-	var encounter_id := int(encounter_loop.get("encounterId", -1))
-	var encounter := runtime_state.get_effective_complex_encounter(
-		bundle.get_encounter("complex", encounter_id)
+	return _encounter_opcode_runtime._eliminate_complex_result(
+		result_index
 	)
-	var source_actions: Variant = encounter.get("actions", [])
-	if not (source_actions is Array):
-		return _halt_with_error("Complex encounter has no action array to mutate")
-	var first_slot := (result_index - 1) * 8
-	var actions: Array = []
-	for action_value: Variant in source_actions:
-		if not (action_value is Dictionary):
-			continue
-		var slot := int(action_value.get("slot", -1))
-		if slot < first_slot or slot >= first_slot + 8:
-			actions.append(action_value.duplicate(true))
-	actions.append({"id": 0, "rawCode": 24, "slot": first_slot + 7})
-	actions.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		return int(a.get("slot", -1)) < int(b.get("slot", -1))
-	)
-	encounter["actions"] = actions
-	runtime_state.set_complex_encounter_override(encounter_id, encounter)
-	return _continue_result()
 
 
 func _execute_treasure(treasure_id: int) -> Dictionary:
@@ -1305,22 +1251,8 @@ func _action_point_destination_result(reason: String) -> Dictionary:
 
 
 func _repeat_encounter_after_fallthrough() -> Dictionary:
-	if encounter_origins.is_empty():
-		return {}
-	var encounter_loop: Dictionary = encounter_origins[-1]
-	encounter_loop["remainingAttempts"] = int(
-		encounter_loop.get("remainingAttempts", 1)
-	) - 1
-	encounter_origins[-1] = encounter_loop
-	if int(encounter_loop["remainingAttempts"]) <= 0:
-		return {}
-	# Classic repeats only when a result block falls through. Opcodes 24 and 25
-	# clear the encounter flag before reaching this point and therefore terminate.
-	return _yield_encounter(
-		str(encounter_loop.get("encounterKind", "")),
-		int(encounter_loop.get("encounterId", -1)),
-		0
-	)
+	return _encounter_opcode_runtime \
+		._repeat_encounter_after_fallthrough()
 
 
 func _persist_removed_action_point(consume_codes: bool) -> void:
@@ -1566,42 +1498,12 @@ func _branch_to_loaded_encounter_result(
 	result_index: int,
 	start_slot: int
 ) -> Dictionary:
-	if result_index < 0 or result_index > 3:
-		return _halt_with_error("Classic encounter result index must be between 0 and 3")
-	# Classic keeps the most recently loaded simple and complex records in
-	# separate buffers. A nested encounter can therefore branch back into its
-	# enclosing record without starting another encounter.
-	var encounter_id := (
-		loaded_simple_encounter_id
-		if encounter_kind == "simple"
-		else loaded_complex_encounter_id
-	)
-	if encounter_id < 0:
-		# Both Classic buffers are zeroed before their first load.
-		_set_cursor({
-			"id": "%s encounter:unloaded:outcome:%d" % [encounter_kind, result_index + 1],
-			"actions": [],
-		}, start_slot)
-		return _continue_result()
-	var encounter := bundle.get_encounter(encounter_kind, encounter_id)
-	if encounter.is_empty():
-		return _halt_with_error(
-			"Missing loaded %s encounter record %d" % [encounter_kind, encounter_id]
+	return _encounter_opcode_runtime \
+		._branch_to_loaded_encounter_result(
+			encounter_kind,
+			result_index,
+			start_slot
 		)
-	if encounter_kind == "simple":
-		encounter = runtime_state.get_effective_simple_encounter(encounter)
-	else:
-		encounter = runtime_state.get_effective_complex_encounter(encounter)
-	var target := _encounter_outcome_trigger(
-		encounter_kind,
-		encounter_id,
-		encounter,
-		result_index + 1
-	)
-	if target.is_empty():
-		return _halt_with_error("Classic encounter has no action array")
-	_set_cursor(target, start_slot)
-	return _continue_result()
 
 
 func _branch_to_extra_action_point(record_id: int, gosub: bool, start_slot: int) -> Dictionary:
@@ -1648,40 +1550,16 @@ func _encounter_outcome_trigger(
 	encounter: Dictionary,
 	outcome: int
 ) -> Dictionary:
-	var encounter_actions: Variant = encounter.get("actions", [])
-	if not (encounter_actions is Array):
-		return {}
-	var first_slot := (outcome - 1) * 8
-	var actions: Array = []
-	for action_value: Variant in encounter_actions:
-		if not (action_value is Dictionary):
-			continue
-		var slot := int(action_value.get("slot", -1))
-		if slot < first_slot or slot >= first_slot + 8:
-			continue
-		var action: Dictionary = action_value.duplicate(true)
-		var raw_code := int(action.get("rawCode", 0))
-		action["code"] = normalize_opcode(raw_code)
-		action["gosub"] = raw_code < 0 and raw_code not in [-14, -23]
-		action["slot"] = slot - first_slot
-		actions.append(action)
-	return {
-		"id": "%s encounter:%d:outcome:%d" % [encounter_kind, encounter_id, outcome],
-		"source": "Data ED" if encounter_kind == "simple" else "Data ED2",
-		"recordIndex": encounter_id,
-		"actions": actions,
-	}
+	return _encounter_opcode_runtime._encounter_outcome_trigger(
+		encounter_kind,
+		encounter_id,
+		encounter,
+		outcome
+	)
 
 
 func _break_encounter() -> Dictionary:
-	if encounter_origins.is_empty():
-		return _halt_with_error("Break encounter loop has no active encounter")
-	var origin: Dictionary = encounter_origins.pop_back()
-	current_trigger = origin["trigger"]
-	current_action_index = int(origin["actionIndex"])
-	call_stack = origin["callStack"]
-	active_action_point_header = origin["actionPointHeader"]
-	return _continue_result()
+	return _encounter_opcode_runtime._break_encounter()
 
 
 func _restore_call_frame() -> void:

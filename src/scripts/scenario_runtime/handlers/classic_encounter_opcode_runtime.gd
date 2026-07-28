@@ -316,6 +316,255 @@ func _thief_messages(thief_encounter: Dictionary) -> Array:
 	return messages
 
 
+func _eliminate_current_simple_option(
+	option_index: int
+) -> Dictionary:
+	if runtime.encounter_origins.is_empty():
+		return _halt(
+			"Simple option mutation has no active encounter"
+		)
+	var encounter_loop: Dictionary = runtime.encounter_origins[-1]
+	if str(encounter_loop.get("encounterKind", "")) != "simple":
+		return _halt(
+			"Simple option mutation is outside a simple encounter"
+		)
+	var encounter_id := int(encounter_loop.get("encounterId", -1))
+	var mutation_result := _eliminate_simple_encounter_option(
+		encounter_id,
+		option_index
+	)
+	if not mutation_result.is_empty():
+		return mutation_result
+	return _yield_encounter("simple", encounter_id, 0)
+
+
+func _eliminate_simple_option_from_extra_code(
+	extra_code_id: int
+) -> Dictionary:
+	var values := _values(extra_code_id)
+	if values.size() < 2:
+		return _halt(
+			"Simple option mutation references missing Extra Code row %d"
+			% extra_code_id
+		)
+	var mutation_result := _eliminate_simple_encounter_option(
+		int(values[0]),
+		int(values[1])
+	)
+	return _continue() if mutation_result.is_empty() \
+		else mutation_result
+
+
+func _eliminate_simple_encounter_option(
+	encounter_id: int,
+	option_index: int
+) -> Dictionary:
+	if option_index < 1 or option_index > 4:
+		return _halt(
+			"Simple encounter option index must be between 1 and 4"
+		)
+	var encounter: Dictionary = _bundle().get_encounter(
+		"simple",
+		encounter_id
+	)
+	if encounter.is_empty():
+		return _halt(
+			"Missing simple encounter record %d" % encounter_id
+		)
+	encounter = runtime.runtime_state.get_effective_simple_encounter(
+		encounter
+	)
+	var choice_results: Variant = encounter.get("choiceResults", [])
+	if not (choice_results is Array) \
+			or choice_results.size() < option_index:
+		return _halt(
+			"Simple encounter %d has no option %d"
+			% [encounter_id, option_index]
+		)
+	var updated_results: Array = choice_results.duplicate()
+	updated_results[option_index - 1] = 0
+	encounter["choiceResults"] = updated_results
+	runtime.runtime_state.set_simple_encounter_override(
+		encounter_id,
+		encounter
+	)
+	return {}
+
+
+func _eliminate_complex_result(result_index: int) -> Dictionary:
+	if runtime.encounter_origins.is_empty():
+		return _halt(
+			"Complex result mutation has no active encounter"
+		)
+	var encounter_loop: Dictionary = runtime.encounter_origins[-1]
+	if str(encounter_loop.get("encounterKind", "")) != "complex":
+		return _halt(
+			"Complex result mutation is outside a complex encounter"
+		)
+	if result_index < 1 or result_index > 4:
+		return _halt(
+			"Complex result mutation index must be between 1 and 4"
+		)
+	var encounter_id := int(encounter_loop.get("encounterId", -1))
+	var encounter: Dictionary = \
+		runtime.runtime_state.get_effective_complex_encounter(
+			_bundle().get_encounter("complex", encounter_id)
+		)
+	var source_actions: Variant = encounter.get("actions", [])
+	if not (source_actions is Array):
+		return _halt(
+			"Complex encounter has no action array to mutate"
+		)
+	var first_slot := (result_index - 1) * 8
+	var actions: Array = []
+	for action_value: Variant in source_actions:
+		if not (action_value is Dictionary):
+			continue
+		var slot := int(action_value.get("slot", -1))
+		if slot < first_slot or slot >= first_slot + 8:
+			actions.append(action_value.duplicate(true))
+	actions.append({
+		"id": 0,
+		"rawCode": 24,
+		"slot": first_slot + 7,
+	})
+	actions.sort_custom(
+		func(a: Dictionary, b: Dictionary) -> bool:
+			return int(a.get("slot", -1)) \
+				< int(b.get("slot", -1))
+	)
+	encounter["actions"] = actions
+	runtime.runtime_state.set_complex_encounter_override(
+		encounter_id,
+		encounter
+	)
+	return _continue()
+
+
+func _repeat_encounter_after_fallthrough() -> Dictionary:
+	if runtime.encounter_origins.is_empty():
+		return {}
+	var encounter_loop: Dictionary = runtime.encounter_origins[-1]
+	encounter_loop["remainingAttempts"] = int(
+		encounter_loop.get("remainingAttempts", 1)
+	) - 1
+	runtime.encounter_origins[-1] = encounter_loop
+	if int(encounter_loop["remainingAttempts"]) <= 0:
+		return {}
+	return _yield_encounter(
+		str(encounter_loop.get("encounterKind", "")),
+		int(encounter_loop.get("encounterId", -1)),
+		0
+	)
+
+
+func _branch_to_loaded_encounter_result(
+	encounter_kind: String,
+	result_index: int,
+	start_slot: int
+) -> Dictionary:
+	if result_index < 0 or result_index > 3:
+		return _halt(
+			"Classic encounter result index must be between 0 and 3"
+		)
+	var encounter_id: int = (
+		runtime.loaded_simple_encounter_id
+		if encounter_kind == "simple"
+		else runtime.loaded_complex_encounter_id
+	)
+	if encounter_id < 0:
+		runtime.call(
+			"_set_cursor",
+			{
+				"id": "%s encounter:unloaded:outcome:%d"
+					% [encounter_kind, result_index + 1],
+				"actions": [],
+			},
+			start_slot
+		)
+		return _continue()
+	var encounter: Dictionary = _bundle().get_encounter(
+		encounter_kind,
+		encounter_id
+	)
+	if encounter.is_empty():
+		return _halt(
+			"Missing loaded %s encounter record %d"
+			% [encounter_kind, encounter_id]
+		)
+	if encounter_kind == "simple":
+		encounter = \
+			runtime.runtime_state.get_effective_simple_encounter(
+				encounter
+			)
+	else:
+		encounter = \
+			runtime.runtime_state.get_effective_complex_encounter(
+				encounter
+			)
+	var target := _encounter_outcome_trigger(
+		encounter_kind,
+		encounter_id,
+		encounter,
+		result_index + 1
+	)
+	if target.is_empty():
+		return _halt("Classic encounter has no action array")
+	runtime.call("_set_cursor", target, start_slot)
+	return _continue()
+
+
+func _encounter_outcome_trigger(
+	encounter_kind: String,
+	encounter_id: int,
+	encounter: Dictionary,
+	outcome: int
+) -> Dictionary:
+	var encounter_actions: Variant = encounter.get("actions", [])
+	if not (encounter_actions is Array):
+		return {}
+	var first_slot := (outcome - 1) * 8
+	var actions: Array = []
+	for action_value: Variant in encounter_actions:
+		if not (action_value is Dictionary):
+			continue
+		var slot := int(action_value.get("slot", -1))
+		if slot < first_slot or slot >= first_slot + 8:
+			continue
+		var action: Dictionary = action_value.duplicate(true)
+		var raw_code := int(action.get("rawCode", 0))
+		action["code"] = (
+			abs(raw_code)
+			if raw_code < 0 and raw_code not in [-14, -23]
+			else raw_code
+		)
+		action["gosub"] = (
+			raw_code < 0 and raw_code not in [-14, -23]
+		)
+		action["slot"] = slot - first_slot
+		actions.append(action)
+	return {
+		"id": "%s encounter:%d:outcome:%d"
+			% [encounter_kind, encounter_id, outcome],
+		"source": (
+			"Data ED" if encounter_kind == "simple" else "Data ED2"
+		),
+		"recordIndex": encounter_id,
+		"actions": actions,
+	}
+
+
+func _break_encounter() -> Dictionary:
+	if runtime.encounter_origins.is_empty():
+		return _halt("Break encounter loop has no active encounter")
+	var origin: Dictionary = runtime.encounter_origins.pop_back()
+	runtime.current_trigger = origin["trigger"]
+	runtime.current_action_index = int(origin["actionIndex"])
+	runtime.call_stack = origin["callStack"]
+	runtime.active_action_point_header = origin["actionPointHeader"]
+	return _continue()
+
+
 func _bundle() -> ClassicCampaignBundle:
 	return runtime.bundle
 
@@ -326,6 +575,10 @@ func _values(extra_code_id: int) -> Array:
 
 func _run() -> Dictionary:
 	return runtime.run_until_yield()
+
+
+func _continue() -> Dictionary:
+	return _result("_continue_result")
 
 
 func _halt(message: String) -> Dictionary:
