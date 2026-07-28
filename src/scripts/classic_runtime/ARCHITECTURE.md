@@ -22,6 +22,13 @@ Runtime v2 keeps the parts of the Remake that already work well--the map, HUD,
 combat system, inventory, characters, audio, and save UI--but puts a versioned
 scenario VM and explicit engine APIs in front of them.
 
+This guide describes the implementation after the
+`refactor/scenario-runtime-domain-extraction` branch. The package, VM, handler,
+port, extension, rules, and save contracts did not change during that
+refactoring. The important change is that the two large POC implementation
+seams were split into domain runtimes and domain Godot services while keeping
+those public contracts stable.
+
 > **Scope of this guide**
 >
 > "Samuel's implementation" means the Realmz Castle `Realmz-Remake`
@@ -57,7 +64,8 @@ flowchart LR
     R -->|continue or branch| VM
     R -->|yield command| HOST["ClassicRuntimeHost"]
     HOST --> PORT["One command port"]
-    PORT --> G["ScenarioGodotServices"]
+    PORT --> DOMAIN["One domain Godot service"]
+    DOMAIN --> G["ScenarioGodotServices coordinator"]
     G --> GAME["Map, HUD, combat, inventory, characters"]
     GAME -->|structured response| HOST
     HOST --> VM
@@ -78,7 +86,7 @@ objects and presentation.
 | **Step result** | The handler's control-flow answer: continue, yield, branch, call, return, replace, halt, or error. |
 | **Command** | A request for the Godot side to do something, such as show text, start a battle, check an item, or teleport. |
 | **Port** | The single owner and validator for a family of commands crossing into Godot. |
-| **Service** | The actual Godot-facing implementation behind a port. |
+| **Service** | The domain-specific Godot implementation behind a port. It can use shared native helpers from the services coordinator. |
 | **Continuation** | The saved identity and data required to resume the exact handler that yielded. |
 | **Runtime state** | Mutable scenario state: AP replacements, quest state, map mutations, encounter changes, timed events, and similar campaign-owned changes. |
 | **Gameplay ruleset** | Six resolved domain providers plus validated options, chosen at new-game time and locked into the save. |
@@ -223,24 +231,33 @@ or exposes the important execution facts:
 - step and stack limits; and
 - execution snapshots and restoration.
 
+For Classic execution, those mutable facts live in
+`ClassicScenarioExecutionState`, which the interpreter creates and owns.
+`ClassicOpcodeRuntime` is bound to that state; it does not create a second
+cursor, stack, trace, or continuation store. Keeping the state object explicit
+also gives snapshots and restoration one concrete schema boundary.
+
 There are two instruction shapes, but not two campaign execution systems.
 Generic semantic triggers and preserved Classic triggers both resolve through
 `ScenarioInstructionRegistry`. Classic execution uses
-`ClassicOpcodeRuntime` internally for the source-backed mechanics and its
-unusual original stack behavior. The VM still resolves the registered handler
-before that mechanic can run, captures the yield as a
-`ScenarioPendingCommand`, and owns the public resume path.
+`ClassicOpcodeRuntime` as a compatibility coordinator for shared bundle access,
+state proxies, cursor lifecycle, and the unusual original stack behavior. The
+actual opcode mechanics are split across eight handler-aligned domain runtimes.
+The VM still resolves the registered handler before a mechanic can run,
+captures the yield as a `ScenarioPendingCommand`, and owns the public resume
+path.
 
-This is worth emphasizing because `ClassicOpcodeRuntime` is still a large file.
-Its size does not make it the dispatcher. The ownership check happens first:
+There is only one execution loop. The old loop inside
+`ClassicOpcodeRuntime` has been removed. The active path is:
 
 1. normalize the instruction;
 2. ask the registry for its one owner;
 3. fail if no owner exists, except for an evidence-listed original dispatcher
    no-op;
-4. call that handler;
-5. apply or capture the result; and
-6. continue until the VM yields, completes, or errors.
+4. ask `ClassicOpcodeRuntime` for that handler's domain runtime;
+5. execute the mechanic through the registered handler;
+6. apply or capture its `ScenarioStepResult`; and
+7. continue until the VM yields, completes, or errors.
 
 The hard limits are intentional. The VM stops after 256 internal steps instead
 of hanging, and Classic GOSUB depth is capped at 20 frames instead of writing
@@ -253,7 +270,7 @@ past the original fixed array.
 | Handler ID | Domain |
 | --- | --- |
 | `core.control-flow` | AP replacement, branches, calls, returns, and encounter-flow changes |
-| `core.encounter` | Simple and complex encounter operations |
+| `core.encounters` | Simple and complex encounter operations |
 | `core.map-time` | Map mutation, teleporting, time, darkness, view, and random rectangles |
 | `core.combat` | Battle requests, battle state, macros, morale, and combatant mutations |
 | `core.inventory` | Treasure, shops, temples, banking, items, charges, and equipment storage |
@@ -279,10 +296,27 @@ instruction pointer themselves. The result vocabulary is intentionally small:
 | `error` | Stop with a developer- and source-visible failure |
 
 Classic handlers currently call focused mechanics on
-`ClassicOpcodeRuntime`. That helper owns the complicated source-fidelity work:
-signed opcodes, encounter result blocks, AP/XAP replacement, Classic selection
-tracking, GOSUB quirks, and source-specific branching. The handler owns
-dispatch; the helper owns the mechanic.
+their matching domain runtime:
+
+| Handler | Mechanic implementation |
+| --- | --- |
+| `core.control-flow` | `ClassicControlFlowOpcodeRuntime` |
+| `core.encounters` | `ClassicEncounterOpcodeRuntime` |
+| `core.map-time` | `ClassicMapTimeOpcodeRuntime` |
+| `core.combat` | `ClassicCombatOpcodeRuntime` |
+| `core.inventory` | `ClassicInventoryOpcodeRuntime` |
+| `core.character` | `ClassicCharacterOpcodeRuntime` |
+| `core.rules-state` | `ClassicRulesStateOpcodeRuntime` |
+| `core.presentation` | `ClassicPresentationOpcodeRuntime` |
+
+Those objects own the complicated source-fidelity mechanics: signed opcodes,
+encounter result blocks, AP/XAP replacement, Classic selection tracking, GOSUB
+quirks, source-specific branching, combat macros, and mutation ordering.
+`ClassicOpcodeRuntime.classic_handler_runtime()` is the narrow coordinator that
+maps a registered core handler to its mechanic object and supplies shared
+bundle/state helpers. The handler owns instruction dispatch, the domain runtime
+owns the mechanic, `ClassicScenarioExecutionState` owns mutable execution
+facts, and `ScenarioInterpreter` owns the loop.
 
 ### 7. A yield becomes one structured pending command
 
@@ -357,20 +391,40 @@ The core command names are registered by the six default ports before any
 extension port. An extension command must be declared in the trusted extension
 catalog and cannot collide with an existing owner.
 
-### 10. `ScenarioGodotServices` implements the native side
+The five gameplay ports resolve their own native runtime during configuration.
+`DelegatingScenarioPort` asks the configured coordinator for
+`scenario_port_runtime(port_id)` and then validates and calls that domain
+service. `PersistencePort` remains the sixth boundary and aggregates saveable
+port and coordinator state rather than owning a separate gameplay service.
 
-`ScenarioGodotServices` is intentionally behind the ports. It contains the
-reusable Godot-facing operations that know about `GameGlobal`, the map, HUD,
-combat, native items, characters, audio, and game state.
+### 10. Domain services implement the native side
 
-It does **not** decide which command ID owns an action, which handler should
-resume, or where the scenario instruction pointer moves. Those decisions belong
-on the scenario side of the boundary.
+`ScenarioGodotServices` now creates five Godot-facing domain services:
 
-This file is still large because it is the integration seam with a mature game,
-not because every operation should remain in one file forever. We can split its
-internal implementation by native subsystem later without changing the
-scenario contracts. That is one of the reasons the port boundary exists.
+| Port | Native implementation |
+| --- | --- |
+| `MapPort` | `ScenarioGodotMapServices` |
+| `CombatPort` | `ScenarioGodotCombatServices` |
+| `InventoryPort` | `ScenarioGodotInventoryServices` |
+| `CharacterPort` | `ScenarioGodotCharacterServices` |
+| `PresentationPort` | `ScenarioGodotPresentationServices` |
+
+Each domain service exposes the operations for one port. A map command no
+longer reflects against one all-purpose adapter; it is validated against and
+executed by `ScenarioGodotMapServices`, and the same rule applies to the other
+domains.
+
+`ScenarioGodotServices` remains the coordinator and shared native owner. It
+holds campaign-wide resources and cross-domain state, creates the domain
+services, provides autoload/UI/native helper access, prepares save-safe command
+tracking, and aggregates persistence. The domain services inherit
+`ScenarioGodotDomainService` and currently call back to that coordinator for
+shared helpers that have not yet moved behind narrower typed collaborators.
+
+Neither the domain services nor the coordinator decide which command ID owns
+an action, which handler should resume, or where the scenario instruction
+pointer moves. Those decisions remain on the scenario side of the port
+boundary.
 
 ### 11. Gameplay behavior is selected independently of execution
 
@@ -503,9 +557,10 @@ Here is the concrete map path:
 4. The host starts the trigger with map position and native execution context.
 5. `ScenarioInterpreter` asks `ScenarioInstructionRegistry` for the owner of
    each instruction.
-6. The handler either completes a source-side mechanic or yields a Godot
-   command.
-7. The owning port calls `ScenarioGodotServices`.
+6. The handler runs its domain opcode runtime and either completes a source-side
+   mechanic or yields a Godot command.
+7. The owning port calls its domain Godot service, which can use shared native
+   helpers from `ScenarioGodotServices`.
 8. The response resumes the same handler.
 9. When the trigger completes, the host clears the active execution and the map
    refreshes through the existing game flow.
@@ -527,8 +582,9 @@ Battle is the easiest way to see why continuations matter:
 1. A combat handler resolves the Classic battle action.
 2. It yields `start_battle` with the authored battle identity and context.
 3. `CombatPort` validates and routes the request.
-4. `ScenarioGodotServices` materializes or loads the native battle and enters
-   the existing combat state.
+4. `ScenarioGodotCombatServices` materializes or loads the native battle,
+   using shared coordinator helpers where needed, and enters the existing
+   combat state.
 5. The outer scenario execution remains suspended with its handler, action
    identity, and continuation data intact.
 6. Battle-round and queued macros can run through nested hosts while sharing
@@ -647,9 +703,11 @@ state.
 
 ### Testable subsystems
 
-A handler can be tested without a HUD. A port can be tested with a service
-double. A bundle can be validated without starting a game. A route test can
-still exercise the complete native stack when that is the claim we need.
+A handler and its domain runtime can be tested without a HUD. A port can be
+tested with a service double. A domain Godot service can be characterized
+without exposing unrelated port commands. A bundle can be validated without
+starting a game. A route test can still exercise the complete native stack
+when that is the claim we need.
 
 ### Selectable behavior without campaign forks
 
@@ -665,12 +723,16 @@ This is the practical part I expect developers to come back to.
 1. Find its owner in `scripts/scenario_runtime/handlers`.
 2. If no family owns it yet, add it to the narrowest matching handler's opcode
    list. Do not add a second dispatcher.
-3. Put source-specific calculations and Classic stack/encounter behavior in
-   `ClassicOpcodeRuntime` or an existing focused Classic helper.
+3. Put source-specific calculations in that handler family's
+   `classic_*_opcode_runtime.gd`. Shared cursor, stack, continuation, or bundle
+   plumbing belongs in `ClassicOpcodeRuntime` only when more than one domain
+   genuinely needs it.
 4. If it needs native game state, yield a command instead of reaching into
    `GameGlobal` from the handler.
 5. Add that command to exactly one port, with request and response contracts.
-6. Reuse or add a focused method in `ScenarioGodotServices`.
+6. Reuse or add a focused method in the matching
+   `ScenarioGodot*Services` domain service. Keep coordinator access limited to
+   shared native concerns.
 7. Add a source-backed fixture with exact record/slot evidence.
 8. Add a native integration or route smoke if the claim crosses map, UI,
    inventory, combat, media, or persistence.
@@ -684,7 +746,7 @@ presence proves routing, not correct behavior across every authored form.
 1. Choose the owning port by domain.
 2. Add the command ID once.
 3. Define its request and response contracts.
-4. Map it to a service method.
+4. Map it to a method on that port's domain Godot service.
 5. Keep scenario continuation out of the service.
 6. Test duplicate ownership and malformed request/response behavior where
    relevant.
@@ -768,8 +830,10 @@ When an AP behaves incorrectly, follow the same path the runtime follows:
    and command are present.
 6. **Port:** Confirm the command belongs to the expected domain and the request
    passes its contract.
-7. **Godot service:** Confirm the service saw the expected native context and
-   returned a valid response.
+7. **Godot domain service:** Confirm the port resolved the expected domain
+   service, that the service saw the expected native context, and that it
+   returned a valid response. If it delegated to the coordinator, trace that
+   shared helper separately.
 8. **Resume:** Confirm the pending record resumes through the same handler and
    applies the authored branch.
 9. **Persistence:** If the bug appears after load, compare runtime, port,
@@ -790,14 +854,25 @@ without manually replaying the whole campaign.
 | [`classic_runtime/classic_runtime_state.gd`](classic_runtime_state.gd) | Mutable Classic scenario state |
 | [`classic_runtime/classic_runtime_host.gd`](classic_runtime_host.gd) | Active execution, nested macros, and command round trips |
 | [`scenario_runtime/scenario_interpreter.gd`](../scenario_runtime/scenario_interpreter.gd) | VM, handler routing, pending commands, trace, and snapshots |
+| [`scenario_runtime/classic_execution_state.gd`](../scenario_runtime/classic_execution_state.gd) | VM-owned mutable Classic cursor, stack, pending, encounter-origin, and trace state |
 | [`scenario_runtime/scenario_instruction_registry.gd`](../scenario_runtime/scenario_instruction_registry.gd) | Exclusive opcode and semantic-operation ownership |
 | [`scenario_runtime/handlers/`](../scenario_runtime/handlers/) | Core instruction families and Classic dispatch ownership |
-| [`scenario_runtime/handlers/classic_opcode_runtime.gd`](../scenario_runtime/handlers/classic_opcode_runtime.gd) | Source-backed Classic mechanics behind the handlers |
+| [`scenario_runtime/handlers/classic_opcode_runtime.gd`](../scenario_runtime/handlers/classic_opcode_runtime.gd) | Shared Classic compatibility coordinator, lifecycle, state proxies, and handler-runtime lookup |
+| [`scenario_runtime/handlers/classic_control_flow_opcode_runtime.gd`](../scenario_runtime/handlers/classic_control_flow_opcode_runtime.gd) | AP/XAP lifecycle, branches, calls, returns, replacement, and encounter fallthrough mechanics |
+| [`scenario_runtime/handlers/classic_encounter_opcode_runtime.gd`](../scenario_runtime/handlers/classic_encounter_opcode_runtime.gd) | Simple/complex encounter execution and outcome mechanics |
+| [`scenario_runtime/handlers/classic_map_time_opcode_runtime.gd`](../scenario_runtime/handlers/classic_map_time_opcode_runtime.gd) | Map, movement, time, view, and random-rectangle mechanics |
+| [`scenario_runtime/handlers/classic_combat_opcode_runtime.gd`](../scenario_runtime/handlers/classic_combat_opcode_runtime.gd) | Battle, combatant, macro, morale, and combat mutation mechanics |
+| [`scenario_runtime/handlers/classic_inventory_opcode_runtime.gd`](../scenario_runtime/handlers/classic_inventory_opcode_runtime.gd) | Treasure, shop, wealth, item, and equipment mechanics |
+| [`scenario_runtime/handlers/classic_character_opcode_runtime.gd`](../scenario_runtime/handlers/classic_character_opcode_runtime.gd) | Character selection, health, progression, condition, and ally mechanics |
+| [`scenario_runtime/handlers/classic_rules_state_opcode_runtime.gd`](../scenario_runtime/handlers/classic_rules_state_opcode_runtime.gd) | Persistent rule and scenario-state mechanics |
+| [`scenario_runtime/handlers/classic_presentation_opcode_runtime.gd`](../scenario_runtime/handlers/classic_presentation_opcode_runtime.gd) | Text, sound, picture, and authored-wait mechanics |
 | [`scenario_runtime/scenario_step_result.gd`](../scenario_runtime/scenario_step_result.gd) | The VM control-flow vocabulary |
 | [`scenario_runtime/scenario_pending_command.gd`](../scenario_runtime/scenario_pending_command.gd) | Serializable yield/resume identity |
 | [`scenario_runtime/scenario_command_router.gd`](../scenario_runtime/scenario_command_router.gd) | Exclusive command ownership and boundary validation |
 | [`scenario_runtime/ports/`](../scenario_runtime/ports/) | Six domain APIs into the native game |
-| [`scenario_runtime/godot/scenario_godot_services.gd`](../scenario_runtime/godot/scenario_godot_services.gd) | Reusable Godot implementations behind the ports |
+| [`scenario_runtime/godot/scenario_godot_domain_service.gd`](../scenario_runtime/godot/scenario_godot_domain_service.gd) | Shared contract and coordinator access for native domain services |
+| [`scenario_runtime/godot/`](../scenario_runtime/godot/) | Five domain services plus the shared Godot coordinator |
+| [`scenario_runtime/godot/scenario_godot_services.gd`](../scenario_runtime/godot/scenario_godot_services.gd) | Campaign-wide native coordinator, shared helpers, cross-domain state, and persistence aggregation |
 | [`scenario_runtime/scenario_extension_registry.gd`](../scenario_runtime/scenario_extension_registry.gd) | Trusted extension catalog, validation, and bindings |
 | [`scenario_runtime/extensions/`](../scenario_runtime/extensions/) | Engine-shipped extension code and conformance fixture |
 | [`scenario_runtime/gameplay_rule_registry.gd`](../scenario_runtime/gameplay_rule_registry.gd) | Provider/preset loading and resolution |
@@ -890,24 +965,46 @@ Focused component tests and route acceptance still matter. A green VM fixture
 cannot prove HUD behavior, a native battle, save/reload, or campaign completion.
 Use the evidence ladder in [CLASSIC_PORTING_GUIDE.md](CLASSIC_PORTING_GUIDE.md).
 
-## The architecture is modular, but the implementation is still maturing
+## The extraction is real, but the boundaries are still maturing
 
-There are two large integration files:
+This branch completed the first meaningful split of both POC seams:
 
-- `ClassicOpcodeRuntime` contains a lot of source-backed Classic mechanics; and
-- `ScenarioGodotServices` contains a lot of native Godot integration.
+- the former Classic opcode implementation is now a compatibility coordinator,
+  one VM-owned execution-state object, and eight handler-aligned domain
+  runtimes; and
+- the native command implementation is now five port-aligned Godot services
+  behind a shared coordinator.
 
-That is honest technical debt, not a hidden return to the old model. The new
-architecture gives those files enforceable boundaries:
+That is more than moving code into smaller files. Registered handlers now
+resolve a domain mechanic object, and configured ports now resolve a domain
+native service. The old duplicate Classic loop is gone, and each domain can be
+reviewed and changed without searching one 4,000-line opcode implementation or
+one 6,000-line command adapter.
 
-- the Classic helper cannot claim an opcode without a registered handler;
-- the Godot service cannot claim a command without a registered port;
-- neither file is supplied by a campaign; and
-- their public state and continuation are captured by the VM/session contracts.
+The remaining debt is also concrete:
 
-We should split them when a split produces a clearer owned subsystem, not just
-to make the files shorter. The stable IDs, registries, ports, and save contracts
-are the architecture we need to preserve through that refactoring.
+- `ClassicOpcodeRuntime` still exposes compatibility proxies and shared helper
+  methods used by several domain runtimes;
+- the Classic domain runtimes are configured with that coordinator and use
+  dynamic helper invocation where the shared contract is not typed yet;
+- `ScenarioGodotServices` is still a large coordinator because many shared
+  constants, native-resource operations, cross-domain helpers, and persistence
+  concerns remain there;
+- the Godot domain services retain a `service_owner` callback for those shared
+  operations; and
+- `PersistencePort` aggregates state rather than having an independent native
+  service.
+
+Those seams are acceptable for this extraction, but they are not the final
+shape. The next useful refactors should replace broad coordinator callbacks
+with narrow typed collaborators, move truly domain-owned constants and state
+to their owners, and reduce compatibility proxies only after callers and tests
+use the new boundary directly.
+
+The stable IDs, registries, VM state, pending-command schema, ports, save
+contracts, and data-only package boundary are the architecture to preserve
+while doing that work. File size alone is not the target; explicit ownership
+is.
 
 ## Frequently asked questions
 
@@ -948,8 +1045,8 @@ an explicit compatibility break.
 
 They are still useful parts of the native Remake. The rule is not "never call
 them." The rule is that imported scenario instructions do not call them
-directly. `ScenarioGodotServices` can reuse proven native helpers behind a
-validated port.
+directly. A domain Godot service, or the shared coordinator behind it, can reuse
+proven native helpers behind a validated port.
 
 ### Why not let extensions override a core opcode?
 
@@ -968,9 +1065,10 @@ proof.
 
 If you remember only one path, remember this one:
 
-**Providence data -> validated bundle -> session and locked rules -> VM ->
-one handler -> one command port -> Godot service -> structured response -> same
-handler -> saveable continuation.**
+**Providence data -> validated bundle -> session and locked rules -> VM -> one
+handler -> one domain mechanic -> one command port -> one domain Godot service
+-> shared native coordinator when needed -> structured response -> same handler
+-> saveable continuation.**
 
 Samuel's architecture put campaign code inside the game and let it drive the
 engine directly. Runtime v2 puts a stable, inspectable contract between authored
