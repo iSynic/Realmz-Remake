@@ -450,6 +450,279 @@ func _branch_from_extra_code(
 	)
 
 
+func _remove_current_action_point() -> Dictionary:
+	runtime.remove_action_point = true
+	runtime.removal_x = runtime.runtime_state.x
+	runtime.removal_y = runtime.runtime_state.y
+	runtime.call_stack.clear()
+	runtime.gosub_active = false
+	runtime.encounter_origins.clear()
+	return _continue()
+
+
+func _finish_action_point(
+	reason: String,
+	consume_codes: bool
+) -> Dictionary:
+	if reason == "action-point-ended" \
+			and not runtime.remove_action_point:
+		var repeated_encounter := _invoke(
+			"_repeat_encounter_after_fallthrough"
+		)
+		if not repeated_encounter.is_empty():
+			return repeated_encounter
+	if runtime.remove_action_point \
+			and not runtime.origin_action_point.is_empty():
+		_persist_removed_action_point(consume_codes)
+	elif consume_codes \
+			and not runtime.origin_action_point.is_empty():
+		_set_origin_action_point_percent(-1)
+	var destination_result := _action_point_destination_result(reason)
+	if not destination_result.is_empty():
+		return destination_result
+	runtime.call("_clear_control_flow")
+	return _invoke("_completed_result", [reason])
+
+
+func _action_point_destination_result(
+	reason: String
+) -> Dictionary:
+	if runtime.origin_action_point.is_empty() \
+			or runtime.suppress_action_point_destination:
+		return {}
+	var state: ClassicRuntimeState = runtime.runtime_state
+	var source_level := int(runtime.origin_action_point.get(
+		"levelIndex",
+		state.level_index
+	))
+	var source_coordinate: Variant = \
+		runtime.origin_action_point.get("coordinate", {})
+	var source_x := state.x
+	var source_y := state.y
+	if source_coordinate is Dictionary:
+		source_x = int(source_coordinate.get("x", source_x))
+		source_y = int(source_coordinate.get("y", source_y))
+	var destination_level := int(
+		runtime.active_action_point_header.get(
+			"landid",
+			source_level
+		)
+	)
+	var destination_x := int(
+		runtime.active_action_point_header.get("targetX", source_x)
+	)
+	var destination_y := int(
+		runtime.active_action_point_header.get("targetY", source_y)
+	)
+	if destination_level == source_level \
+			and destination_x == source_x \
+			and destination_y == source_y:
+		return {}
+	if destination_level == state.level_index \
+			and destination_x == state.x \
+			and destination_y == state.y:
+		return {}
+
+	state.set_position(
+		destination_level,
+		destination_x,
+		destination_y
+	)
+	runtime.pending_teleport = {
+		"recheckDestination": true,
+		"completionReason": reason,
+	}
+	return _invoke("_yield_result", [
+		"teleport",
+		{
+			"levelType": state.level_type,
+			"levelIndex": state.level_index,
+			"x": state.x,
+			"y": state.y,
+			"soundId": 0,
+			"messageId": 0,
+			"message": {},
+			"recheckDestination": true,
+			"actionPointDestination": true,
+		},
+	])
+
+
+func _persist_removed_action_point(consume_codes: bool) -> void:
+	var state: ClassicRuntimeState = runtime.runtime_state
+	var level_kind := str(runtime.origin_action_point.get(
+		"levelType",
+		state.level_type
+	))
+	var record_index := int(
+		runtime.origin_action_point.get("recordIndex", -1)
+	)
+	if consume_codes and record_index >= 0:
+		_set_origin_action_point_percent(-1)
+
+	var destination_level := int(
+		runtime.active_action_point_header.get(
+			"landid",
+			state.level_index
+		)
+	)
+	var destination_x := int(
+		runtime.active_action_point_header.get("targetX", state.x)
+	)
+	var destination_y := int(
+		runtime.active_action_point_header.get("targetY", state.y)
+	)
+	var changes_position := destination_level != state.level_index \
+		or destination_x != state.x \
+		or destination_y != state.y
+	if not changes_position or record_index < 0:
+		return
+
+	state.set_position(
+		destination_level,
+		destination_x,
+		destination_y
+	)
+	var replacement: Dictionary = \
+		runtime.active_action_point_header.duplicate(true)
+	replacement["actions"] = runtime.current_trigger.get(
+		"actions",
+		[]
+	).duplicate(true)
+	replacement["targetX"] = runtime.removal_x
+	replacement["targetY"] = runtime.removal_y
+	replacement["source"] = (
+		"Data DDD" if level_kind == "dungeon" else "Data DD"
+	)
+	replacement["levelType"] = level_kind
+	replacement["levelIndex"] = destination_level
+	replacement["recordIndex"] = record_index
+	replacement["id"] = _map_action_point_id(
+		level_kind,
+		destination_level,
+		record_index
+	)
+	replacement["coordinate"] = _coordinate_from_door_id(
+		int(replacement.get("doorid", 0)),
+		destination_level
+	)
+	replacement["active"] = (
+		int(replacement.get("percent", 0)) >= 1
+		and replacement.get("coordinate") is Dictionary
+	)
+	if consume_codes:
+		state.set_trigger_percent(
+			level_kind,
+			destination_level,
+			record_index,
+			-1
+		)
+	state.set_action_point_override(
+		str(replacement["id"]),
+		replacement
+	)
+
+
+func _set_origin_action_point_percent(percent: int) -> void:
+	if runtime.origin_action_point.is_empty():
+		return
+	var record_index := int(
+		runtime.origin_action_point.get("recordIndex", -1)
+	)
+	if record_index < 0:
+		return
+	var state: ClassicRuntimeState = runtime.runtime_state
+	var level_kind := str(runtime.origin_action_point.get(
+		"levelType",
+		state.level_type
+	))
+	var source_level := int(runtime.origin_action_point.get(
+		"levelIndex",
+		state.level_index
+	))
+	state.set_trigger_percent(
+		level_kind,
+		source_level,
+		record_index,
+		percent
+	)
+	runtime.active_action_point_header["percent"] = percent
+
+
+func _map_action_point_id(
+	level_kind: String,
+	level: int,
+	record_index: int
+) -> String:
+	var source := (
+		"Data DDD" if level_kind == "dungeon" else "Data DD"
+	)
+	return "%s:%d:%d" % [source, level, record_index]
+
+
+func _effective_map_action_point(
+	level_kind: String,
+	level: int,
+	record_index: int
+) -> Dictionary:
+	var trigger_id := _map_action_point_id(
+		level_kind,
+		level,
+		record_index
+	)
+	var action_point: Dictionary = \
+		runtime.runtime_state.get_action_point_override(trigger_id)
+	if action_point.is_empty():
+		action_point = runtime.bundle.get_trigger(trigger_id)
+	return (
+		runtime.runtime_state.get_effective_action_point(action_point)
+		if not action_point.is_empty() else {}
+	)
+
+
+func _coordinate_from_door_id(
+	door_id: int,
+	level: int
+) -> Variant:
+	if door_id <= 0 \
+			or floori(float(door_id) / 10000.0) != level:
+		return null
+	var packed_position := door_id % 10000
+	return {
+		"x": packed_position % 100,
+		"y": floori(float(packed_position) / 100.0),
+	}
+
+
+func _is_map_action_point(
+	action_point: Dictionary
+) -> bool:
+	return str(action_point.get("source", "")) in [
+		"Data DD",
+		"Data DDD",
+	]
+
+
+func _branch_to_extra_action_point(
+	record_id: int,
+	gosub: bool,
+	start_slot: int
+) -> Dictionary:
+	var target: Dictionary = runtime.bundle.get_extra_action_point(
+		record_id
+	)
+	if target.is_empty():
+		return _halt(
+			"Missing Data ED3 action point %d" % record_id
+		)
+	if gosub:
+		var push_result := _invoke("_push_call_frame")
+		if str(push_result.get("status", "")) != "continue":
+			return push_result
+	runtime.call("_set_cursor", target, start_slot)
+	return _continue()
+
+
 func _values(extra_code_id: int) -> Array:
 	return runtime.call("_extra_code_values", extra_code_id)
 
