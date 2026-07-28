@@ -71,6 +71,14 @@ var last_error: String:
 		return str(_classic_executor.last_error) if _classic_executor != null else ""
 
 
+static func normalize_opcode(raw_code: int) -> int:
+	return ClassicOpcodeRuntimeScript.normalize_opcode(raw_code)
+
+
+static func handles_opcode(code: int) -> bool:
+	return ClassicOpcodeRuntimeScript.handles_opcode(code)
+
+
 func configure(registry_or_bundle: Variant, triggers_or_state: Variant) -> void:
 	if registry_or_bundle is ClassicCampaignBundle \
 			and triggers_or_state is ClassicRuntimeState:
@@ -168,6 +176,18 @@ func begin_trigger(trigger_id: String, start_slot := 0, context := {}) -> bool:
 func run_until_yield() -> Dictionary:
 	if _classic_executor == null:
 		return _error("Classic compatibility execution is not configured")
+	if pending_command != null \
+			and pending_command.handler_id.begins_with("core.") \
+			and str(
+				pending_command.action_identity.get("kind", "")
+			) == "classic":
+		var continuation_id := str(pending_command.continuation.get(
+				"_continuationId",
+				""
+			))
+		if continuation_id.is_empty() \
+				or continuation_id == "dungeon-move":
+			return resume_command({})
 	return _classic_result(_run_classic_loop())
 
 
@@ -194,7 +214,9 @@ func _run_classic_loop() -> Dictionary:
 				instruction_value
 			):
 				continue
-			return _classic_error(_unhandled_message(instruction))
+			return _classic_executor.execute_prepared_instruction(
+				instruction_value
+			)
 		var action_identity := _classic_action_identity()
 		if str(instruction.get("kind", "classic")) == "semantic":
 			action_identity["kind"] = "semantic"
@@ -436,7 +458,7 @@ func _classic_result(value: Variant) -> Dictionary:
 	if value is Dictionary:
 		if str(value.get("status", "")) == "yield":
 			_capture_classic_pending(value)
-		else:
+		elif str(value.get("status", "")) != "error":
 			pending_command = null
 		return value
 	return {

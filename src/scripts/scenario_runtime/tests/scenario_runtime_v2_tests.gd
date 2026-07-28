@@ -450,8 +450,8 @@ func _test_classic_dispatcher_noops() -> void:
 	)
 	result = vm.run_until_yield()
 	_expect(
-		result.get("status") == "error",
-		"Classic VM still rejects an opcode without dispatcher no-op evidence"
+		result.get("status") == "unsupported",
+		"Classic VM reports an opcode without dispatcher no-op evidence"
 	)
 
 
@@ -492,6 +492,33 @@ func _test_builtin_extension_execution() -> void:
 	if not bundle.last_error.is_empty():
 		return
 	bundle._build_indexes()
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var interpreter := InterpreterScript.new()
+	interpreter.configure(bundle, state)
+	_expect(
+		interpreter.begin_trigger("scenario-runtime-v2:semantic"),
+		"semantic operation starts through Classic compatibility"
+	)
+	var semantic_yield := interpreter.run_until_yield()
+	_expect(
+		semantic_yield.get("command") == "scenario.runtime-fixture.present",
+		"semantic compatibility execution yields its extension command"
+	)
+	var waiting := interpreter.run_until_yield()
+	_expect(
+		waiting.get("status") == "error"
+			and str(waiting.get("message", "")).contains("waiting"),
+		"semantic extension commands wait for an explicit response"
+	)
+	_expect(
+		interpreter.pending_command != null,
+		"waiting preserves the semantic extension continuation"
+	)
+	_expect(
+		interpreter.resume_command({"status": "ok"}).get("status") == "completed",
+		"semantic extension resumes only after its required response"
+	)
 	var host := HostScript.new()
 	add_child(host)
 	host.configure(RefCounted.new())
