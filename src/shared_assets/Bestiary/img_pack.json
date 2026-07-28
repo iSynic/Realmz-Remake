@@ -714,5 +714,131 @@
       "0_ref_x" : 6,
       "0_ref_y" : 28,
       "size" : "64x64"
+   },
+   "CREA_classic_cicn_386" :
+   {
+      "0_ref_x" : 22,
+      "0_ref_y" : 30,
+      "size" : "32x32"
+   },
+   "CREA_classic_cicn_404" :
+   {
+      "0_ref_x" : 0,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_407" :
+   {
+      "0_ref_x" : 2,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_419" :
+   {
+      "0_ref_x" : 4,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_421" :
+   {
+      "0_ref_x" : 6,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_422" :
+   {
+      "0_ref_x" : 8,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_427" :
+   {
+      "0_ref_x" : 10,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_429" :
+   {
+      "0_ref_x" : 12,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_433" :
+   {
+      "0_ref_x" : 14,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_447" :
+   {
+      "0_ref_x" : 16,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_448" :
+   {
+      "0_ref_x" : 20,
+      "0_ref_y" : 30,
+      "size" : "32x64"
+   },
+   "CREA_classic_cicn_453" :
+   {
+      "0_ref_x" : 21,
+      "0_ref_y" : 30,
+      "size" : "32x64"
+   },
+   "CREA_classic_cicn_459" :
+   {
+      "0_ref_x" : 18,
+      "0_ref_y" : 30,
+      "size" : "64x64"
+   },
+   "CREA_classic_cicn_469" :
+   {
+      "0_ref_x" : 23,
+      "0_ref_y" : 30,
+      "size" : "32x32"
+   },
+   "CREA_classic_cicn_472" :
+   {
+      "0_ref_x" : 24,
+      "0_ref_y" : 30,
+      "size" : "32x32"
+   },
+   "CREA_classic_cicn_481" :
+   {
+      "0_ref_x" : 25,
+      "0_ref_y" : 30,
+      "size" : "32x32"
+   },
+   "CREA_classic_cicn_483" :
+   {
+      "0_ref_x" : 26,
+      "0_ref_y" : 30,
+      "size" : "32x32"
+   },
+   "CREA_classic_cicn_485" :
+   {
+      "0_ref_x" : 30,
+      "0_ref_y" : 30,
+      "size" : "64x32"
+   },
+   "CREA_classic_cicn_491" :
+   {
+      "0_ref_x" : 27,
+      "0_ref_y" : 30,
+      "size" : "32x32"
+   },
+   "CREA_classic_cicn_493" :
+   {
+      "0_ref_x" : 28,
+      "0_ref_y" : 30,
+      "size" : "32x32"
+   },
+   "CREA_classic_cicn_503" :
+   {
+      "0_ref_x" : 29,
+      "0_ref_y" : 30,
+      "size" : "32x32"
    }
 }

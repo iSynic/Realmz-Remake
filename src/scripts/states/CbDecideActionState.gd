@@ -10,6 +10,9 @@ const PermanentFleeingTraitScript = preload(
 const ClassicPlayerAutoCombatScript = preload(
 	"res://scripts/classic_runtime/classic_player_auto_combat.gd"
 )
+const ClassicMonsterDecisionScript = preload(
+	"res://scripts/classic_runtime/classic_monster_decision.gd"
+)
 const CLASSIC_BATTLE_MINIMUM_OFFSET := 5
 const CLASSIC_BATTLE_MAXIMUM_LOCAL_COORDINATE := 7
 
@@ -711,7 +714,9 @@ func do_ai_creature_action(cur_act_crea : Creature) :
 		var _aoe_shape : Array = decision_array[4]
 		var item: Variant = decision_array[5]
 		var _main_tpos : Vector2i = decision_array[6]
-		var tg_tiles : Array = decision_array[7]
+		var tg_tiles := ClassicMonsterDecisionScript.spell_target_tiles(
+			decision_array
+		)
 		var _tg_creas : Array = decision_array[8]
 		if (
 			decision_array.size() > 9

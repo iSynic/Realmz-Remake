@@ -52,6 +52,9 @@ const SoundResolutionScript = preload(
 const MonsterIconResolutionScript = preload(
 	"res://scripts/classic_runtime/classic_monster_icon_resolution.gd"
 )
+const StockMonsterIconCatalogScript = preload(
+	"res://scripts/classic_runtime/classic_stock_monster_icon_catalog.gd"
+)
 const KnownDataCorrectionsScript = preload(
 	"res://scripts/classic_runtime/classic_known_data_corrections.gd"
 )
@@ -4761,6 +4764,9 @@ func _test_builtin_shared_asset_tilesets() -> void:
 	var residual_attack_sound_fallbacks: Array[String] = []
 	var icon_resolution_counts: Dictionary = {}
 	var invalid_icon_resolutions: Array[String] = []
+	var stock_icon_fallback_offenders: Array[String] = []
+	var active_icon_fallback_offenders: Array[String] = []
+	var inactive_icon_fallbacks: Array[String] = []
 	for campaign_name: String in DirAccess.get_directories_at(campaigns_root):
 		if (
 			campaign_name.ends_with(" (Classic)")
@@ -4812,6 +4818,24 @@ func _test_builtin_shared_asset_tilesets() -> void:
 				var has_icon_fallback: bool = fallbacks is Array and fallbacks.has(
 					"iconId:%s" % icon_status
 				)
+				if has_icon_fallback:
+					if bool(monster.get("classicRecord", {}).get("notOnMenu", false)):
+						inactive_icon_fallbacks.append(identity)
+					else:
+						active_icon_fallback_offenders.append(identity)
+				if icon_status == "stock-family-jewels-pair":
+					var base_icon_id := int(
+						icon_resolution.get("baseIconId", 0)
+					)
+					if (
+						runtime_image_key.is_empty()
+						or runtime_image_key
+							!= StockMonsterIconCatalogScript.image_key(
+								base_icon_id
+							)
+						or has_icon_fallback
+					):
+						stock_icon_fallback_offenders.append(identity)
 				if (
 					not (materialization is Dictionary)
 					or int(materialization.get("version", 0))
@@ -4953,7 +4977,7 @@ func _test_builtin_shared_asset_tilesets() -> void:
 		native_resources.free()
 	_expect_equal(
 		generated_monster_count,
-		1878,
+		1952,
 		"built-in corpus checks every generated Classic monster"
 	)
 	_expect_equal(
@@ -4980,11 +5004,46 @@ func _test_builtin_shared_asset_tilesets() -> void:
 		"every built-in generated monster retains current icon-pair provenance"
 	)
 	_expect_equal(
+		stock_icon_fallback_offenders,
+		[],
+		"every built-in stock monster uses its verified Family Jewels sprite"
+	)
+	_expect_equal(
+		active_icon_fallback_offenders,
+		[],
+		"every menu-visible built-in monster resolves source-backed icon art"
+	)
+	_expect_equal(
+		inactive_icon_fallbacks,
+		["White Dragon (Classic):Classic Monster 140"],
+		"only White Dragon's hidden unreferenced Zaphres record lacks source icon art"
+	)
+	var white_dragon_encounters: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(
+			campaigns_root.path_join(
+				"White Dragon (Classic)/classic/encounters.json"
+			)
+		)
+	)
+	var zaphres_battles: Array = []
+	if white_dragon_encounters is Dictionary:
+		for battle_value: Variant in white_dragon_encounters.get("battles", []):
+			if (
+				battle_value is Dictionary
+				and battle_value.get("grid", []).has(140)
+			):
+				zaphres_battles.append(int(battle_value.get("id", -1)))
+	_expect_equal(
+		zaphres_battles,
+		[],
+		"White Dragon never places its hidden Zaphres record in a battle"
+	)
+	_expect_equal(
 		icon_resolution_counts,
 		{
-			"campaign-runtime-media": 1060,
-			"classic-resource-pair-runtime-media-incomplete": 5,
-			"stock-family-jewels-pair": 812,
+			"campaign-runtime-media": 1061,
+			"classic-resource-pair-runtime-media-incomplete": 4,
+			"stock-family-jewels-pair": 886,
 			"unresolved-external-classic-resource": 1,
 		},
 		"built-in monster icon inventory classifies every generated definition"
@@ -7835,10 +7894,204 @@ func _test_classic_bestiary_materializer() -> void:
 			"res://shared_assets/Bestiary/img_pack.json"
 		)
 	)
+	var expected_stock_icon_ids: Array = []
+	expected_stock_icon_ids.append_array(range(384, 462))
+	expected_stock_icon_ids.append_array(range(464, 471))
+	expected_stock_icon_ids.append_array(range(472, 474))
+	expected_stock_icon_ids.append(475)
+	expected_stock_icon_ids.append(478)
+	expected_stock_icon_ids.append_array(range(481, 484))
+	expected_stock_icon_ids.append_array(range(485, 497))
+	expected_stock_icon_ids.append_array(range(500, 517))
+	_expect_equal(
+		StockMonsterIconCatalogScript.supported_icon_ids(),
+		expected_stock_icon_ids,
+		"the stock icon catalog covers every valid monster-facing Family Jewels pair"
+	)
+	var shared_atlas_resource: Variant = load(
+		"res://shared_assets/Bestiary/textureAtlas.png"
+	)
+	var shared_atlas := Image.new()
+	if shared_atlas_resource is Texture2D:
+		shared_atlas = shared_atlas_resource.get_image()
+	elif shared_atlas_resource is Image:
+		shared_atlas = shared_atlas_resource
+	_expect(
+		not shared_atlas.is_empty(),
+		"the shared monster atlas remains readable"
+	)
+	var missing_stock_image_keys: Array[String] = []
+	var invalid_stock_image_rects: Array[String] = []
+	for icon_id: int in expected_stock_icon_ids:
+		var image_keys: Array = StockMonsterIconCatalogScript.image_aliases(
+			icon_id
+		)
+		for image_key_value: Variant in image_keys:
+			var image_key := str(image_key_value)
+			var image_record: Variant = shared_image_pack.get(image_key)
+			if not (image_record is Dictionary):
+				missing_stock_image_keys.append("%d:%s" % [icon_id, image_key])
+				continue
+			var size_parts := str(image_record.get("size", "")).split("x")
+			if size_parts.size() != 2:
+				invalid_stock_image_rects.append(
+					"%d:%s:size" % [icon_id, image_key]
+				)
+				continue
+			var image_rect := Rect2i(
+				int(image_record.get("0_ref_x", -1)) * 32,
+				int(image_record.get("0_ref_y", -1)) * 32,
+				int(size_parts[0]),
+				int(size_parts[1])
+			)
+			if (
+				image_rect.position.x < 0
+				or image_rect.position.y < 0
+				or image_rect.end.x > shared_atlas.get_width()
+				or image_rect.end.y > shared_atlas.get_height()
+				or not shared_atlas.get_region(image_rect).get_used_rect().has_area()
+			):
+				invalid_stock_image_rects.append(
+					"%d:%s:bounds" % [icon_id, image_key]
+				)
+	_expect_equal(
+		missing_stock_image_keys,
+		[],
+		"every verified stock icon and exact alias exists in the shared atlas index"
+	)
+	_expect_equal(
+		invalid_stock_image_rects,
+		[],
+		"every verified stock icon points at visible atlas pixels"
+	)
 	_expect_equal(
 		shared_image_pack.get("CREA_classic_cicn_509"),
 		{"0_ref_x": 19.0, "0_ref_y": 0.0, "size": "64x32"},
 		"the shared atlas exposes the red stock cicn 509 worm"
+	)
+	_expect_equal(
+		shared_image_pack.get("CREA_hell_bat"),
+		{"0_ref_x": 11.0, "0_ref_y": 26.0, "size": "64x32"},
+		"the shared atlas exposes the stock cicn 451 bat"
+	)
+	var bat_record := native_reuse_record.duplicate(true)
+	bat_record["id"] = 61
+	bat_record["displayName"] = "Vampire Bat"
+	bat_record["iconId"] = 451
+	var bat_monster: Dictionary = materializer._native_monster(
+		bat_record,
+		[],
+		{},
+		[],
+		{},
+		{},
+		{},
+		MonsterIconResolutionScript.resolve(451)
+	)
+	_expect_equal(
+		bat_monster.get("data", {}).get("image"),
+		"CREA_hell_bat",
+		"stock cicn 451 monsters use the shared bat art"
+	)
+	_expect(
+		not bat_monster.get("classicMaterialization", {}).get(
+			"fidelityFallbacks", []
+		).has("iconId:stock-family-jewels-pair"),
+		"resolved stock bat art is no longer reported as a placeholder"
+	)
+	_expect(
+		materializer._generated_monster_needs_refresh(
+			{"data": {"image": "CREA_humanmage"}},
+			MonsterIconResolutionScript.resolve(451)
+		),
+		"an existing stock bat fallback is selected for targeted refresh"
+	)
+	_expect(
+		not materializer._generated_monster_needs_refresh(
+			{"data": {"image": "CREA_hell_bat"}},
+			MonsterIconResolutionScript.resolve(451)
+		),
+		"an existing resolved stock bat remains byte-stable"
+	)
+	var human_mage_record := native_reuse_record.duplicate(true)
+	human_mage_record["id"] = 150
+	human_mage_record["displayName"] = "Evil Mage"
+	human_mage_record["iconId"] = 466
+	var human_mage_monster: Dictionary = materializer._native_monster(
+		human_mage_record,
+		[],
+		{},
+		[],
+		{},
+		{},
+		{},
+		MonsterIconResolutionScript.resolve(466)
+	)
+	_expect_equal(
+		human_mage_monster.get("data", {}).get("image"),
+		"CREA_humanmage",
+		"stock cicn 466 intentionally retains the human mage art"
+	)
+	_expect(
+		not human_mage_monster.get("classicMaterialization", {}).get(
+			"fidelityFallbacks", []
+		).has("iconId:stock-family-jewels-pair"),
+		"the real stock human mage is distinguished from an icon fallback"
+	)
+	_expect(
+		materializer._generated_monster_needs_refresh(
+			{
+				"data": {"image": "CREA_humanmage"},
+				"classicMaterialization": {
+					"fidelityFallbacks": ["iconId:stock-family-jewels-pair"],
+					"iconResolution": MonsterIconResolutionScript.resolve(466),
+				},
+			},
+			MonsterIconResolutionScript.resolve(466)
+		),
+		"a stale fallback record refreshes even when its pixels match the real stock human mage"
+	)
+	var mixed_icon_record := native_reuse_record.duplicate(true)
+	mixed_icon_record["id"] = 95
+	mixed_icon_record["displayName"] = "Runic Legionnaire"
+	mixed_icon_record["iconId"] = 486
+	var mixed_icon_resolution := {
+		"baseIconId": 486,
+		"pairedIconId": 794,
+		"baseResourceSource": "The Family Jewels",
+		"pairedResourceSource": "campaign-and-family-jewels",
+		"baseRuntimeMediaPresent": false,
+		"pairedRuntimeMediaPresent": true,
+		"status": "classic-resource-pair-runtime-media-incomplete",
+		"source": "loaded Classic resource chain",
+	}
+	var mixed_icon_monster: Dictionary = materializer._native_monster(
+		mixed_icon_record,
+		[],
+		{},
+		[],
+		{},
+		{},
+		{},
+		mixed_icon_resolution
+	)
+	_expect_equal(
+		mixed_icon_monster.get("data", {}).get("image"),
+		"CREA_royal_guard",
+		"a stock base icon remains usable when the scenario supplies only its facing image"
+	)
+	_expect(
+		not mixed_icon_monster.get("classicMaterialization", {}).get(
+			"fidelityFallbacks", []
+		).has("iconId:classic-resource-pair-runtime-media-incomplete"),
+		"a mixed stock and campaign icon pair no longer falls back to the human mage"
+	)
+	_expect(
+		materializer._generated_monster_needs_refresh(
+			{"data": {"image": "CREA_humanmage"}},
+			mixed_icon_resolution
+		),
+		"an existing mixed-pair human mage fallback is selected for refresh"
 	)
 	var carrion_record := native_reuse_record.duplicate(true)
 	carrion_record["id"] = 102
@@ -8025,6 +8278,100 @@ func _test_classic_bestiary_materializer() -> void:
 			"shipped Mithril Vault uses the exact scenario cicn 409 pixels"
 		)
 	mithril_resources.free()
+	var half_truth_root := ProjectSettings.globalize_path(
+		"res://Campaigns/Half Truth (Classic)"
+	)
+	var half_truth_bundle = BundleScript.new()
+	_expect(
+		half_truth_bundle.load_from_directory(half_truth_root),
+		"the shipped Half Truth bundle loads for mixed stock and campaign icon resolution"
+	)
+	var half_truth_resources = NativeResourcesScript.new()
+	half_truth_resources.load_bestiary_resources("res://shared_assets/Bestiary/")
+	half_truth_resources.load_bestiary_resources(
+		half_truth_root.path_join("Bestiary") + "/"
+	)
+	var half_truth_runic_key: String = mithril_adapter.resolve_classic_monster_bestiary_name(
+		95,
+		half_truth_bundle.get_monster(95),
+		half_truth_resources.crea_book
+	)
+	var half_truth_runic: Dictionary = half_truth_resources.crea_book.get(
+		half_truth_runic_key,
+		{}
+	)
+	_expect_equal(
+		half_truth_runic_key,
+		"Classic Monster 95",
+		"shipped Half Truth selects its generated Runic Legionnaire"
+	)
+	_expect_equal(
+		half_truth_runic.get("classicMaterialization", {}).get(
+			"iconResolution", {}
+		).get("runtimeImageKey"),
+		"CREA_royal_guard",
+		"shipped Half Truth resolves its stock base and scenario facing icon pair"
+	)
+	_expect(
+		not half_truth_runic.get("classicMaterialization", {}).get(
+			"fidelityFallbacks", []
+		).has("iconId:classic-resource-pair-runtime-media-incomplete"),
+		"shipped Half Truth no longer reports Runic Legionnaire as an icon fallback"
+	)
+	half_truth_resources.free()
+	var twin_sands_root := ProjectSettings.globalize_path(
+		"res://Campaigns/Twin Sands of Time (Classic)"
+	)
+	var twin_sands_bundle = BundleScript.new()
+	_expect(
+		twin_sands_bundle.load_from_directory(twin_sands_root),
+		"the shipped Twin Sands bundle loads with recovered scenario icon media"
+	)
+	var twin_sands_resources = NativeResourcesScript.new()
+	twin_sands_resources.load_bestiary_resources("res://shared_assets/Bestiary/")
+	twin_sands_resources.load_bestiary_resources(
+		twin_sands_root.path_join("Bestiary") + "/"
+	)
+	var twin_sands_raolph_key: String = mithril_adapter.resolve_classic_monster_bestiary_name(
+		94,
+		twin_sands_bundle.get_monster(94),
+		twin_sands_resources.crea_book
+	)
+	var twin_sands_raolph_texture: Variant = twin_sands_resources.crea_book.get(
+		twin_sands_raolph_key,
+		{}
+	).get("data", {}).get("image")
+	var twin_sands_icon_record: Dictionary = twin_sands_bundle.documents.get(
+		"assets", {}
+	).get("catalog", {}).get("icons", []).filter(
+		func(icon: Variant) -> bool:
+			return icon is Dictionary and int(icon.get("resourceId", 0)) == 452
+	).front()
+	var twin_sands_raolph_source := Image.new()
+	twin_sands_raolph_source.load(
+		twin_sands_root.path_join(
+			str(twin_sands_icon_record.get("runtimeMedia", {}).get("path", ""))
+		)
+	)
+	_expect_equal(
+		twin_sands_raolph_key,
+		"Classic Monster 94",
+		"shipped Twin Sands selects its generated Raolph"
+	)
+	_expect(
+		twin_sands_raolph_texture is Texture2D,
+		"shipped Twin Sands Raolph resolves to a native texture"
+	)
+	if twin_sands_raolph_texture is Texture2D:
+		var twin_sands_raolph_atlas_image: Image = (
+			twin_sands_raolph_texture.get_image()
+		)
+		_expect_equal(
+			twin_sands_raolph_atlas_image.get_data(),
+			twin_sands_raolph_source.get_data(),
+			"shipped Twin Sands uses the exact scenario cicn 452 pixels"
+		)
+	twin_sands_resources.free()
 	var campaign_icon_bundle = BundleScript.new()
 	campaign_icon_bundle.load_from_directory(PROVIDENCE_AUTHORITATIVE_FIXTURE)
 	_clear_producer_monster_equipment(campaign_icon_bundle)
@@ -8920,6 +9267,29 @@ func _test_classic_monster_decision() -> void:
 	_expect(
 		not MonsterDecisionScript.should_retry_cast(100, false, false, false, 2),
 		"Classic stops after its second failed spell pass"
+	)
+	var target_position := Vector2i(14, 9)
+	var affected_area := [
+		target_position,
+		Vector2i(13, 9),
+		Vector2i(15, 9),
+		Vector2i(14, 8),
+		Vector2i(14, 10),
+	]
+	_expect_equal(
+		MonsterDecisionScript.spell_target_tiles([
+			1,
+			null,
+			4,
+			target_position,
+			[],
+			null,
+			target_position,
+			affected_area,
+			[],
+		]),
+		[target_position],
+		"one AI spell decision queues one cast at its primary target"
 	)
 	var hostile_caster := ClassicEffectTarget.new(0)
 	var effect_target := ClassicEffectTarget.new(1)

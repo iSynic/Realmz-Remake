@@ -34,6 +34,9 @@ const MonsterGenerationScript = preload(
 const MonsterIconResolutionScript = preload(
 	"res://scripts/classic_runtime/classic_monster_icon_resolution.gd"
 )
+const StockMonsterIconCatalogScript = preload(
+	"res://scripts/classic_runtime/classic_stock_monster_icon_catalog.gd"
+)
 
 const BESTIARY_BOOK_PATH := "Bestiary/stuff_book.json"
 const BESTIARY_IMAGE_BOOK_PATH := "Bestiary/img_pack.json"
@@ -45,14 +48,6 @@ const SHARED_SPELL_DIRECTORY := "res://shared_assets/spells/"
 const TEMPORARY_SPELL_SCREEN_TRAIT := "t_classic_spell_screen.gd"
 const PERMANENT_ANIMATED_TRAIT := "p_classic_animated.gd"
 const DEFAULT_IMAGE := "CREA_humanmage"
-const STOCK_SHARED_IMAGE_BY_ICON_ID := {
-	398: "CREA_carrion_slug",
-	509: "CREA_classic_cicn_509",
-}
-const STOCK_SHARED_IMAGE_ALIASES_BY_ICON_ID := {
-	398: ["CREA_carrion_slug", "CREA_larva", "CREA_slime_worm"],
-	509: ["CREA_classic_cicn_509"],
-}
 const TYPE_TAGS := [
 	"Magic Using",
 	"Undead",
@@ -201,7 +196,13 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 					if existing_materialization is Dictionary
 					else 0
 				)
-				if existing_version < MATERIALIZATION_VERSION:
+				if (
+					existing_version < MATERIALIZATION_VERSION
+					or _generated_monster_needs_refresh(
+						existing_entry,
+						icon_resolution
+					)
+				):
 					bestiary_book[existing_key] = _native_monster(
 						record,
 						descriptions,
@@ -994,6 +995,37 @@ func _book_monster_key_by_id(bestiary_book: Dictionary, monster_id: int) -> Vari
 	return null
 
 
+func _generated_monster_needs_refresh(
+	existing_entry: Dictionary,
+	icon_resolution: Dictionary
+) -> bool:
+	var resolved_image_key := str(icon_resolution.get("runtimeImageKey", ""))
+	if resolved_image_key.is_empty():
+		resolved_image_key = _stock_shared_image_key(icon_resolution)
+	if resolved_image_key.is_empty():
+		return false
+	var data: Variant = existing_entry.get("data", {})
+	if data is Dictionary and str(data.get("image", "")) != resolved_image_key:
+		return true
+	var materialization: Variant = existing_entry.get("classicMaterialization")
+	if not (materialization is Dictionary):
+		return false
+	var existing_resolution: Variant = materialization.get("iconResolution", {})
+	if (
+		not (existing_resolution is Dictionary)
+		or str(existing_resolution.get("runtimeImageKey", ""))
+			!= resolved_image_key
+	):
+		return true
+	var fallbacks: Variant = materialization.get("fidelityFallbacks", [])
+	return (
+		fallbacks is Array
+		and fallbacks.has(
+			"iconId:%s" % str(icon_resolution.get("status", "unresolved"))
+		)
+	)
+
+
 func _book_has_matching_native_monster(
 	bestiary_book: Dictionary,
 	record: Dictionary,
@@ -1043,21 +1075,20 @@ func _native_image_matches_icon(
 	if image_key.is_empty():
 		return true
 	var base_icon_id := int(icon_resolution.get("baseIconId", 0))
-	var aliases: Variant = STOCK_SHARED_IMAGE_ALIASES_BY_ICON_ID.get(
-		base_icon_id,
-		[image_key]
-	)
+	var aliases: Variant = StockMonsterIconCatalogScript.image_aliases(base_icon_id)
 	return aliases is Array and aliases.has(str(data.get("image", "")))
 
 
 func _stock_shared_image_key(icon_resolution: Dictionary) -> String:
-	if str(icon_resolution.get("status", "")) != "stock-family-jewels-pair":
+	var status := str(icon_resolution.get("status", ""))
+	var base_source := str(icon_resolution.get("baseResourceSource", ""))
+	if (
+		status != "stock-family-jewels-pair"
+		and base_source != "The Family Jewels"
+	):
 		return ""
-	return str(
-		STOCK_SHARED_IMAGE_BY_ICON_ID.get(
-			int(icon_resolution.get("baseIconId", 0)),
-			""
-		)
+	return StockMonsterIconCatalogScript.image_key(
+		int(icon_resolution.get("baseIconId", 0))
 	)
 
 

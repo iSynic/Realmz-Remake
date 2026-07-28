@@ -48,6 +48,12 @@ static func should_retry_cast(
 	)
 
 
+static func spell_target_tiles(decision: Array) -> Array:
+	if decision.size() <= 6:
+		return []
+	return [Vector2i(decision[6])]
+
+
 static func are_opponents(actor: Variant, target: Variant) -> bool:
 	var actor_faction: Variant = _faction(actor)
 	var target_faction: Variant = _faction(target)
