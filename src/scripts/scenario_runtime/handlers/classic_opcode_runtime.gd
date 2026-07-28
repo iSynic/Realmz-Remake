@@ -1,9 +1,6 @@
 class_name ClassicOpcodeRuntime
 extends RefCounted
 
-const CoreHandlerCatalogScript = preload(
-	"res://scripts/scenario_runtime/handlers/core_handler_catalog.gd"
-)
 const CombatOpcodeRuntimeScript = preload(
 	"res://scripts/scenario_runtime/handlers/classic_combat_opcode_runtime.gd"
 )
@@ -31,7 +28,6 @@ const ClassicExecutionStateScript = preload(
 const RulesStateOpcodeRuntimeScript = preload(
 	"res://scripts/scenario_runtime/handlers/classic_rules_state_opcode_runtime.gd"
 )
-const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
 const HANDLED_OPCODES := [
 	-23, -14,
@@ -214,9 +210,7 @@ var loaded_complex_encounter_id: int:
 	set(value):
 		_execution_state.loaded_complex_encounter_id = value
 var percent_roll_provider: Callable
-var semantic_operation_executor: Callable
 var scenario_run_delegate: Callable
-var compatibility_instruction_registry: ScenarioInstructionRegistry
 var trace: Array:
 	get:
 		return _execution_state.trace
@@ -274,14 +268,6 @@ func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeStat
 	if _rules_state_opcode_runtime == null:
 		_rules_state_opcode_runtime = RulesStateOpcodeRuntimeScript.new()
 		_rules_state_opcode_runtime.configure(self)
-	if compatibility_instruction_registry == null:
-		compatibility_instruction_registry = ScenarioInstructionRegistry.new()
-		if not CoreHandlerCatalogScript.register_all(
-			compatibility_instruction_registry
-		):
-			last_error = compatibility_instruction_registry.last_error
-			halted = true
-			return
 	loaded_simple_encounter_id = -1
 	loaded_complex_encounter_id = -1
 	reset_execution()
@@ -309,10 +295,6 @@ func classic_handler_runtime(handler_id: String) -> Object:
 
 func set_percent_roll_provider(provider: Callable) -> void:
 	percent_roll_provider = provider
-
-
-func set_semantic_operation_executor(executor: Callable) -> void:
-	semantic_operation_executor = executor
 
 
 func set_scenario_run_delegate(delegate: Callable) -> void:
@@ -403,77 +385,9 @@ func run_until_yield() -> Dictionary:
 		return _halt_with_error(
 			"Scenario VM returned an invalid Classic execution result"
 		)
-	return run_compatibility_loop()
-
-
-func run_compatibility_loop() -> Dictionary:
-	if halted:
-		return _error_result(last_error if not last_error.is_empty() else "Interpreter is halted")
-	if not pending_choice.is_empty():
-		return _error_result("A classic choice must be resumed before execution can continue")
-	if not pending_encounter.is_empty():
-		return _error_result("A classic encounter must be resumed before execution can continue")
-	if not pending_battle.is_empty():
-		return _error_result("A classic battle outcome must be resumed before execution can continue")
-	if not pending_selective_battle.is_empty():
-		return _error_result("A classic selective battle must be resumed before execution can continue")
-	if not pending_item_check.is_empty():
-		return _error_result("A classic item check must be resumed before execution can continue")
-	if not pending_wealth_payment.is_empty():
-		return _error_result("A classic wealth payment must be resumed before execution can continue")
-	if not pending_party_condition_check.is_empty():
-		return _error_result("A classic party-condition check must be resumed before execution can continue")
-	if not pending_character_ability_check.is_empty():
-		return _error_result(
-			"A classic character-ability check must be resumed before execution can continue"
-		)
-	if not pending_misc_branch.is_empty():
-		return _error_result("A classic party identity check must be resumed before execution can continue")
-	if not pending_ally_check.is_empty():
-		return _error_result("A classic ally check must be resumed before execution can continue")
-	if not pending_combat_monster_check.is_empty():
-		return _error_result("A classic combat-monster check must be resumed before execution can continue")
-	if not pending_combat_revival.is_empty():
-		return _error_result("A classic combat revival must be resumed before execution can continue")
-	if not pending_battle_round_macro.is_empty():
-		return _error_result("A classic battle-round macro must be resumed before execution can continue")
-	if not pending_random_branch.is_empty():
-		return _error_result("A classic random branch presentation must finish before execution can continue")
-	if not pending_time_mutation.is_empty():
-		return _error_result("A classic time mutation must finish before execution can continue")
-	if not pending_exploration_status.is_empty():
-		return _error_result(
-			"A classic exploration-status action must finish before execution can continue"
-		)
-	if not pending_teleport.is_empty():
-		return _error_result("A classic teleport must finish before execution can continue")
-
-	for _step: int in MAX_INTERNAL_STEPS:
-		if current_trigger.is_empty():
-			return _completed_result("action-point-ended")
-
-		var actions: Variant = current_trigger.get("actions", [])
-		if not (actions is Array):
-			return _halt_with_error("Trigger %s has no action array" % _current_trigger_id())
-		if current_action_index >= actions.size():
-			return _finish_action_point("action-point-ended", true)
-
-		var action: Variant = actions[current_action_index]
-		current_action_index += 1
-		if not (action is Dictionary):
-			return _halt_with_error("Trigger %s contains a non-object action" % _current_trigger_id())
-		_update_gosub_state(action)
-		trace.append({
-			"triggerId": _current_trigger_id(),
-			"slot": int(action.get("slot", -1)),
-			"code": int(action.get("code", 0)),
-		})
-		var result := _execute_action(action)
-		if str(result.get("status", "")) == "continue":
-			continue
-		return result
-
-	return _halt_with_error("Classic action execution exceeded %d internal steps" % MAX_INTERNAL_STEPS)
+	return _halt_with_error(
+		"Classic opcode execution requires ScenarioInterpreter"
+	)
 
 
 func take_next_instruction() -> Dictionary:
@@ -508,8 +422,27 @@ func take_next_instruction() -> Dictionary:
 	}
 
 
-func execute_prepared_instruction(action: Dictionary) -> Dictionary:
-	return _execute_action(action)
+func unsupported_instruction_result(action: Dictionary) -> Dictionary:
+	var code := normalize_opcode(int(
+		action.get("rawCode", action.get("code", 0))
+	))
+	halted = true
+	last_error = (
+		"Unsupported Classic opcode %d at %s record %d slot %d"
+		% [
+			code,
+			str(current_trigger.get("source", "unknown source")),
+			int(current_trigger.get("recordIndex", -1)),
+			int(action.get("slot", -1)),
+		]
+	)
+	return {
+		"status": "unsupported",
+		"message": last_error,
+		"opcode": code,
+		"action": action,
+		"triggerId": _current_trigger_id(),
+	}
 
 
 func is_prepared_instruction_dispatcher_noop(action: Dictionary) -> bool:
@@ -599,60 +532,6 @@ func resume_time_mutation(response: Dictionary) -> Dictionary:
 
 func resume_exploration_status(response: Dictionary) -> Dictionary:
 	return _map_time_opcode_runtime.resume_exploration_status(response)
-
-
-func _execute_action(action: Dictionary) -> Dictionary:
-	if str(action.get("kind", "classic")) == "semantic":
-		if not semantic_operation_executor.is_valid():
-			return _halt_with_error(
-				"Semantic scenario operation '%s' has no registered executor"
-				% action.get("operation", "")
-			)
-		var semantic_result: Variant = semantic_operation_executor.call(action)
-		if semantic_result is Dictionary:
-			return semantic_result
-		return _halt_with_error(
-			"Semantic scenario operation '%s' returned an invalid result"
-			% action.get("operation", "")
-		)
-	if compatibility_instruction_registry == null:
-		return _halt_with_error("Classic instruction registry is unavailable")
-	var instruction := action.duplicate(true)
-	instruction["kind"] = "classic"
-	var raw_code := int(
-		instruction.get("rawCode", instruction.get("code", 0))
-	)
-	instruction["code"] = normalize_opcode(raw_code)
-	var handler := compatibility_instruction_registry.resolve(instruction)
-	if handler != null and handler.has_method("execute_on_runtime"):
-		var handler_result: Variant = handler.call(
-			"execute_on_runtime",
-			instruction,
-			self
-		)
-		if handler_result is Dictionary:
-			return handler_result
-		return _halt_with_error(
-			"Classic handler '%s' returned invalid opcode state"
-			% handler.handler_id()
-		)
-	var code := int(instruction.get("code", 0))
-	if bundle.is_dispatcher_noop(current_trigger, action):
-		return _continue_result()
-	halted = true
-	last_error = "Unsupported Classic opcode %d at %s record %d slot %d" % [
-		code,
-		str(current_trigger.get("source", "unknown source")),
-		int(current_trigger.get("recordIndex", -1)),
-		int(action.get("slot", -1)),
-	]
-	return {
-		"status": "unsupported",
-		"message": last_error,
-		"opcode": code,
-		"action": action,
-		"triggerId": _current_trigger_id(),
-	}
 
 
 func _execute_combat_monster_check(monster_name_id: int) -> Dictionary:

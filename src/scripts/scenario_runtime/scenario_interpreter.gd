@@ -145,9 +145,6 @@ func _configure_classic_compatibility(
 	_classic_executor.set_scenario_run_delegate(
 		Callable(self, "_run_classic_loop")
 	)
-	_classic_executor.set_semantic_operation_executor(
-		Callable(self, "_execute_classic_semantic_action")
-	)
 	_sync_classic_observability()
 
 
@@ -214,7 +211,7 @@ func _run_classic_loop() -> Dictionary:
 				instruction_value
 			):
 				continue
-			return _classic_executor.execute_prepared_instruction(
+			return _classic_executor.unsupported_instruction_result(
 				instruction_value
 			)
 		var action_identity := _classic_action_identity()
