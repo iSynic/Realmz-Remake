@@ -55,6 +55,7 @@ func _ready() -> void:
 	_test_handler_registry()
 	_test_command_ports()
 	_test_scenario_vm()
+	_test_classic_execution_state_ownership()
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
 	_test_old_save_rejection()
@@ -324,6 +325,80 @@ func _test_scenario_vm() -> void:
 	)
 	var resumed := vm.resume({"status": "ok"}, RefCounted.new())
 	_expect(resumed.get("status") == "complete", "VM resumes through its owning handler")
+
+
+func _test_classic_execution_state_ownership() -> void:
+	var bundle := BundleScript.new()
+	bundle.manifest = {
+		"start": {
+			"levelType": "land",
+			"levelIndex": 0,
+			"x": 0,
+			"y": 0,
+		},
+	}
+	var trigger := {
+		"id": "Data ED3:macro:12",
+		"source": "Data ED3",
+		"recordIndex": 12,
+		"actions": [],
+	}
+	var next_trigger := {
+		"id": "Data ED3:macro:13",
+		"source": "Data ED3",
+		"recordIndex": 13,
+		"actions": [],
+	}
+	bundle.triggers_by_id[trigger["id"]] = trigger
+	bundle.triggers_by_id[next_trigger["id"]] = next_trigger
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var vm := InterpreterScript.new()
+	vm.configure(bundle, state)
+	_expect(
+		vm.classic_execution_state != null,
+		"Classic VM owns its execution state"
+	)
+	_expect(
+		vm.begin_trigger(trigger["id"]),
+		"Classic VM starts an interpreter-owned execution state"
+	)
+	_expect(
+		vm.classic_execution_state.current_trigger.get("id") \
+			== trigger["id"],
+		"Classic cursor is stored on the interpreter-owned state"
+	)
+	var saved := vm.make_execution_snapshot()
+	_expect(
+		saved.get("status") == "ok",
+		"Interpreter-owned Classic state produces a save snapshot"
+	)
+	var restored_state := ClassicRuntimeStateScript.new()
+	restored_state.configure_from_bundle(bundle)
+	var restored_vm := InterpreterScript.new()
+	restored_vm.configure(bundle, restored_state)
+	_expect(
+		restored_vm.restore_execution_snapshot(
+			saved.get("snapshot", {})
+		).get("status") == "ok",
+		"Interpreter-owned Classic state restores a save snapshot"
+	)
+	_expect(
+		restored_vm.classic_execution_state.current_trigger.get("id") \
+			== trigger["id"],
+		"Restored Classic cursor remains interpreter-owned"
+	)
+	restored_vm.classic_execution_state.loaded_simple_encounter_id = 41
+	restored_vm.classic_execution_state.loaded_complex_encounter_id = 42
+	_expect(
+		restored_vm.begin_trigger(next_trigger["id"]),
+		"Classic VM starts a later action point"
+	)
+	_expect(
+		restored_vm.classic_execution_state.loaded_simple_encounter_id == 41
+			and restored_vm.classic_execution_state.loaded_complex_encounter_id == 42,
+		"Loaded encounter buffers survive action-point activation"
+	)
 
 
 func _test_classic_dispatcher_noops() -> void:

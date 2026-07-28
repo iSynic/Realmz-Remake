@@ -25,9 +25,11 @@ const PresentationOpcodeRuntimeScript = preload(
 const ControlFlowOpcodeRuntimeScript = preload(
 	"res://scripts/scenario_runtime/handlers/classic_control_flow_opcode_runtime.gd"
 )
+const ClassicExecutionStateScript = preload(
+	"res://scripts/scenario_runtime/classic_execution_state.gd"
+)
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
-const EXECUTION_SNAPSHOT_SCHEMA_VERSION := 2
 const HANDLED_OPCODES := [
 	-23, -14,
 	0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
@@ -43,20 +45,66 @@ const HANDLED_OPCODES := [
 ]
 var bundle: ClassicCampaignBundle
 var runtime_state: ClassicRuntimeState
-var current_trigger: Dictionary = {}
-var current_action_index := 0
-var origin_action_point: Dictionary = {}
-var active_action_point_header: Dictionary = {}
-var suppress_action_point_destination := false
-var remove_action_point := false
-var removal_x := 0
-var removal_y := 0
-var call_stack: Array = []
-var gosub_active := false
+var _execution_state: RefCounted = \
+	ClassicExecutionStateScript.new()
+var current_trigger: Dictionary:
+	get:
+		return _execution_state.current_trigger
+	set(value):
+		_execution_state.current_trigger = value
+var current_action_index: int:
+	get:
+		return _execution_state.current_action_index
+	set(value):
+		_execution_state.current_action_index = value
+var origin_action_point: Dictionary:
+	get:
+		return _execution_state.origin_action_point
+	set(value):
+		_execution_state.origin_action_point = value
+var active_action_point_header: Dictionary:
+	get:
+		return _execution_state.active_action_point_header
+	set(value):
+		_execution_state.active_action_point_header = value
+var suppress_action_point_destination: bool:
+	get:
+		return _execution_state.suppress_action_point_destination
+	set(value):
+		_execution_state.suppress_action_point_destination = value
+var remove_action_point: bool:
+	get:
+		return _execution_state.remove_action_point
+	set(value):
+		_execution_state.remove_action_point = value
+var removal_x: int:
+	get:
+		return _execution_state.removal_x
+	set(value):
+		_execution_state.removal_x = value
+var removal_y: int:
+	get:
+		return _execution_state.removal_y
+	set(value):
+		_execution_state.removal_y = value
+var call_stack: Array:
+	get:
+		return _execution_state.call_stack
+	set(value):
+		_execution_state.call_stack = value
+var gosub_active: bool:
+	get:
+		return _execution_state.gosub_active
+	set(value):
+		_execution_state.gosub_active = value
 # Classic mechanics expose these views while older focused fixtures still call
 # the typed resume helpers. The only stored continuation is pending_continuation;
 # ScenarioInterpreter serializes it into ScenarioPendingCommand.
-var pending_continuation: Dictionary = {}
+var pending_continuation: Dictionary:
+	get:
+		return _execution_state.pending_continuation
+	set(value):
+		_execution_state.pending_continuation = value
 var pending_choice: Dictionary:
 	get:
 		return _pending_view("choice")
@@ -142,17 +190,45 @@ var pending_teleport: Dictionary:
 		return _pending_view("teleport")
 	set(value):
 		_set_pending_view("teleport", value)
-var execution_context: Dictionary = {}
-var encounter_origins: Array = []
-var loaded_simple_encounter_id := -1
-var loaded_complex_encounter_id := -1
+var execution_context: Dictionary:
+	get:
+		return _execution_state.execution_context
+	set(value):
+		_execution_state.execution_context = value
+var encounter_origins: Array:
+	get:
+		return _execution_state.encounter_origins
+	set(value):
+		_execution_state.encounter_origins = value
+var loaded_simple_encounter_id: int:
+	get:
+		return _execution_state.loaded_simple_encounter_id
+	set(value):
+		_execution_state.loaded_simple_encounter_id = value
+var loaded_complex_encounter_id: int:
+	get:
+		return _execution_state.loaded_complex_encounter_id
+	set(value):
+		_execution_state.loaded_complex_encounter_id = value
 var percent_roll_provider: Callable
 var semantic_operation_executor: Callable
 var scenario_run_delegate: Callable
 var compatibility_instruction_registry: ScenarioInstructionRegistry
-var trace: Array = []
-var last_error := ""
-var halted := false
+var trace: Array:
+	get:
+		return _execution_state.trace
+	set(value):
+		_execution_state.trace = value
+var last_error: String:
+	get:
+		return _execution_state.last_error
+	set(value):
+		_execution_state.last_error = value
+var halted: bool:
+	get:
+		return _execution_state.halted
+	set(value):
+		_execution_state.halted = value
 var _combat_opcode_runtime: RefCounted
 var _inventory_opcode_runtime: RefCounted
 var _character_opcode_runtime: RefCounted
@@ -160,6 +236,11 @@ var _map_time_opcode_runtime: RefCounted
 var _encounter_opcode_runtime: RefCounted
 var _presentation_opcode_runtime: RefCounted
 var _control_flow_opcode_runtime: RefCounted
+
+
+func bind_execution_state(state: RefCounted) -> void:
+	if state != null:
+		_execution_state = state
 
 
 func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeState) -> void:
@@ -266,160 +347,19 @@ static func handles_opcode(code: int) -> bool:
 
 
 func reset_execution() -> void:
-	current_trigger = {}
-	current_action_index = 0
-	origin_action_point.clear()
-	active_action_point_header.clear()
-	suppress_action_point_destination = false
-	remove_action_point = false
-	removal_x = 0
-	removal_y = 0
-	call_stack.clear()
-	gosub_active = false
-	pending_continuation.clear()
-	execution_context.clear()
-	encounter_origins.clear()
-	trace.clear()
-	last_error = ""
-	halted = false
+	_execution_state.reset()
 
 
 func make_execution_snapshot() -> Dictionary:
-	if halted:
-		return _snapshot_error("A stopped Classic action point cannot be saved")
-	var snapshot := {
-		"schemaVersion": EXECUTION_SNAPSHOT_SCHEMA_VERSION,
-		"currentTrigger": current_trigger.duplicate(true),
-		"currentActionIndex": current_action_index,
-		"originActionPoint": origin_action_point.duplicate(true),
-		"activeActionPointHeader": active_action_point_header.duplicate(true),
-		"suppressActionPointDestination": suppress_action_point_destination,
-		"removeActionPoint": remove_action_point,
-		"removalX": removal_x,
-		"removalY": removal_y,
-		"callStack": call_stack.duplicate(true),
-		"gosubActive": gosub_active,
-		"pendingContinuation": pending_continuation.duplicate(true),
-		"executionContext": execution_context.duplicate(true),
-		"encounterOrigins": encounter_origins.duplicate(true),
-		"loadedSimpleEncounterId": loaded_simple_encounter_id,
-		"loadedComplexEncounterId": loaded_complex_encounter_id,
-	}
-	if not _is_snapshot_value(snapshot):
-		return _snapshot_error(
-			"Classic continuation contains runtime-only values and cannot be saved"
-		)
-	return {"status": "ok", "snapshot": snapshot}
+	return _execution_state.make_snapshot()
 
 
 func restore_execution_snapshot(snapshot: Variant) -> Dictionary:
-	var validation := validate_execution_snapshot(snapshot)
-	if str(validation.get("status", "")) != "ok":
-		return validation
-	var saved: Dictionary = snapshot
-	reset_execution()
-	current_trigger = saved["currentTrigger"].duplicate(true)
-	current_action_index = int(saved["currentActionIndex"])
-	origin_action_point = saved["originActionPoint"].duplicate(true)
-	active_action_point_header = saved["activeActionPointHeader"].duplicate(true)
-	suppress_action_point_destination = bool(saved.get(
-		"suppressActionPointDestination",
-		false
-	))
-	remove_action_point = bool(saved["removeActionPoint"])
-	removal_x = int(saved["removalX"])
-	removal_y = int(saved["removalY"])
-	call_stack = saved["callStack"].duplicate(true)
-	gosub_active = bool(saved["gosubActive"])
-	pending_continuation = saved["pendingContinuation"].duplicate(true)
-	execution_context = saved["executionContext"].duplicate(true)
-	encounter_origins = saved["encounterOrigins"].duplicate(true)
-	loaded_simple_encounter_id = int(saved["loadedSimpleEncounterId"])
-	loaded_complex_encounter_id = int(saved["loadedComplexEncounterId"])
-	return {"status": "ok"}
+	return _execution_state.restore_snapshot(snapshot)
 
 
 static func validate_execution_snapshot(snapshot: Variant) -> Dictionary:
-	if not (snapshot is Dictionary):
-		return _snapshot_error("Classic continuation execution state is not a dictionary")
-	if int(snapshot.get("schemaVersion", 0)) != EXECUTION_SNAPSHOT_SCHEMA_VERSION:
-		return _snapshot_error("Classic continuation execution schema is not supported")
-	for field_name: String in [
-		"currentTrigger",
-		"originActionPoint",
-		"activeActionPointHeader",
-		"pendingContinuation",
-		"executionContext",
-	]:
-		if not (snapshot.get(field_name) is Dictionary):
-			return _snapshot_error("Classic continuation has invalid %s" % field_name)
-	var pending_value: Dictionary = snapshot["pendingContinuation"]
-	if not pending_value.is_empty():
-		if not (pending_value.get("continuationId") is String) \
-				or str(pending_value["continuationId"]).is_empty() \
-				or not (pending_value.get("data") is Dictionary):
-			return _snapshot_error(
-				"Classic continuation has an invalid pending record"
-			)
-	for field_name: String in ["callStack", "encounterOrigins"]:
-		if not (snapshot.get(field_name) is Array):
-			return _snapshot_error("Classic continuation has invalid %s" % field_name)
-	if int(snapshot.get("currentActionIndex", -1)) < 0:
-		return _snapshot_error("Classic continuation has an invalid action index")
-	if snapshot["callStack"].size() > MAX_CALL_STACK_DEPTH:
-		return _snapshot_error("Classic continuation exceeds the GOSUB stack limit")
-	for field_name: String in ["removeActionPoint", "gosubActive"]:
-		if not (snapshot.get(field_name) is bool):
-			return _snapshot_error("Classic continuation has invalid %s" % field_name)
-	if snapshot.has("suppressActionPointDestination") \
-			and not (snapshot.get("suppressActionPointDestination") is bool):
-		return _snapshot_error(
-			"Classic continuation has invalid suppressActionPointDestination"
-		)
-	for field_name: String in [
-		"removalX",
-		"removalY",
-		"loadedSimpleEncounterId",
-		"loadedComplexEncounterId",
-	]:
-		var field_value: Variant = snapshot.get(field_name)
-		if not (field_value is int or field_value is float):
-			return _snapshot_error("Classic continuation has invalid %s" % field_name)
-	for frame_value: Variant in snapshot["callStack"]:
-		if not (frame_value is Dictionary) \
-				or not (frame_value.get("trigger") is Dictionary) \
-				or not (frame_value.get("actionPointHeader") is Dictionary) \
-				or not (frame_value.get("actionIndex") is int or frame_value.get("actionIndex") is float):
-			return _snapshot_error("Classic continuation has an invalid GOSUB frame")
-	for origin_value: Variant in snapshot["encounterOrigins"]:
-		if not (origin_value is Dictionary) \
-				or not (origin_value.get("trigger") is Dictionary) \
-				or not (origin_value.get("callStack") is Array) \
-				or not (origin_value.get("actionPointHeader") is Dictionary):
-			return _snapshot_error("Classic continuation has an invalid encounter frame")
-	if not _is_snapshot_value(snapshot):
-		return _snapshot_error("Classic continuation contains invalid runtime values")
-	return {"status": "ok"}
-
-
-static func _is_snapshot_value(value: Variant) -> bool:
-	if value == null or value is bool or value is int or value is float or value is String:
-		return true
-	if value is Array:
-		for child_value: Variant in value:
-			if not _is_snapshot_value(child_value):
-				return false
-		return true
-	if value is Dictionary:
-		for key: Variant in value:
-			if not (key is String) or not _is_snapshot_value(value[key]):
-				return false
-		return true
-	return false
-
-
-static func _snapshot_error(message: String) -> Dictionary:
-	return {"status": "error", "message": message}
+	return ClassicExecutionStateScript.validate_snapshot(snapshot)
 
 
 func begin_trigger(trigger_id: String, start_slot := 0, context := {}) -> bool:

@@ -10,6 +10,9 @@ const CoreHandlerCatalogScript = preload(
 const ClassicContinuationRouterScript = preload(
 	"res://scripts/scenario_runtime/classic_continuation_router.gd"
 )
+const ClassicExecutionStateScript = preload(
+	"res://scripts/scenario_runtime/classic_execution_state.gd"
+)
 const SNAPSHOT_SCHEMA_VERSION := 2
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
@@ -28,6 +31,7 @@ var last_result: Dictionary = {}
 var _classic_executor: Object
 var _classic_continuation_router: ClassicContinuationRouter
 var _classic_mode := false
+var classic_execution_state: RefCounted
 
 var runtime_state: ClassicRuntimeState:
 	get:
@@ -74,6 +78,7 @@ func configure(registry_or_bundle: Variant, triggers_or_state: Variant) -> void:
 		return
 	_classic_mode = false
 	_classic_executor = null
+	classic_execution_state = null
 	instruction_registry = registry_or_bundle
 	triggers = (
 		triggers_or_state.duplicate(true)
@@ -123,7 +128,9 @@ func _configure_classic_compatibility(
 		}
 		halted = true
 		return
+	classic_execution_state = ClassicExecutionStateScript.new()
 	_classic_executor = ClassicOpcodeRuntimeScript.new()
+	_classic_executor.bind_execution_state(classic_execution_state)
 	_classic_executor.configure(campaign_bundle, state)
 	_classic_continuation_router = ClassicContinuationRouterScript.new()
 	_classic_continuation_router.configure(_classic_executor)
@@ -400,7 +407,7 @@ func resume_classic_instruction(
 func make_execution_snapshot() -> Dictionary:
 	if _classic_executor == null:
 		return {"status": "ok", "snapshot": snapshot()}
-	var result: Dictionary = _classic_executor.make_execution_snapshot()
+	var result: Dictionary = classic_execution_state.make_snapshot()
 	if str(result.get("status", "")) == "ok":
 		result["snapshot"]["scenarioPendingCommand"] = (
 			pending_command.to_dictionary() if pending_command != null else null
@@ -411,7 +418,7 @@ func make_execution_snapshot() -> Dictionary:
 func restore_execution_snapshot(saved: Variant) -> Dictionary:
 	if _classic_executor == null:
 		return restore(saved)
-	var result: Dictionary = _classic_executor.restore_execution_snapshot(saved)
+	var result: Dictionary = classic_execution_state.restore_snapshot(saved)
 	if str(result.get("status", "")) == "ok":
 		pending_command = ScenarioPendingCommand.from_dictionary(
 			saved.get("scenarioPendingCommand")
@@ -421,7 +428,7 @@ func restore_execution_snapshot(saved: Variant) -> Dictionary:
 
 
 static func validate_execution_snapshot(saved: Variant) -> Dictionary:
-	return ClassicOpcodeRuntimeScript.validate_execution_snapshot(saved)
+	return ClassicExecutionStateScript.validate_snapshot(saved)
 
 
 func _classic_result(value: Variant) -> Dictionary:
