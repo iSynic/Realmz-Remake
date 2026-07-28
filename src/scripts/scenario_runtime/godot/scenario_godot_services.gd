@@ -37,6 +37,9 @@ const MapServicesScript = preload(
 const InventoryServicesScript = preload(
 	"res://scripts/scenario_runtime/godot/scenario_godot_inventory_services.gd"
 )
+const CharacterServicesScript = preload(
+	"res://scripts/scenario_runtime/godot/scenario_godot_character_services.gd"
+)
 const CombatRoutRulesScript = preload(
 	"res://scripts/classic_runtime/classic_combat_rout_rules.gd"
 )
@@ -159,6 +162,7 @@ var _active_classic_command := ""
 var _active_command_save_safe := false
 var _map_services: RefCounted
 var _inventory_services: RefCounted
+var _character_services: RefCounted
 
 
 func _init() -> void:
@@ -166,6 +170,8 @@ func _init() -> void:
 	_map_services.configure(self)
 	_inventory_services = InventoryServicesScript.new()
 	_inventory_services.configure(self)
+	_character_services = CharacterServicesScript.new()
+	_character_services.configure(self)
 
 
 func scenario_service_contract_version() -> int:
@@ -177,6 +183,8 @@ func scenario_port_runtime(port_id: String) -> Object:
 		return _map_services
 	if port_id == "core.inventory":
 		return _inventory_services
+	if port_id == "core.character":
+		return _character_services
 	return self
 
 
@@ -709,21 +717,6 @@ static func teleport_message_present(payload: Dictionary) -> bool:
 	return MapServicesScript.teleport_message_present(payload)
 
 
-func _alter_party_fatigue(payload: Dictionary) -> Dictionary:
-	var game_global: Object = _autoload("GameGlobal")
-	if game_global == null \
-			or not _object_has_property(game_global, "fatigue") \
-			or not game_global.has_method("set_party_fatigue"):
-		return _error("Realmz party fatigue is unavailable")
-	var previous := float(game_global.get("fatigue"))
-	var current := classic_fatigue_after_action(previous, payload)
-	game_global.call("set_party_fatigue", current)
-	return {
-		"previousFatigue": previous,
-		"fatigue": current,
-	}
-
-
 func classic_fatigue_after_action(
 	current_fatigue: float,
 	payload: Dictionary
@@ -863,27 +856,6 @@ func _refresh_exploration_icon(game_global: Object) -> void:
 		current_map.call("set_ow_character_icon", character.get("icon"))
 
 
-func _check_party_condition(payload: Dictionary) -> Dictionary:
-	var game_global: Object = _autoload("GameGlobal")
-	if game_global == null:
-		return _error("Realmz party state is unavailable")
-	var global_effects: Variant = game_global.get("global_effects")
-	if not (global_effects is Dictionary):
-		return _error("Realmz global-effect state is unavailable")
-	var result := party_condition_status(
-		int(payload.get("conditionIndex", -1)),
-		global_effects,
-		int(game_global.get("classic_light_condition")),
-		game_global.get("classic_party_conditions")
-	)
-	if not bool(result.get("supported", false)):
-		return _error(
-			"Classic party condition %d has no Remake state mapping" \
-				% int(payload.get("conditionIndex", -1))
-		)
-	return {"active": bool(result.get("active", false))}
-
-
 func party_condition_status(
 	condition_index: int,
 	global_effects: Dictionary,
@@ -915,14 +887,6 @@ func party_condition_status(
 	return {"supported": true, "active": duration > 0}
 
 
-func _check_party_ally(payload: Dictionary) -> Dictionary:
-	var game_global: Object = _autoload("GameGlobal")
-	var player_allies: Variant = game_global.get("player_allies") if game_global != null else null
-	if not (player_allies is Array):
-		return _error("Realmz ally state is unavailable")
-	return {"present": party_has_classic_ally(payload, player_allies)}
-
-
 func party_has_classic_ally(payload: Dictionary, allies: Array) -> bool:
 	var monster_id := int(payload.get("monsterId", -1))
 	var monster_name_id := int(payload.get("monsterNameId", -1))
@@ -949,27 +913,6 @@ func party_has_classic_ally(payload: Dictionary, allies: Array) -> bool:
 		if not display_name.is_empty() and ally_name.to_lower() == display_name.to_lower():
 			return true
 	return false
-
-
-func _remove_classic_allies(payload: Dictionary) -> Dictionary:
-	var game_global: Object = _autoload("GameGlobal")
-	var player_allies: Variant = game_global.get("player_allies") if game_global != null else null
-	if not (player_allies is Array):
-		return _error("Realmz ally state is unavailable")
-	var previous_allies: Array = player_allies.duplicate()
-	var result := remove_classic_allies(payload, player_allies)
-	for ally_value: Variant in previous_allies:
-		if player_allies.has(ally_value):
-			continue
-		classic_selected_characters.erase(ally_value)
-		var native_selection: Variant = game_global.get("last_picked_characters")
-		if native_selection is Array:
-			native_selection.erase(ally_value)
-	var ui: Object = _autoload("UI")
-	if ui != null and ui.ow_hud != null \
-			and ui.ow_hud.has_method("fillCharactersRect"):
-		ui.ow_hud.fillCharactersRect()
-	return result
 
 
 func remove_classic_allies(payload: Dictionary, allies: Array) -> Dictionary:
@@ -2129,43 +2072,6 @@ func _classic_monster_id_from_name(creature_name: String) -> int:
 	if words.is_empty() or not words[-1].is_valid_int():
 		return -1
 	return int(words[-1])
-
-
-func _add_classic_ally(payload: Dictionary) -> Dictionary:
-	var game_global: Object = _autoload("GameGlobal")
-	var player_allies: Variant = game_global.get("player_allies") if game_global != null else null
-	if not (player_allies is Array):
-		return _error("Realmz ally state is unavailable")
-	if player_allies.size() >= 20:
-		return {"status": "skipped", "message": "Classic ally limit of 20 has been reached"}
-	var node_access: Object = _autoload("NodeAccess")
-	var resources: Object = node_access.__Resources() if node_access != null else null
-	var creature_book: Variant = resources.get("crea_book") if resources != null else null
-	if not (creature_book is Dictionary):
-		return _error("Realmz bestiary resources are unavailable")
-	var monster: Variant = payload.get("monster", {})
-	if not (monster is Dictionary):
-		return _error("Classic ally command is missing its monster record")
-	var monster_id := int(payload.get("monsterId", -1))
-	var bestiary_name := resolve_classic_monster_bestiary_name(monster_id, monster, creature_book)
-	if bestiary_name.is_empty():
-		return _error("Classic ally %d (%s) has no matching Remake bestiary entry" % [
-			monster_id,
-			monster.get("displayName", "unnamed"),
-		])
-	var creature_script: Variant = game_global.get("combatCreatureGD")
-	if not (creature_script is Script):
-		return _error("Realmz creature script is unavailable")
-	var ally: Object = creature_script.new()
-	if not ally.has_method("initialize_from_bestiary_dict"):
-		return _error("Realmz creature cannot load a bestiary entry")
-	ally.initialize_from_bestiary_dict(
-		bestiary_name,
-		_classic_monster_generation_context(game_global, "ally")
-	)
-	_set_classic_monster_identity(ally, monster_id, monster)
-	game_global.add_npc_ally(ally)
-	return {"name": str(ally.get("name")), "monsterId": monster_id}
 
 
 func _classic_monster_generation_context(
@@ -4246,29 +4152,6 @@ func _apply_classic_item_identity(item: Dictionary, item_id: int) -> void:
 	item["stateData"] = state_data
 
 
-func _give_experience(payload: Dictionary) -> Dictionary:
-	var game_global: Object = _autoload("GameGlobal")
-	if game_global == null:
-		return _error("Realmz game state is unavailable")
-	await game_global.show_loot_menu(
-		[],
-		[0, 0, 0],
-		int(payload.get("experience", 0))
-	)
-	return {}
-
-
-func _remove_experience(payload: Dictionary) -> Dictionary:
-	var party := _party_characters()
-	var result := apply_classic_experience_loss(
-		payload,
-		party,
-		_current_selected_characters()
-	)
-	_refresh_party_panels(party)
-	return result
-
-
 func drop_all_party_items(party: Array) -> Dictionary:
 	var items_removed := 0
 	for character_value: Variant in party:
@@ -4468,40 +4351,6 @@ func _classic_overworld_movement(value: Variant) -> Vector2i:
 	return movement
 
 
-func _pick_characters(payload: Dictionary) -> Dictionary:
-	var party := _party_characters()
-	if party.is_empty():
-		return _error("Classic character pick has no party members")
-	var allow_dead := bool(payload.get("allowDead", false))
-	var eligible: Array = []
-	for character_value: Variant in party:
-		if allow_dead or _is_living_character(character_value):
-			eligible.append(character_value)
-	if eligible.is_empty():
-		return _error("Classic character pick has no eligible party members")
-	var count: int = min(int(payload.get("count", 0)), eligible.size())
-	if count < 1:
-		return _error("Classic character pick requests no characters")
-	var ui: Object = _autoload("UI")
-	if ui == null or ui.ow_hud == null:
-		return _error("Realmz character picker is unavailable")
-	ui.ow_hud.request_pc_pick(count)
-	var picked_value: Variant = await ui.ow_hud.pc_picked
-	if not (picked_value is Array):
-		return _error("Realmz character picker returned an invalid selection")
-	for character_value: Variant in picked_value:
-		if not party.has(character_value) \
-			or (not allow_dead and not _is_living_character(character_value)):
-			return _error("Realmz character picker returned an ineligible party member")
-	var selected := select_characters_after_pick(
-		picked_value,
-		party,
-		bool(payload.get("invert", false))
-	)
-	_store_selected_characters(selected)
-	return {"selectedCount": selected.size()}
-
-
 func select_characters_after_pick(picked: Array, party: Array, invert: bool) -> Array:
 	var selected: Array = []
 	for character_value: Variant in party:
@@ -4509,36 +4358,6 @@ func select_characters_after_pick(picked: Array, party: Array, invert: bool) -> 
 		if was_picked != invert:
 			selected.append(character_value)
 	return selected
-
-
-func _filter_selected_characters(payload: Dictionary) -> Dictionary:
-	var result := filter_characters_by_check(
-		payload,
-		_party_characters(),
-		_current_selected_characters()
-	)
-	if str(result.get("status", "")) == "error":
-		return result
-	var selected: Array = result.get("selected", [])
-	_store_selected_characters(selected)
-	return {
-		"selectedCount": selected.size(),
-		"checks": result.get("checks", []),
-	}
-
-
-func _check_character_ability(payload: Dictionary) -> Dictionary:
-	var pick_result := await _pick_characters({
-		"count": 1,
-		"allowDead": false,
-		"invert": false,
-	})
-	if str(pick_result.get("status", "")) == "error":
-		return pick_result
-	var selected := _current_selected_characters()
-	if selected.size() != 1:
-		return _error("Classic character-ability check did not select one character")
-	return character_ability_check(payload, selected[0])
 
 
 func character_ability_check(
@@ -4577,34 +4396,6 @@ func character_ability_check(
 		"value": stat_value,
 		"characterName": str(character.get("name")),
 	}
-
-
-func _level_up_selected_characters(payload: Dictionary) -> Dictionary:
-	var selected := _current_selected_characters()
-	var game_global: Object = _autoload("GameGlobal")
-	if game_global == null:
-		return _error("Realmz game state is unavailable")
-	for character_value: Variant in selected:
-		if not (character_value is Object) \
-				or not _object_has_property(character_value, "exp_tnl"):
-			return _error("Classic level-up target cannot receive experience")
-		character_value.set("exp_tnl", 0)
-	await game_global.give_exp_to_pcs(
-		maxi(1, int(payload.get("experience", 1))),
-		selected
-	)
-	_refresh_party_panels(selected)
-	return {"leveledCharacterCount": selected.size()}
-
-
-func _alter_selected_characters(payload: Dictionary) -> Dictionary:
-	var result := alter_selected_characters(
-		payload,
-		_current_selected_characters()
-	)
-	if str(result.get("status", "")) != "error":
-		_refresh_party_panels(_current_selected_characters())
-	return result
 
 
 func alter_selected_characters(payload: Dictionary, selected: Array) -> Dictionary:
@@ -4706,22 +4497,6 @@ func alter_selected_characters(payload: Dictionary, selected: Array) -> Dictiona
 	return {"changedCharacterCount": changed}
 
 
-func _select_characters_by_identity(payload: Dictionary) -> Dictionary:
-	var result := select_characters_by_identity(
-		payload,
-		_party_characters(),
-		_classic_rule_names()
-	)
-	if str(result.get("status", "")) == "error":
-		return result
-	var selected: Array = result.get("selected", [])
-	_store_selected_characters(selected)
-	return {
-		"selectedCount": selected.size(),
-		"checks": result.get("checks", []),
-	}
-
-
 func select_characters_by_identity(
 	payload: Dictionary,
 	party: Array,
@@ -4785,18 +4560,6 @@ func select_characters_by_identity(
 		"selected": selected,
 		"checks": checks,
 	}
-
-
-func _check_party_misc(payload: Dictionary) -> Dictionary:
-	var game_global: Object = _autoload("GameGlobal")
-	return party_misc_matches(
-		payload,
-		_party_characters(),
-		_current_selected_characters(),
-		_classic_rule_names(),
-		bool(game_global.camping) if game_global != null else false,
-		bool(game_global.is_sailing_boat) if game_global != null else false
-	)
 
 
 func party_misc_matches(
@@ -4881,32 +4644,6 @@ func character_condition_group_matches(
 		) == 0:
 			return {"matched": false}
 	return {"matched": true}
-
-
-func _select_characters_by_misc(payload: Dictionary) -> Dictionary:
-	var resolved_payload := payload.duplicate(true)
-	var selector := str(payload.get("selector", ""))
-	if selector == "has_item" or selector == "wearing_item":
-		var item_id: int = abs(int(payload.get("value", 0)))
-		if item_id == 0:
-			return _error(
-				"Classic item selector has no item ID"
-			)
-		resolved_payload["itemIds"] = [item_id]
-	var result := select_characters_by_misc(
-		resolved_payload,
-		_party_characters(),
-		_current_selected_characters(),
-		_selected_character()
-	)
-	if str(result.get("status", "")) == "error":
-		return result
-	var selected: Array = result.get("selected", [])
-	_store_selected_characters(selected)
-	return {
-		"selectedCount": selected.size(),
-		"checks": result.get("checks", []),
-	}
 
 
 func select_characters_by_misc(
@@ -5191,53 +4928,6 @@ func _character_has_item(
 
 func _classic_spell_save_chance(character: Object, save_index: int) -> float:
 	return SpellSavesScript.save_chance_for(character, save_index)
-
-
-func _change_selected_health(payload: Dictionary) -> Dictionary:
-	var result := apply_selected_health_effect(payload, _current_selected_characters())
-	return await _finish_health_effect(payload, result)
-
-
-func _give_character_condition(payload: Dictionary) -> Dictionary:
-	var result: Dictionary = CharacterConditionRulesScript.apply_condition(
-		_party_characters(),
-		_current_selected_characters(),
-		str(payload.get("targetMode", "")),
-		int(payload.get("conditionIndex", -1)),
-		int(payload.get("duration", 0))
-	)
-	if str(result.get("status", "")) == "error":
-		return result
-	var affected_characters: Array = result.get("affectedCharacters", [])
-	for character_value: Variant in affected_characters:
-		_play_sound({"soundId": int(payload.get("soundId", 0))})
-		_refresh_character_panel(character_value)
-	result.erase("affectedCharacters")
-	return result
-
-
-func _change_party_health(payload: Dictionary) -> Dictionary:
-	var result := apply_party_health_effect(payload, _party_characters())
-	return await _finish_health_effect(payload, result)
-
-
-func _cast_classic_spell(payload: Dictionary) -> Dictionary:
-	var target_mode := str(payload.get("targetMode", ""))
-	if target_mode != "party" and target_mode != "selected":
-		return _error("Classic spell command has an invalid target mode")
-	var targets := spell_effect_targets(
-		target_mode,
-		_party_characters(),
-		_current_selected_characters()
-	)
-	if target_mode == "party":
-		# Opcode 18 replaces Classic's transient picked set with the whole party.
-		_store_selected_characters(targets)
-	if targets.is_empty():
-		if target_mode == "selected":
-			return {"targetCount": 0}
-		return _error("Classic party spell command has no party members")
-	return await _apply_classic_spell_to_targets(payload, targets)
 
 
 func _apply_classic_spell_to_targets(payload: Dictionary, targets: Array) -> Dictionary:
