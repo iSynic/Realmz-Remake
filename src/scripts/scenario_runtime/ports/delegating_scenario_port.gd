@@ -9,6 +9,14 @@ var runtime_bindings: Dictionary = {}
 
 func configure(services: Dictionary) -> void:
 	_port_runtime = services.get("scenarioPortRuntime")
+	if _port_runtime != null \
+			and _port_runtime.has_method("scenario_port_runtime"):
+		var domain_runtime: Variant = _port_runtime.call(
+			"scenario_port_runtime",
+			port_id()
+		)
+		if domain_runtime is Object:
+			_port_runtime = domain_runtime
 	gameplay_rules = services.get("gameplayRules")
 	extension_registry = services.get("extensionRegistry")
 	runtime_bindings = services.get("runtimeBindings", {}).duplicate(true)
