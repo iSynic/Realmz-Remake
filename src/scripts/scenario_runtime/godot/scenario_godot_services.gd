@@ -40,6 +40,9 @@ const InventoryServicesScript = preload(
 const CharacterServicesScript = preload(
 	"res://scripts/scenario_runtime/godot/scenario_godot_character_services.gd"
 )
+const CombatServicesScript = preload(
+	"res://scripts/scenario_runtime/godot/scenario_godot_combat_services.gd"
+)
 const CombatRoutRulesScript = preload(
 	"res://scripts/classic_runtime/classic_combat_rout_rules.gd"
 )
@@ -154,15 +157,16 @@ var classic_bundle: Object
 var classic_spell_overrides: Dictionary = {}
 var classic_registered_spells: Dictionary = {}
 var classic_map_bridge = MapBridgeScript.new()
-var last_classic_spawn_presentation: Dictionary = {}
-# Opcode 100 runs in a nested host while start_battle waits on this adapter.
-# This one-shot carries its slot-8 result back to the suspended outer command.
-var _forced_battle_resume_slot := -1
+var last_classic_spawn_presentation: Dictionary:
+	get:
+		return _combat_services.last_classic_spawn_presentation \
+			if _combat_services != null else {}
 var _active_classic_command := ""
 var _active_command_save_safe := false
 var _map_services: RefCounted
 var _inventory_services: RefCounted
 var _character_services: RefCounted
+var _combat_services: RefCounted
 
 
 func _init() -> void:
@@ -172,6 +176,8 @@ func _init() -> void:
 	_inventory_services.configure(self)
 	_character_services = CharacterServicesScript.new()
 	_character_services.configure(self)
+	_combat_services = CombatServicesScript.new()
+	_combat_services.configure(self)
 
 
 func scenario_service_contract_version() -> int:
@@ -185,6 +191,8 @@ func scenario_port_runtime(port_id: String) -> Object:
 		return _inventory_services
 	if port_id == "core.character":
 		return _character_services
+	if port_id == "core.combat":
+		return _combat_services
 	return self
 
 
@@ -193,7 +201,7 @@ func configure_classic_bundle(bundle: Object) -> void:
 	classic_bundle = bundle
 	classic_map_bridge.configure(bundle)
 	classic_spell_overrides.clear()
-	_forced_battle_resume_slot = -1
+	_combat_services.reset_campaign_state()
 	_active_classic_command = ""
 	_active_command_save_safe = false
 	_register_classic_spell_overrides()
@@ -515,11 +523,6 @@ func get_classic_execution_context() -> Dictionary:
 func prepare_scenario_command(command: String) -> void:
 	_active_classic_command = command
 	_active_command_save_safe = REPLAYABLE_PRESENTATION_COMMANDS.has(command)
-
-
-func _give_battle_loot(_payload: Dictionary) -> Dictionary:
-	# Native battle cleanup has already presented defeated-enemy rewards.
-	return {}
 
 
 func _show_text(payload: Dictionary) -> Dictionary:
@@ -936,13 +939,6 @@ func remove_classic_allies(payload: Dictionary, allies: Array) -> Dictionary:
 	}
 
 
-func _check_combat_monster(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	return {"present": combat_has_classic_monster(payload, context["combatants"])}
-
-
 func combat_has_classic_monster(payload: Dictionary, combatants: Array) -> bool:
 	var monster_name_id := int(payload.get("monsterNameId", -1))
 	if monster_name_id < 0:
@@ -955,189 +951,6 @@ func combat_has_classic_monster(payload: Dictionary, combatants: Array) -> bool:
 		if _classic_monster_name_id(creature) == monster_name_id:
 			return true
 	return false
-
-
-func _destroy_combat_monsters(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var selected: Array = select_classic_combatants(payload, context["combatants"])
-	var removed: int = remove_classic_combatants(context["state"], selected)
-	if removed < 0:
-		return _error("Realmz combat removal API is unavailable")
-	return {"removed": removed}
-
-
-func _deanimate_lower_undead(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var monster_ids: Variant = payload.get("monsterIds", [])
-	if not (monster_ids is Array):
-		return _error("Classic lower-undead command has an invalid monster list")
-	var selected: Array = select_classic_combatants_by_ids(monster_ids, context["combatants"])
-	var removed: int = remove_classic_combatants(context["state"], selected)
-	if removed < 0:
-		return _error("Realmz combat removal API is unavailable")
-	return {"removed": removed}
-
-
-func _rout_combat_monsters(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var actor_faction: Variant = payload.get("actorFaction")
-	if actor_faction == null:
-		actor_faction = _active_combat_faction(context["stateMachine"])
-	if actor_faction == null:
-		return _error("Realmz active combat actor is unavailable")
-	var monster_ids: Variant = payload.get("monsterIds", [])
-	if not (monster_ids is Array):
-		return _error("Classic combat-rout command has an invalid monster list")
-	var selected := select_classic_combatants_by_ids_and_faction(
-		monster_ids,
-		int(actor_faction),
-		context["combatants"]
-	)
-	var fleeing_trait: Variant = load(PERMANENT_FLEEING_TRAIT_PATH)
-	if not (fleeing_trait is Script):
-		return _error("Realmz permanent fleeing trait is unavailable")
-	var routed := apply_classic_rout(selected, fleeing_trait)
-	if routed < 0:
-		return _error("Realmz permanent fleeing trait is unavailable")
-	return {"routed": routed}
-
-
-func _spawn_combat_monsters(payload: Dictionary) -> Dictionary:
-	last_classic_spawn_presentation.clear()
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var game_global: Object = _autoload("GameGlobal")
-	var node_access: Object = _autoload("NodeAccess")
-	if game_global == null or node_access == null:
-		return _error("Realmz combat spawn dependencies are unavailable")
-	var resources: Object = node_access.__Resources()
-	var map: Object = node_access.__Map()
-	var creature_book: Variant = resources.get("crea_book") if resources != null else null
-	var creature_script: Variant = game_global.get("combatCreatureGD")
-	var combatant_scene: Variant = _combatant_scene_resource()
-	if not (creature_book is Dictionary):
-		return _error("Realmz bestiary resources are unavailable")
-	var origin: Variant = _classic_spawn_origin(payload, context["stateMachine"])
-	if not (origin is Vector2):
-		return _error("Realmz combat spawn actor position is unavailable")
-	var actor_faction: Variant = payload.get("actorFaction")
-	if bool(payload.get("inheritActorFaction", false)) and actor_faction == null:
-		actor_faction = _active_combat_faction(context["stateMachine"])
-	if bool(payload.get("inheritActorFaction", false)) and actor_faction == null:
-		return _error("Realmz combat spawn actor faction is unavailable")
-	var result := spawn_classic_combatants(
-		payload,
-		context["state"],
-		map,
-		creature_book,
-		creature_script,
-		combatant_scene,
-		origin,
-		actor_faction
-	)
-	if str(result.get("status", "")) == "error":
-		return result
-	var spawned_combatants: Variant = result.get("combatants", [])
-	if not (spawned_combatants is Array):
-		return _error("Classic combat spawn returned an invalid combatant list")
-	if bool(payload.get("skipPresentation", false)):
-		result["presentation"] = {
-			"style": "none",
-			"animated": 0,
-			"soundRepeats": 0,
-			"events": [],
-		}
-		return result
-	for combatant_value: Variant in spawned_combatants:
-		if combatant_value is Object \
-				and combatant_value.has_method("prepare_classic_spawn_animation"):
-			combatant_value.prepare_classic_spawn_animation()
-	var presentation_events: Array = []
-	var animated_count := 0
-	var sound_id := int(payload.get("soundId", 0))
-	for spawn_index: int in spawned_combatants.size():
-		if sound_id != 0:
-			_play_sound({"soundId": sound_id})
-			presentation_events.append({
-				"spawnIndex": spawn_index,
-				"event": "sound",
-				"soundId": sound_id,
-			})
-		var combatant: Variant = spawned_combatants[spawn_index]
-		if combatant is Object and combatant.has_method("play_classic_spawn_animation"):
-			var animation_finished: Variant = combatant.play_classic_spawn_animation()
-			if animation_finished is Signal:
-				await animation_finished
-			animated_count += 1
-			presentation_events.append({
-				"spawnIndex": spawn_index,
-				"event": "conjuration",
-			})
-	var presentation := {
-		"style": "classic-conjuration",
-		"animated": animated_count,
-		"soundRepeats": int(result.get("spawned", 0)) if sound_id != 0 else 0,
-		"events": presentation_events,
-	}
-	result["presentation"] = presentation
-	last_classic_spawn_presentation = presentation.duplicate(true)
-	return result
-
-
-func _revive_classic_combatants(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var party := _party_characters()
-	if party.is_empty():
-		return _error("Classic combat revival has no party members")
-	var living_party := 0
-	for character_value: Variant in party:
-		if _is_living_character(character_value):
-			living_party += 1
-	if living_party == 0:
-		var origin: Variant = payload.get("actorPosition", Vector2.ZERO)
-		if origin is Vector2i:
-			origin = Vector2(origin)
-		elif not (origin is Vector2):
-			origin = Vector2.ZERO
-		var revived := revive_classic_party(
-			party,
-			context["state"],
-			context["combatants"],
-			origin
-		)
-		if str(revived.get("status", "")) == "error":
-			return revived
-		_refresh_party_panels(party)
-		return revived
-
-	var actor_monster_id := int(payload.get("actorMonsterId", -1))
-	var monster: Variant = payload.get("monster", {})
-	if actor_monster_id < 0 or not (monster is Dictionary) or monster.is_empty():
-		return _error("Classic NPC revival is missing its dead monster record")
-	var revived_monster: Dictionary = monster.duplicate(true)
-	revived_monster["traitor"] = 0
-	var spawn_payload := {
-		"monsterId": actor_monster_id,
-		"monster": revived_monster,
-		"spawnCount": 1,
-		"actorPosition": payload.get("actorPosition"),
-		"soundId": 0,
-		"skipPresentation": true,
-	}
-	var spawn_result := await _spawn_combat_monsters(spawn_payload)
-	if str(spawn_result.get("status", "")) == "error":
-		return spawn_result
-	spawn_result["npcRevived"] = int(spawn_result.get("spawned", 0))
-	return spawn_result
 
 
 func revive_classic_party(
@@ -1187,13 +1000,6 @@ func revive_classic_party(
 	return {"partyRevived": revived}
 
 
-func _alter_classic_combatants(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	return alter_classic_combatants(payload, context["combatants"])
-
-
 func alter_classic_combatants(payload: Dictionary, combatants: Array) -> Dictionary:
 	var target_type := str(payload.get("targetType", ""))
 	if target_type not in ["ally", "monster"]:
@@ -1227,26 +1033,6 @@ func alter_classic_combatants(payload: Dictionary, combatants: Array) -> Diction
 		"iconChanged": icon_id != -1,
 		"faction": faction,
 	}
-
-
-func _fumble_active_combatant(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var active_combatant: Variant = _active_combatant(context["stateMachine"])
-	if active_combatant == null:
-		return _error("Realmz active combat actor is unavailable")
-	_play_sound(payload)
-	var message: Variant = payload.get("message", {})
-	if message is Dictionary and not str(message.get("text", "")).is_empty():
-		var text_result := await _show_text(payload)
-		if str(text_result.get("status", "")) == "error":
-			return text_result
-	var result := fumble_classic_combatant(context["state"], active_combatant)
-	if bool(result.get("fumbled", false)):
-		for sound_id: int in result.get("dropSoundIds", []):
-			_play_sound({"soundId": sound_id})
-	return result
 
 
 func fumble_classic_combatant(
@@ -1410,19 +1196,6 @@ func _set_classic_combat_monster_slots_used(combat_state: Variant, count: int) -
 		combat_state.set("classic_monster_slots_used", count)
 
 
-func _activate_battle_round_macro(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var battle_data: Variant = context["state"].get("cur_battle_data")
-	if not apply_battle_round_macro_schedule(
-		battle_data,
-		bool(payload.get("disableSchedule", false))
-	):
-		return _error("Realmz battle-round schedule is unavailable")
-	return {"targetMacroId": int(payload.get("targetMacroId", -1))}
-
-
 func apply_battle_round_macro_schedule(battle_data: Variant, disable_schedule: bool) -> bool:
 	if not (battle_data is Dictionary):
 		return false
@@ -1431,27 +1204,11 @@ func apply_battle_round_macro_schedule(battle_data: Variant, disable_schedule: b
 	return true
 
 
-func _end_classic_battle(payload: Dictionary) -> Dictionary:
-	var context := _combat_context()
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var game_global: Object = _autoload("GameGlobal")
-	if game_global == null or not game_global.has_method("end_battle"):
-		return _error("Realmz battle completion API is unavailable")
-	var resume_slot := int(payload.get("resumeSlot", -1))
-	if not _record_forced_battle_resume_slot(resume_slot):
-		return _error("Classic forced battle resume slot must be 8")
-	var outcome := str(payload.get("outcome", "won"))
-	var reward_mode := str(payload.get("rewardMode", "normal"))
-	await game_global.call("end_battle", outcome, reward_mode)
-	return {"outcome": outcome, "resumeSlot": resume_slot}
-
-
 func start_classic_random_battle(
 	battle_range: Array,
 	surprise := false
 ) -> Dictionary:
-	return await _start_classic_battle({
+	return await _combat_services._start_classic_battle({
 		"battleIdRange": battle_range.duplicate(),
 		"participantMode": "party",
 		"surprise": surprise,
@@ -1461,105 +1218,12 @@ func start_classic_random_battle(
 	})
 
 
-func _start_classic_battle(payload: Dictionary) -> Dictionary:
-	_forced_battle_resume_slot = -1
-	var node_access: Object = _autoload("NodeAccess")
-	var resources: Object = node_access.__Resources() if node_access != null else null
-	var game_global: Object = _autoload("GameGlobal")
-	if resources == null or game_global == null:
-		return _error("Realmz battle resources are unavailable")
-	var battle_id_result := resolve_classic_battle_id(payload)
-	if str(battle_id_result.get("status", "")) == "error":
-		return battle_id_result
-	var battle_id := int(battle_id_result["battleId"])
-	var resource_result := ensure_classic_battle_resource(
-		battle_id,
-		resources.battles_book,
-		resources.crea_book
-	)
-	if str(resource_result.get("status", "")) == "error":
-		return resource_result
-	var request := build_classic_battle_request(
-		payload,
-		resources.battles_book,
-		_party_characters(),
-		_current_selected_characters(),
-		battle_id
-	)
-	if str(request.get("status", "")) == "error":
-		return request
-
-	_play_sound(payload)
-	var message: Variant = payload.get("message", {})
-	if int(payload.get("messageId", 0)) != 0 \
-			and message is Dictionary \
-			and not str(message.get("text", "")).is_empty():
-		var text_result := await _show_text(payload)
-		if str(text_result.get("status", "")) == "error":
-			return text_result
-	if bool(request.get("noBattle", false)):
-		return {
-			"battleId": int(request.get("battleId", 0)),
-			"battleStarted": false,
-			"outcome": "lost",
-			"coward": true,
-			"survivorCount": 0,
-		}
-
-	game_global.allow_next_battle_loot = bool(request["allowLoot"])
-	var battle_overrides := build_existing_classic_battle_overrides(
-		battle_id,
-		resources.battles_book,
-		resources.crea_book
-	)
-	battle_overrides["classicBattleId"] = battle_id
-	battle_overrides["classicPriestTurningEnabled"] = bool(
-		payload.get("priestTurningEnabled", true)
-	)
-	game_global.start_battle(
-		str(request["battleName"]),
-		"",
-		true,
-		bool(request["surprise"]),
-		bool(request["allowLoss"]),
-		true,
-		true,
-		request["participants"],
-		battle_overrides
-	)
-	var outcome_value: Variant = await game_global.battle_end
-	# GameGlobal restores the exploration actor after emitting battle_end.
-	# Resume Classic afterward so a following position change is not overwritten.
-	await game_global.get_tree().process_frame
-	var outcome := str(outcome_value)
-	var survivor_count := 0
-	for character_value: Variant in request["participants"]:
-		if _is_living_character(character_value):
-			survivor_count += 1
-	var response := {
-		"battleId": int(request["battleId"]),
-		"battleStarted": true,
-		"outcome": outcome,
-		"coward": outcome != "won",
-		"survivorCount": survivor_count,
-	}
-	var forced_resume_slot := _take_forced_battle_resume_slot()
-	if forced_resume_slot >= 0:
-		response["forcedResumeSlot"] = forced_resume_slot
-	return response
-
-
 func _record_forced_battle_resume_slot(resume_slot: int) -> bool:
-	if resume_slot != 8:
-		return false
-	_forced_battle_resume_slot = resume_slot
-	return true
+	return _combat_services._record_forced_battle_resume_slot(resume_slot)
 
 
 func _take_forced_battle_resume_slot() -> int:
-	var resume_slot := _forced_battle_resume_slot
-	_forced_battle_resume_slot = -1
-	return resume_slot
+	return _combat_services._take_forced_battle_resume_slot()
 
 
 func build_classic_battle_request(
@@ -2156,11 +1820,6 @@ func _present_random_branch(payload: Dictionary) -> Dictionary:
 	_play_sound(payload)
 	if int(payload.get("messageId", 0)) == 0:
 		return {}
-	return await _show_text(payload)
-
-
-func _present_priest_turning(payload: Dictionary) -> Dictionary:
-	_play_sound(payload)
 	return await _show_text(payload)
 
 
@@ -4227,36 +3886,6 @@ func apply_classic_experience_loss(
 		"experiencePerCharacter": per_character,
 		"experienceRemoved": experience_removed,
 	}
-
-
-func _apply_coward_penalty(payload: Dictionary) -> Dictionary:
-	var text_rect: Object = _text_rect()
-	if text_rect == null:
-		return _error("Realmz HUD TextRect is unavailable for the Classic coward penalty")
-
-	await text_rect.set_text(CLASSIC_COWARD_RETREAT_MESSAGE, true)
-	var sound_result := _play_sound(payload)
-	await text_rect.set_text(CLASSIC_COWARD_EXPERIENCE_MESSAGE, true)
-
-	var party := _party_characters()
-	var result := apply_classic_coward_experience_penalty(
-		party,
-		int(payload.get("experiencePerLevel", 0))
-	)
-	_refresh_party_panels(party)
-	result["warningIds"] = payload.get("warningIds", []).duplicate()
-	result["soundResult"] = sound_result
-	if bool(payload.get("backUpParty", false)):
-		var retreat_result := retreat_classic_party(
-			_autoload("GameGlobal"),
-			payload.get("entryMovement")
-		)
-		for retreat_key: Variant in retreat_result:
-			result[retreat_key] = retreat_result[retreat_key]
-	else:
-		result["partyBackedUp"] = false
-		result["backUpReason"] = "Classic does not retreat the party in dungeons"
-	return result
 
 
 func apply_classic_coward_experience_penalty(
