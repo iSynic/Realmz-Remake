@@ -9,7 +9,6 @@ func _ready():
 #	get_viewport().set_sdf_scale(2)
 	#print("MAIN METHODS : \n",get_script().get_script_method_list())
 	var _err1 = get_tree().root.connect("size_changed",Callable(NodeAccess.__Map(),"_on_viewport_size_changed"))
-	var _err2 = get_tree().root.connect("size_changed",Callable(UI.ow_hud,"_on_viewport_size_changed"))
 	#get_tree().root.max_size = Window.MODE_FULLSCREEN
 	
 	#var config = FileAccess.open(Paths.realmzfolderpath+"settings.cfg", FileAccess.ModeFlags.WRITE_READ)
@@ -47,6 +46,8 @@ func _ready():
 	#pass
 
 func _exit_tree():
+	if DisplayServer.get_name() == "headless":
+		return
 	Utils.FileHandler.set_cfg_setting(Paths.settingspath, "SETTINGS","screen_size_x", DisplayServer.window_get_size().x)
 	Utils.FileHandler.set_cfg_setting(Paths.settingspath, "SETTINGS","screen_size_y", DisplayServer.window_get_size().y)
 	pass

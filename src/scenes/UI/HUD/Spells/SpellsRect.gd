@@ -15,6 +15,7 @@ class_name SpellsMenu
 
 @onready var spellLevelsRect = $"VBoxContainer/TopContainer/SpellLevelsRect/SpellLevelsContainer"
 @onready var spelllistContainer = $"VBoxContainer/TopContainer/SpellsListRect/ScrollContainer/SpellListContainer"
+@onready var slevelbutton1: Button = $"VBoxContainer/TopContainer/SpellLevelsRect/SpellLevelsContainer/SLevelButton1"
 
 @onready var spellPowersContainer = $"VBoxContainer/MiddleContainer/PowerLevelsRect/PowerLevelsContainer"
 
@@ -73,6 +74,7 @@ var picked_character = null
 var picked_level = 1
 var picked_spell : Spell = null
 var picked_power : int = 1
+var encounter_selection_mode := false
 
 @onready var plevelbutton1 = $"VBoxContainer/MiddleContainer/PowerLevelsRect/PowerLevelsContainer/PLevelButton1"
 @onready var plevelbutton2 = $"VBoxContainer/MiddleContainer/PowerLevelsRect/PowerLevelsContainer/PLevelButton2"
@@ -84,6 +86,7 @@ var picked_power : int = 1
 @onready var plevelbuttons : Array = [plevelbutton1,plevelbutton2,plevelbutton3,plevelbutton4,plevelbutton5,plevelbutton6,plevelbutton7]
 
 signal spell_picked
+signal encounter_spell_picked
 
 
 # Called when the node enters the scene tree for the first time.
@@ -113,6 +116,7 @@ func on_viewport_size_changed(screensize) :
 
 
 func initialize(character) :
+	encounter_selection_mode = false
 	picked_spell = null
 	castButton.disabled = true
 #	print("initialize spell menu for "+character.name)
@@ -133,8 +137,14 @@ func initialize(character) :
 		if c.get_index() >0 :
 			c.set_button_group(powerbgroup)
 	
-	_on_SLevelButton_pressed(0)
+	slevelbutton1.button_pressed = true
+	_on_SLevelButton_pressed(1)
 	_on_PLevelButton_pressed(1)
+
+
+func initialize_for_encounter(character) -> void:
+	initialize(character)
+	encounter_selection_mode = true
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 #func _process(delta):
@@ -143,6 +153,11 @@ func initialize(character) :
 
 func _on_CastButton_pressed():
 	print("_on_CastButton_pressed")
+	if encounter_selection_mode:
+		encounter_selection_mode = false
+		hide()
+		encounter_spell_picked.emit()
+		return
 #	hide()
 #	picked_spell = "some spell "+String(randi()%1000)
 	emit_signal("spell_picked", picked_character, picked_spell, picked_power, {} ) #item is {}
@@ -155,6 +170,10 @@ func _on_AbortButton_pressed():
 	print("SpellsRect AbortButton_pressed")
 	hide()
 	picked_spell = null
+	if encounter_selection_mode:
+		encounter_selection_mode = false
+		encounter_spell_picked.emit()
+		return
 	#push_error("Spells Menu : ABORT BUTTON PRESSED : behavior has changed, spell is null, not string 'abort'  anymore !")
 	if StateMachine.is_combat_state() :
 		StateMachine.exit_cb_menu_state()
@@ -227,12 +246,18 @@ func _on_SLevelButton_pressed(slevel : int):
 			#castButton.disabled = castButton.disabled and picked_spell.in_field
 
 func can_cast_spell(crea : Creature, spell, power : int) -> bool :
+	if not encounter_selection_mode \
+			and not spell.get("is_not_spell") \
+			and not crea.can_cast_spells():
+		return false
 	if not spell.get("is_not_spell") and crea.get_spellsperround_left()<=0 :
 		return false
-	if StateMachine.is_combat_state() and (not spell.in_combat) :
+	if not encounter_selection_mode \
+			and StateMachine.is_combat_state() and (not spell.in_combat) :
 		#print("SpellsRect can_cast_spell : "+spell.name+ "is not for combat mode")
 		return false
-	if StateMachine.is_exploration_state() and (not spell.in_field) :
+	if not encounter_selection_mode \
+			and StateMachine.is_exploration_state() and (not spell.in_field) :
 		#print("SpellsRect can_cast_spell : "+spell.name+ "is not for field mode")
 		return false
 			#castButton.disabled = castButton.disabled and picked_spell.in_combat
@@ -276,10 +301,10 @@ func _on_spell_selected(spelldict : Dictionary, button) :
 		for i in range(7) :
 			var pbutton = plevelbuttons[i]
 			pbutton.set_disabled(i>=maxplevel)
-		if picked_power >= maxplevel :
+		if picked_power > maxplevel :
 			var pbutton = plevelbuttons[maxplevel-1]
 			pbutton.set_pressed(true)
-			_on_PLevelButton_pressed(maxplevel-1)
+			_on_PLevelButton_pressed(maxplevel)
 	else :
 		for b in plevelbuttons :
 			b.set_disabled(false)

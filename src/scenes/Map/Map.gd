@@ -12,6 +12,17 @@ Loads Things and add them into this Node.
 extends Control
 class_name Map
 
+const ClassicQueuedSpellRuntimeScript = preload(
+	"res://scripts/classic_runtime/classic_queued_spell_runtime.gd"
+)
+const ClassicLightScript = preload(
+	"res://scripts/classic_runtime/classic_light.gd"
+)
+const ClassicDungeonBattleTerrainScript = preload(
+	"res://scripts/classic_runtime/classic_dungeon_battle_terrain.gd"
+)
+const BattleOccupancyRulesScript = preload("res://scripts/battle_occupancy_rules.gd")
+
 # Get Thing Scene By default #
 #@export (PackedScene) var _thing
 
@@ -22,6 +33,7 @@ var display_explored_only : bool = false
 var explored_tiles : Array = []  #array of array  of boold, true=explored
 var extra_images : Dictionary = {}
 var show_scripts : bool = true
+@export var show_pathfinding_debug : bool = false
 var mapdata : Array = []
 var map_size : Vector2 = Vector2.ONE
 var mapscriptareas : Dictionary = {}
@@ -86,21 +98,53 @@ var  exploration_sight_dirs : Array = []
 #var exampleTerrainEffect : Dictionary = {"caster" : "somecreature", "Tiles" : [Vector2.ZERO], "timeleft" : 3, "spell" : somescript, "texture" : Texture}
 
 var terrainEffects : Array = []
+var _next_terrain_effect_id := 1
 #var terrainTexAtlas : ImageTexture = preload("res://shared_assets/BattleEffects/BattleEffects.png")
 var terrains_tex_pos_dict : Dictionary = {
 	"Bnd" : Vector2i(2,1),	"Web" : Vector2i(3,1),	"Trg" : Vector2i(4,1),"Yfr" : Vector2i(5,1),
 	"Gcl" : Vector2i(6,1),	"Bcl" : Vector2i(7,1),	"Spn" : Vector2i(8,1),"Slm" : Vector2i(9,1),
 	"Spr" : Vector2i(10,1),	"Bal" : Vector2i(11,1),	"Orb" : Vector2i(12,1),"Thn" : Vector2i(13,1),
-	"Spk" : Vector2i(14,1),	"Str" : Vector2i(0,2),	"Dts" : Vector2i(1,2) ,"Ice" : Vector2i(5,2) }
+	"Spk" : Vector2i(14,1),	"Str" : Vector2i(0,2),	"Dts" : Vector2i(1,2) ,"Ice" : Vector2i(5,2),
+	# Exact PICT 302 frames used by Classic queue icons 9 and 10.
+	"ClassicQueue9" : Vector2i(4,6), "ClassicQueue10" : Vector2i(12,6) }
 var tex_name_tex_dict : Dictionary = {}
 
-func add_terrain_effect_from_spell(spell,power : int, aoe : Array, targ_pos : Vector2i,caster : Creature) :
+func add_terrain_effect_from_spell(
+	spell,
+	power: int,
+	aoe: Array,
+	targ_pos: Vector2i,
+	caster: Creature
+) -> bool:
 	var t_aoe : Array = []
 	for i in range(aoe.size()) :
 		t_aoe.append(Vector2i(aoe[i])+targ_pos)
-	var texture = tex_name_tex_dict[spell.terrain_tex]
-	terrainEffects.append( {"time":spell.get_duration_roll(power,caster), "tiles":t_aoe, "caster":caster, "spell":spell,"power":power,"texture":texture} )
+	var is_classic: bool = spell.has_method("is_classic_queued_spell") \
+		and spell.is_classic_queued_spell()
+	if is_classic and ClassicQueuedSpellRuntimeScript.classic_effect_count(terrainEffects) \
+			>= ClassicQueuedSpellRuntimeScript.MAX_EFFECTS:
+		push_warning("Classic queued spell limit reached; the new field was not retained")
+		return false
+	if spell.terrain_tex.is_empty() or not tex_name_tex_dict.has(spell.terrain_tex):
+		push_warning("Spell %s has no battlefield terrain texture" % spell.name)
+		return false
+	var duration := int(spell.get_duration_roll(power, caster))
+	if duration <= 0 or t_aoe.is_empty():
+		return false
+	terrainEffects.append({
+		"id": _next_terrain_effect_id,
+		"time": duration,
+		"tiles": t_aoe,
+		"caster": caster,
+		"phase_owner": caster,
+		"spell": spell,
+		"power": power,
+		"texture": tex_name_tex_dict[spell.terrain_tex],
+		"classic": is_classic,
+	})
+	_next_terrain_effect_id += 1
 	queue_redraw()
+	return true
 
 func remove_terrain_effect(terrain : Dictionary) :
 	terrainEffects.erase(terrain)
@@ -120,6 +164,12 @@ func get_terrain_effects_at_pos(tpos : Vector2) -> Array :
 				returned.append(t)
 				continue
 	return returned
+
+
+func get_terrain_effects_touching_creature(creature: Creature) -> Array:
+	return ClassicQueuedSpellRuntimeScript.effects_touching_creature(
+		terrainEffects, creature
+	)
 
 func add_extra_image(key : String, img_key : String, coords : Vector2) :
 	print("MAp add_extra_image : "+ key+ ', '+img_key,', ',coords)
@@ -144,23 +194,40 @@ func remove_extra_image(key : String) :
 	extra_images[key].queue_free()
 	extra_images.erase(key)
 
-func _on_new_round() :
-	for t in terrainEffects :
-		t["time"]-=1
-	var newarray : Array = []
-	for t in terrainEffects :
-		if t["time"]>0 :
-			newarray.append(t)
-	terrainEffects = newarray
-	var allCreaButtons : Array = StateMachine.combat_state.all_battle_creatures_btns
-	var crealist : Array = []
-	for cb in allCreaButtons :
-		crealist.append(cb.creature)
-	#pathfinder_update_characters(crealist)
+func _on_new_round(combat_buttons: Array = []) -> Array:
+	var stationary_actions := ClassicQueuedSpellRuntimeScript.stationary_actions(
+		terrainEffects, combat_buttons
+	)
+	for terrain: Dictionary in terrainEffects:
+		if not bool(terrain.get("classic", false)):
+			terrain["time"] = int(terrain.get("time", 0)) - 1
+	terrainEffects = terrainEffects.filter(
+		func(terrain: Dictionary) -> bool: return int(terrain.get("time", 0)) > 0
+	)
+	queue_redraw()
+	return stationary_actions
+
+
+func advance_classic_terrain_phase(phase_owner: Creature) -> void:
+	terrainEffects = ClassicQueuedSpellRuntimeScript.advance_phase(
+		terrainEffects, phase_owner
+	)
+	queue_redraw()
+
+
+func advance_missing_classic_terrain_phases(combat_buttons: Array) -> void:
+	var live_creatures: Array = []
+	for button: Variant in combat_buttons:
+		if is_instance_valid(button) and is_instance_valid(button.creature):
+			live_creatures.append(button.creature)
+	terrainEffects = ClassicQueuedSpellRuntimeScript.advance_missing_phases(
+		terrainEffects, live_creatures
+	)
 	queue_redraw()
 
 # Call functions to load the map #
 func _ready():
+	set_debug_overlays_enabled(GameGlobal.map_debug_overlays_enabled)
 	aStar11.crea_size = Vector2.ONE
 	#aStarExtra.crea_size = Vector2(2,2)#Vector2.ONE*2
 	aStar12.crea_size = Vector2(1,2)
@@ -191,6 +258,15 @@ func _ready():
 		exploration_sight_dirs.append(Vector2(halfray-x,halfray))
 		exploration_sight_dirs.append(Vector2(-halfray,halfray-x))
 #	load_map()
+
+func set_debug_overlays_enabled(enabled: bool) -> void:
+	show_scripts = enabled
+	if not is_instance_valid(debuglabel):
+		return
+	debuglabel.visible = enabled
+	if not enabled:
+		debuglabel.text = ""
+	queue_redraw()
 
 func set_ow_character_icon(icon : Texture2D) :
 	if GameGlobal.camping :
@@ -330,7 +406,8 @@ func _draw() :  #map cells are  [ [used_tileset_name,t_id,true],
 #						print(stuffbook[i]){image:[Image:1191], type:ground}
 #						print("draw map, ",i)
 						draw_texture_rect(i["texture"], Rect2(32*x,32*y,32,32), true)
-					if last_generated_path.has(Vector2(cam_x+x,cam_y+y)) :#Vector2(cam_x+x,cam_y+y)) :  #last_generated_path
+					if show_pathfinding_debug \
+							and last_generated_path.has(Vector2(cam_x+x,cam_y+y)):
 						draw_texture_rect(darktexture, Rect2(32*x,32*y,32,32), true)
 
 			##PATHFINDING DEBUG
@@ -361,7 +438,11 @@ func _draw() :  #map cells are  [ [used_tileset_name,t_id,true],
 				var btimg : Texture = mapboats[tpos][0]["tex"]
 				draw_texture_rect(btimg, Rect2(32*x,32*y,32,32), true, Color(1,1,1,1))
 
-	if darkness_level >=0 :
+	if ClassicLightScript.should_draw_darkness(
+		darkness_level,
+		StateMachine.is_combat_state(),
+		is_instance_valid(GameGlobal.classic_campaign_session)
+	):
 		var light_level : int = darkness_level + GameGlobal.light_power
 		light_level = int(clamp(light_level, 0, 6))
 		if light_level <= 6 and light_level >=0:
@@ -415,8 +496,17 @@ func _on_MapMouseControlButton_mouse_exited():
 	#print(" map burp exited")
 
 func _process(_delta):
-	pass
-	var newtext : String = "Map Debug Label : GameState : "+str(StateMachine._state_name)+", combat : "+str(StateMachine.is_combat_state())+", cbanim timer:"+str(StateMachine.combat_state.cbanimstate.timer)+'\n'
+	if not visible:
+		return
+	if not show_scripts:
+		return
+	var combat_animation_timer: Variant = "unloaded"
+	if (
+		is_instance_valid(StateMachine.combat_state)
+		and is_instance_valid(StateMachine.combat_state.cbanimstate)
+	):
+		combat_animation_timer = StateMachine.combat_state.cbanimstate.timer
+	var newtext : String = "Map Debug Label : GameState : "+str(StateMachine._state_name)+", combat : "+str(StateMachine.is_combat_state())+", cbanim timer:"+str(combat_animation_timer)+'\n'
 	debuglabel.text = newtext + '\n teamsize : '+str(GameGlobal.player_characters.size())+ "\n TectRectChoiceContainer visible ?"+str(UI.ow_hud.textRect.choicesContainer.visible)
 	debuglabel.text +=  "\nGameGlobal.currentmap_name : "+GameGlobal.currentmap_name
 
@@ -484,6 +574,7 @@ func explore_tiles_from_tilepos(tpos : Vector2) -> void :
 	#bresenham_line(startpt : Vector2, endpt : Vector2, min_range : int, max_range : int) -> Array :
 	var explored_tiles_x_size = explored_tiles[0].size()
 	var explored_tiles_y_size = explored_tiles.size()
+	var ignore_blocking_sight := GameGlobal.exploration_sight_ignores_blocking_tiles()
 	for endpt in exploration_sight_dirs :
 		#continue
 		#print("explored_tiles_x_size : ",explored_tiles_x_size, ", explored_tiles_y_size : ", explored_tiles_y_size)
@@ -492,7 +583,10 @@ func explore_tiles_from_tilepos(tpos : Vector2) -> void :
 			if t.x<0 or t.y<0 or t.x>=explored_tiles_x_size or t.y>=explored_tiles_y_size : break
 			explored_tiles[t.y][t.x] = 1
 #			print(mapdata[t.x][t.y])
-			if bool(mapdata[t.x][t.y][0]["blkview"]) :
+			var tile_stack: Array = mapdata[t.x][t.y]
+			if tile_stack.is_empty():
+				continue
+			if bool(tile_stack[0]["blkview"]) and not ignore_blocking_sight:
 				break
 
 func generate_zoomed_map(mapname : String) -> void:
@@ -511,6 +605,7 @@ func generate_zoomed_map(mapname : String) -> void:
 	var expanded_cols = orig_cols * 3
 	var expanded_rows = orig_rows * 3
 	var expanded_tilemap = []
+	var classic_dungeon_battle_tiles: Array = []
 	for i in range(expanded_cols):
 		expanded_tilemap.append([])
 		for j in range(expanded_rows):
@@ -525,12 +620,21 @@ func generate_zoomed_map(mapname : String) -> void:
 			else:
 				push_warning("No tilesets loaded for fallback tile!")
 				continue
+			var is_classic_dungeon := (
+				ClassicDungeonBattleTerrainScript.is_classic_dungeon_tile(ground_tile)
+			)
+			if is_classic_dungeon and classic_dungeon_battle_tiles.is_empty():
+				classic_dungeon_battle_tiles = (
+					ClassicDungeonBattleTerrainScript.ensure_tileset(resources.tiles_book)
+				)
 
 			var expansion = []
-			if ground_tile.has("expansion") and ground_tile["expansion"].size() == 9:
+			if is_classic_dungeon:
+				expansion.resize(9)
+				expansion.fill(0)
+			elif ground_tile.has("expansion") and ground_tile["expansion"].size() == 9:
 				expansion = ground_tile["expansion"]
 			else:
-				push_warning("Expansion data missing for tile: %s" % [str(ground_tile)])
 				for k in range(9):
 					expansion.append(ground_tile["id"])
 			# LOGGING for debugging
@@ -541,13 +645,23 @@ func generate_zoomed_map(mapname : String) -> void:
 					var expanded_col = col * 3 + j
 					var expanded_row = row * 3 + i
 					var exp_index = i * 3 + j
-					var tileset_key = ground_tile["tileset_name"] + ".json"
 					var expanded_tile_dict = null
-					if resources.tiles_book.has(tileset_key) and expansion[exp_index] < resources.tiles_book[tileset_key].size() and expansion[exp_index] >= 0:
-						expanded_tile_dict = resources.tiles_book[tileset_key][expansion[exp_index]]
+					if is_classic_dungeon:
+						expanded_tile_dict = (
+							ClassicDungeonBattleTerrainScript.battle_tile_for_field(
+								classic_dungeon_battle_tiles,
+								int(ground_tile["classicDungeonField"])
+							)
+						)
+						if expanded_tile_dict.is_empty():
+							expanded_tile_dict = ground_tile
 					else:
-						push_warning("Invalid expansion index %s for tileset %s, using ground_tile" % [str(expansion[exp_index]), tileset_key])
-						expanded_tile_dict = ground_tile # fallback to ground_tile
+						var tileset_key = ground_tile["tileset_name"] + ".json"
+						if resources.tiles_book.has(tileset_key) and expansion[exp_index] < resources.tiles_book[tileset_key].size() and expansion[exp_index] >= 0:
+							expanded_tile_dict = resources.tiles_book[tileset_key][expansion[exp_index]]
+						else:
+							push_warning("Invalid expansion index %s for tileset %s, using ground_tile" % [str(expansion[exp_index]), tileset_key])
+							expanded_tile_dict = ground_tile # fallback to ground_tile
 					expanded_tilemap[expanded_col][expanded_row] = [expanded_tile_dict] # array of one dict
 
 	# Duplicate original map structure, but replace tilemap with expanded_tilemap
@@ -560,6 +674,16 @@ func generate_zoomed_map(mapname : String) -> void:
 	} # ScriptRects, Paths, and Secrets are present but empty
 	zoomed_map[2] = null # Clear map scripts
 	zoomed_map[4] = "Battle" # Set mapmusictype to "Battle"
+	# Exploration masks use row/column dimensions from the source map. They cannot
+	# be reused by the three-times-larger battlefield, and combat terrain should
+	# remain visible regardless of how much of the source map was explored.
+	zoomed_map[7] = false
+	zoomed_map[8] = []
+	for row in range(expanded_rows):
+		var explored_row: Array = []
+		explored_row.resize(expanded_cols)
+		explored_row.fill(1)
+		zoomed_map[8].append(explored_row)
 	resources.maps_book["temporary_zoomed_map"] = zoomed_map
 	print("MAP Generated temporary zoomed map from: ", mapname, " with music type set to Battle and expanded tiles")
 	load_map(GameGlobal.currentcampaign, "temporary_zoomed_map" )
@@ -569,39 +693,38 @@ func find_path(from : Vector2i, to : Vector2i, swimmer : bool, flying : bool, bi
 	#var right_astar : SpecificAstar2D = aStar11 #get_right_graph_for_crea(crea)
 	var right_astar : SpecificAstar2D = get_right_graph_for_crea(crea)
 	print("MAP ASTAR CREA  SIZE : ", right_astar.crea_size)
-	var unblocked_poses : Array = []
-	for cx in range(right_astar.crea_size.x) :
-		for cy in range(right_astar.crea_size.y):
-			unblocked_poses.append(from+Vector2i(cx,cy))
-			pathfinder_clear_pos(from+Vector2i(cx,cy))
+	var temporarily_cleared: Dictionary = {}
 
+	# Melee AI paths into an occupied target; its final attempted step becomes
+	# an attack. Temporarily clear only that overlap from the active size graph.
 	var who = GameGlobal.who_is_at_tile(to)
 	if who :
-		for x in range(who.creature.size.x) :
-			for y in range(who.creature.size.y) :
-				#var ubp : Vector2 = Vector2(to.x+x, to.y+y)
-				var ubp : Vector2 = Vector2(who.creature.position.x+x, who.creature.position.y+y)
-				#print("map.find_path , to who : "+who.creature.name+ ', at '+ str(who.creature.position)+", size: "+str(who.creature.size))
-
-				if GameGlobal.is_map_tile_walkable_by_char(crea,ubp) :
-					#print("map find_path unlock ubp  unblockposition")
-					unblocked_poses.append(ubp)
-					pathfinder_clear_pos(ubp)
+		for anchor: Vector2i in BattleOccupancyRulesScript.blocked_anchors_for(
+			who.creature.position,
+			who.creature.size,
+			right_astar.crea_size,
+			right_astar.region
+		):
+			if right_astar.blocked_tiles.has(anchor):
+				right_astar.clear_pos(anchor)
+				temporarily_cleared[anchor] = true
 	if melee_enemies_on_the_way :
 		for cb : CombatCreaButton in StateMachine.combat_state.all_battle_creatures_btns :
 			var c : Creature = cb.creature
 			if c.curFaction != crea.curFaction :
-
-				for x in range(c.size.x) :
-					for y in range(c.size.y) :
-						var ubp : Vector2 = Vector2(to.x+x, to.y+y)
-						if GameGlobal.is_map_tile_walkable_by_char(crea,ubp) :
-							unblocked_poses.append(ubp)
-							pathfinder_clear_pos(ubp)
+				for anchor: Vector2i in BattleOccupancyRulesScript.blocked_anchors_for(
+					c.position,
+					c.size,
+					right_astar.crea_size,
+					right_astar.region
+				):
+					if right_astar.blocked_tiles.has(anchor):
+						right_astar.clear_pos(anchor)
+						temporarily_cleared[anchor] = true
 
 	last_generated_path = right_astar.get_point_path(from, to)
-	for p in unblocked_poses :
-		pathfinder_block_pos(p)
+	for anchor: Vector2i in temporarily_cleared:
+		right_astar.block_pos(anchor)
 	return last_generated_path
 
 func get_right_graph_for_crea(crea : Creature) -> SpecificAstar2D :

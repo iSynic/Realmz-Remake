@@ -14,6 +14,9 @@ extends Control
 @onready var newCharacterPanel : NinePatchRect = $NewCharacterPanel
 @onready var hdModeCheckButton : CheckButton = $HDButton
 var profileslist : Array =  []
+var initial_profile_ready := false
+
+signal initial_profile_loaded
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
@@ -26,8 +29,37 @@ func _ready():
 	var profilefromcfg = Utils.FileHandler.get_cfg_setting(Paths.settingspath,"SETTINGS","current_profile", "Default Profile")
 	pass
 	var hd_mode_from_config = Utils.FileHandler.get_cfg_setting(Paths.settingspath,"SETTINGS","hd_mode", false)
+	var game_speed_from_config := float(
+		Utils.FileHandler.get_cfg_setting(
+			Paths.settingspath,
+			"SETTINGS",
+			"game_speed_percent",
+			GameGlobal.DEFAULT_GAME_SPEED_PERCENT
+		)
+	)
+	var map_debug_overlays_from_config := bool(
+		Utils.FileHandler.get_cfg_setting(
+			Paths.settingspath,
+			"SETTINGS",
+			"show_map_debug_overlays",
+			true
+		)
+	)
 	
 	GameGlobal.set_hd_mode(hd_mode_from_config)
+	GameGlobal.set_game_speed_percent(game_speed_from_config)
+	GameGlobal.set_map_debug_overlays_enabled(map_debug_overlays_from_config)
+	_load_initial_profile_after_first_frame(profilefromcfg, hd_mode_from_config)
+
+
+func _load_initial_profile_after_first_frame(
+	profilefromcfg: String,
+	hd_mode_from_config: bool
+) -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return
 #	var dir = Directory.new()
 	if DirAccess.dir_exists_absolute(Paths.profilesfolderpath+"/" + profilefromcfg) :
 #	if dir.dir_exists(Paths.profilesfolderpath+"/" + profilefromcfg) :
@@ -40,6 +72,8 @@ func _ready():
 		hdModeCheckButton.button_pressed = GameGlobal.hd_mode
 		if GameGlobal.hd_mode:
 			ScreenUtils.set_window_scale(self, 2.0)
+	initial_profile_ready = true
+	initial_profile_loaded.emit()
 
 	#print("Mainmenu _ready over")
 
@@ -79,8 +113,11 @@ func _on_profile_popup_menu_id_pressed(id):
 
 
 func _on_new_character_button_pressed():
+	newCharacterPanel.clear_classic_campaign_context()
 	newCharacterPanel.set_clean_character()
 	newCharacterPanel.fill()
+	newCharacterPanel.loadClassesRaces()
+	newCharacterPanel.fillClassesRacesMenus()
 	newCharacterPanel.show()
 #	newCampaignButton.hide()
 

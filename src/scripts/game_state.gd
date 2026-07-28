@@ -5,14 +5,20 @@ class_name GameStateMachine
 @onready var state:State = get_node(initial_state) : set = set_state#, get = _get_state
 @onready var _state_name : String = state.name
 
-@onready var resource_node : Node = NodeAccess.__Resources()
+const EXPLORATION_STATE_PATH := "res://scripts/states/ExplorationState.gd"
+const EX_MENU_STATE_PATH := "res://scripts/states/ExMenusState.gd"
+const EX_ANIMATION_STATE_PATH := "res://scripts/states/ExAnim.gd"
+const COMBAT_STATE_PATH := "res://scripts/states/CombatState.gd"
+const CB_DECIDE_STATE_PATH := "res://scripts/states/CbDecideActionState.gd"
+const CB_ANIMATION_STATE_PATH := "res://scripts/states/CbAnimationState.gd"
+const CB_MENU_STATE_PATH := "res://scripts/states/CbMenusState.gd"
 
-@export var exploration_state : ExplorationState
-@export var combat_state : CombatState
-@export var ex_menu_state : ExMenusState
-@export var cb_menu_state : CbMenusState
-@export var cb_decide_state : CbDecideState
-@export var cb_anim_state : CbAnimationState
+var exploration_state: Node
+var combat_state: Node
+var ex_menu_state: Node
+var cb_menu_state: Node
+var cb_decide_state: Node
+var cb_anim_state: Node
 #@export var cb_target_state : CbTargetingState
 
 var time_since_last_dir_input : float = 0
@@ -44,6 +50,9 @@ func _input(event : InputEvent) -> void :
 
 func transition_to(target_state_path : String, msg : Dictionary = {} ) -> void :
 #	print("STATEMACHINE transtioon from ",state.name," to "+target_state_path)
+	if not has_node(target_state_path) and target_state_path != "Inactive":
+		if not ensure_gameplay_states_loaded():
+			return
 	if not has_node(target_state_path) :
 		push_error("GameStateMachine does not have this state path : "+target_state_path)
 		return
@@ -65,6 +74,53 @@ func _ready():
 #	yield(owner, "ready")
 	#await owner.ready
 	state.enter( )
+
+
+func ensure_gameplay_states_loaded() -> bool:
+	if is_instance_valid(exploration_state) and is_instance_valid(combat_state):
+		return true
+
+	exploration_state = _instantiate_state(EXPLORATION_STATE_PATH, "Exploration")
+	ex_menu_state = _instantiate_state(EX_MENU_STATE_PATH, "ExMenus")
+	var ex_animation_state := _instantiate_state(EX_ANIMATION_STATE_PATH, "ExAnim")
+	combat_state = _instantiate_state(COMBAT_STATE_PATH, "Combat")
+	cb_decide_state = _instantiate_state(CB_DECIDE_STATE_PATH, "CbDecideAction")
+	cb_anim_state = _instantiate_state(CB_ANIMATION_STATE_PATH, "CbAnimation")
+	cb_menu_state = _instantiate_state(CB_MENU_STATE_PATH, "CbMenus")
+	for gameplay_state: Node in [
+		exploration_state,
+		ex_menu_state,
+		ex_animation_state,
+		combat_state,
+		cb_decide_state,
+		cb_anim_state,
+		cb_menu_state,
+	]:
+		if gameplay_state == null:
+			push_error("GameStateMachine could not create the gameplay state graph.")
+			return false
+
+	add_child(exploration_state)
+	exploration_state.add_child(ex_menu_state)
+	exploration_state.add_child(ex_animation_state)
+	add_child(combat_state)
+	combat_state.add_child(cb_decide_state)
+	combat_state.add_child(cb_anim_state)
+	combat_state.add_child(cb_menu_state)
+	combat_state.set("cbanimstate", cb_anim_state)
+	cb_decide_state.set("combat_state", combat_state)
+	return true
+
+
+func _instantiate_state(script_path: String, state_name: String) -> Node:
+	var script := load(script_path) as GDScript
+	if script == null:
+		push_error("GameStateMachine could not load %s." % script_path)
+		return null
+	var gameplay_state := script.new() as Node
+	if gameplay_state != null:
+		gameplay_state.name = state_name
+	return gameplay_state
 
 
 func is_combat_state() :
@@ -154,20 +210,21 @@ func _process(delta):
 
 		
 		var maybe_input : Vector2i = Vector2i.ZERO
-		if GameGlobal.map.mouseinside :
+		var current_map: Map = GameGlobal.map
+		if is_instance_valid(current_map) and current_map.mouseinside :
 			#if Input.is_action_pressed("RightClick") :
 				#send_dir_input(Vector2i.ZERO, false)
-			var targoffset : Vector2 = GameGlobal.map.focuscharacter.get_pixel_position() 
+			var targoffset : Vector2 = current_map.focuscharacter.get_pixel_position()
 			if is_combat_state() :
 				pass
 				var selecetdcharcb : CombatCreaButton = combat_state.get_selected_character_combatbutton()
 				if is_instance_valid(selecetdcharcb) :
 					targoffset = selecetdcharcb.position# + map.focuscharacter.position
 				else :
-					targoffset = GameGlobal.map.focuscharacter.get_pixel_position() 
+					targoffset = current_map.focuscharacter.get_pixel_position()
 			#else :
 				#targoffset = GameGlobal.map.focuscharacter.get_pixel_position()
-			if GameGlobal.map.pressed :
+			if current_map.pressed :
 				maybe_input = StateMachine.get_dir_input_from_mouse(delta, targoffset)
 				#print("gamestate l150 send_dir_input ", maybe_input, " w offset ", targoffset)
 				send_dir_input(maybe_input, false)
@@ -279,15 +336,29 @@ func _is_overlay_panel_visible() -> bool :
 
 			
 
-func check_map_script(position) ->bool :
+func check_map_script(position, context := {}) ->bool :
 	var canwalk = true
 #	print("GameState check_map_scripts : ")
+	GameGlobal.apply_classic_search_time_cost()
+	if await GameGlobal.check_classic_random_rectangles(
+		Vector2i(position),
+		context
+	):
+		return false
 	
 	var scriptstocall : Dictionary = {}
 	
 	for s in GameGlobal.map.mapscriptareas :
 #		print(map.mapscriptareas[s])
 		var sr = GameGlobal.map.mapscriptareas[s]
+		if (
+			GameGlobal.is_classic_runtime_active()
+			and not GameGlobal.ClassicRandomRectangleScript.identity(
+				str(s),
+				sr
+			).is_empty()
+		):
+			continue
 		var l = sr["scriptRectangle"][0][0]
 		var u = sr["scriptRectangle"][0][1]
 		var r = sr["scriptRectangle"][1][0]
@@ -310,7 +381,7 @@ func check_map_script(position) ->bool :
 					continue
 				
 
-				if sr.has("RR_Battle") :
+				if sr.has("RR_Battle") and GameGlobal.random_battles_allowed():
 					printerr("StateMachine sr has RR_Battle")
 					var do_rr_fight : bool = false
 					var num_of_poss_outcomes : int = 1
@@ -343,21 +414,27 @@ func check_map_script(position) ->bool :
 				if not scriptname.is_empty() : scriptstocall[scriptname] = '' #just a set, value doesnt matter
 	
 	printerr("SStateMachine l282 scriptstocall : ", scriptstocall)
-	#check map secrets :
-	for x in [-1,0,1] :
-		for y in [-1,0,1] :
-			var vpos : Vector2i = Vector2i(int(position.x+x),int(position.y+y))
-			if GameGlobal.map.mapsecrets.has( vpos ) :
-				var  randomfloat : float = randf()
-				var randomfail : bool = GameGlobal.map.get_secret_fail_chance(vpos) < randomfloat
-				print("StateMachine randomfail : ", randomfail,' ',GameGlobal.map.get_secret_fail_chance(vpos), '<',randomfloat)
-				if randomfail : #(x==!0 or y!=0) and 
-					continue
-			
-				if GameGlobal.map.mapsecrets[vpos][0]==0 :
-					print("StateMachine check_map_script : map.mapsecrets[vpos] ",GameGlobal.map.mapsecrets[vpos])
-					scriptstocall[GameGlobal.map.mapsecrets[vpos][1]] = ''
-					GameGlobal.map.set_secret_seen(vpos)
+	# Scenario maps keep Classic secret state in their preserved tile fields.
+	var classic_secret_result := GameGlobal.discover_classic_map_secrets(Vector2i(position))
+	if str(classic_secret_result.get("status", "")) == "error":
+		push_error(str(classic_secret_result.get(
+			"message",
+			"Classic secret discovery failed"
+		)))
+	if not bool(classic_secret_result.get("handled", false)):
+		for x in [-1,0,1] :
+			for y in [-1,0,1] :
+				var vpos : Vector2i = Vector2i(int(position.x+x),int(position.y+y))
+				if GameGlobal.map.mapsecrets.has( vpos ) :
+					var randomfloat : float = randf()
+					var detected := GameGlobal.map_secret_detection_succeeds(vpos, randomfloat)
+					if not detected:
+						continue
+
+					if GameGlobal.map.mapsecrets[vpos][0]==0 :
+						print("StateMachine check_map_script : map.mapsecrets[vpos] ",GameGlobal.map.mapsecrets[vpos])
+						scriptstocall[GameGlobal.map.mapsecrets[vpos][1]] = ''
+						GameGlobal.map.set_secret_seen(vpos)
 
 	for s in scriptstocall:
 		#find the script
@@ -381,29 +458,28 @@ func check_map_script(position) ->bool :
 		
 		if mapscriptareas_still_has_s:
 			GameGlobal.current_map_script_name = s
-			var script_returned = s
-			
-			if script_returned == 'STOP':
-				script_returned = ''
-				break
-			
-			while script_returned != null and script_returned != '':
-				# Check flags for if AP is disabled or replaced
-				var shouldcontinue : bool = GameGlobal.check_flags_for_current_map_script_name()
-				if not shouldcontinue:
-					script_returned = ''
-					break
-				
-				# Dodatkowe sprawdzenie przed call()
-				if GameGlobal.current_map_script_name == 'STOP' or GameGlobal.current_map_script_name == '':
-					script_returned = ''
-					break
-				
-				script_returned = await GameGlobal.map.mapscripts.call(GameGlobal.current_map_script_name)
-				if script_returned != null:
-					print("StateMachine check_map_scripts : script_returned is "+str(script_returned))
-					GameGlobal.current_map_script_name = script_returned
-			
+			var classic_context: Dictionary = context.duplicate(true) \
+				if context is Dictionary else {}
+			classic_context["mapPosition"] = Vector2i(position)
+			var classic_dispatch: Dictionary = await GameGlobal.dispatch_classic_map_script(
+				s,
+				classic_context
+			)
+			if bool(classic_dispatch.get("handled", false)):
+				var classic_result: Variant = classic_dispatch.get("result", {})
+				if (
+					classic_result is Dictionary
+					and str(classic_result.get("status", "")) not in ["completed", ""]
+				):
+					printerr(
+						"Classic map action point stopped: ",
+						classic_result.get("message", classic_result)
+					)
+				GameGlobal.current_map_script_name = ''
+				continue
+			push_error(
+				"Scenario map trigger '%s' is not registered with the scenario VM" % s
+			)
 			GameGlobal.current_map_script_name = ''
 		else:
 			print("StateMachine : mapscript doesnt have script "+s+", ok if it's because of a map change")
@@ -419,6 +495,10 @@ func check_map_script(position) ->bool :
 	return canwalk
 	
 
+
+
+func run_complex_encounter_branch(branch: Dictionary) -> void:
+	await ScriptHelperFuncsClass.start_complex_encounter(str(branch["encounter"]))
 
 
 func enter_ex_menu_state(msg_dict : Dictionary) :

@@ -1,4 +1,4 @@
-[gd_scene format=3 uid="uid://bcm4yk3e2uv7"]
+[gd_scene load_steps=82 format=3 uid="uid://bcm4yk3e2uv7"]
 
 [ext_resource type="PackedScene" uid="uid://y2mh6jttjyop" path="res://scenes/UI/HUD/Multiple Choices/ChoicesButton.tscn" id="1"]
 [ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="2"]
@@ -12,6 +12,7 @@
 [ext_resource type="PackedScene" uid="uid://bauulxe7dboxs" path="res://scenes/UI/HUD/TurnOrderPanel/turn_order_panel.tscn" id="11_6j1vb"]
 [ext_resource type="StyleBox" uid="uid://hikrvka0lrg3" path="res://shared_assets/UI/button50_normal_styleboxtexture.tres" id="12_c6hp3"]
 [ext_resource type="PackedScene" uid="uid://vd2sjsgfcp04" path="res://scenes/UI/HUD/MiniMapsRect/minimaps_rect.tscn" id="12_rykdu"]
+[ext_resource type="PackedScene" path="res://scenes/UI/HUD/ClassicPlayerMapRect/classic_player_map_rect.tscn" id="12_classic_map"]
 [ext_resource type="StyleBox" uid="uid://5gwr2x8v5t1f" path="res://shared_assets/UI/button50_hover_styleboxtexture.tres" id="13_dm23x"]
 [ext_resource type="PackedScene" uid="uid://bok34jeuhstd2" path="res://scenes/UI/HUD/CreatureCBRect/creature_rect.tscn" id="13_svkkd"]
 [ext_resource type="PackedScene" uid="uid://1ulsncmtjfnq" path="res://scenes/UI/HUD/PictureRect/picture_rect.tscn" id="13_vmq7b"]
@@ -54,7 +55,9 @@
 [ext_resource type="Texture2D" uid="uid://bie056qn1g078" path="res://scenes/UI/HUD/Button_Save.png" id="55"]
 [ext_resource type="Texture2D" uid="uid://d3bnx4063352c" path="res://scenes/UI/HUD/Button_Money.png" id="56"]
 [ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="67_o5gys"]
-[ext_resource type="Texture2D" uid="uid://dx6foa0r4isji" path="res://scenes/UI/HUD/Button_Spells.png" id="81"]
+[ext_resource type="Texture2D" uid="uid://djcm65t4wb1nt" path="res://scenes/UI/HUD/Button_Spells.png" id="81"]
+[ext_resource type="PackedScene" path="res://scenes/UI/HUD/ClassicTorch/classic_torch_button.tscn" id="82_torch"]
+[ext_resource type="Texture2D" uid="uid://hgowxiea5c08" path="res://shared_assets/UI/buttonShopText.png" id="83_shop"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_kbh82"]
 
@@ -186,6 +189,10 @@ offset_top = 0.0
 offset_bottom = 0.0
 
 [node name="MinimapsRect" parent="VBoxScreen/HBoxTop/MapArea" unique_id=435143942 instance=ExtResource("12_rykdu")]
+visible = false
+layout_mode = 1
+
+[node name="ClassicPlayerMapRect" parent="VBoxScreen/HBoxTop/MapArea" instance=ExtResource("12_classic_map")]
 visible = false
 layout_mode = 1
 
@@ -595,6 +602,26 @@ theme_override_styles/focus = SubResource("StyleBoxEmpty_74ttr")
 disabled = true
 icon = ExtResource("35_k5nci")
 
+[node name="ShopButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+visible = false
+custom_minimum_size = Vector2(50, 50)
+layout_mode = 0
+offset_left = 180.0
+offset_top = 128.0
+offset_right = 230.0
+offset_bottom = 178.0
+tooltip_text = "Enter shop"
+focus_mode = 0
+theme_override_styles/focus = SubResource("StyleBoxEmpty_74ttr")
+theme_override_styles/disabled = ExtResource("15_rs5dt")
+theme_override_styles/hover = ExtResource("13_dm23x")
+theme_override_styles/pressed = ExtResource("14_pjtj6")
+theme_override_styles/normal = ExtResource("12_c6hp3")
+disabled = true
+icon = ExtResource("83_shop")
+icon_alignment = 1
+vertical_icon_alignment = 1
+
 [node name="QSaveButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1463057139]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
@@ -705,6 +732,13 @@ offset_top = 7.94815
 offset_right = 180.189
 offset_bottom = 116.948
 
+[node name="ClassicTorchButton" parent="VBoxScreen/HBoxBot/BotRightPanel" instance=ExtResource("82_torch")]
+layout_mode = 0
+offset_left = 234.0
+offset_top = 8.0
+offset_right = 258.0
+offset_bottom = 78.0
+
 [node name="CombatBRPanel" parent="VBoxScreen/HBoxBot" unique_id=1331322809 instance=ExtResource("28_s8a54")]
 visible = false
 layout_mode = 2
@@ -721,9 +755,12 @@ layout_mode = 1
 
 [node name="CharSwapRect" type="NinePatchRect" parent="." unique_id=199985290]
 visible = false
-layout_mode = 0
-offset_right = 1024.0
-offset_bottom = 600.0
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 mouse_filter = 0
@@ -838,8 +875,10 @@ popup_window = true
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/CampButton" to="." method="_on_CampButton_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/SaveButton" to="." method="_on_save_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/TempleButton" to="." method="_on_temple_button_pressed"]
+[connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/ShopButton" to="." method="_on_shop_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/QSaveButton" to="." method="_on_q_save_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/MinimapsButton" to="." method="_on_minimaps_button_pressed"]
+[connection signal="closed" from="VBoxScreen/HBoxTop/MapArea/ClassicPlayerMapRect" to="." method="_on_classic_player_map_closed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/BestiaryButton" to="." method="_on_bestiary_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/AbiListButton" to="." method="_on_abi_list_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/MoneyButton" to="." method="_on_MoneyButton_pressed"]
@@ -848,5 +887,6 @@ popup_window = true
 [connection signal="toggled" from="VBoxScreen/HBoxBot/BotRightPanel/RestButton" to="." method="_on_RestButton_toggled"]
 [connection signal="timeout" from="VBoxScreen/HBoxBot/BotRightPanel/RestButton/RestTimer" to="." method="_on_RestTimer_timeout"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/SpellButton" to="." method="_on_SpellButton_pressed"]
+[connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/ClassicTorchButton" to="." method="_on_classic_torch_button_pressed"]
 [connection signal="pressed" from="CharSwapRect/OKButton" to="CharSwapRect" method="_on_OKButton_pressed"]
 [connection signal="pressed" from="CharSwapRect/CancelButton" to="CharSwapRect" method="_on_CancelButton_pressed"]

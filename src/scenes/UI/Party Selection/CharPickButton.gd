@@ -23,14 +23,25 @@ func _ready():
 		set_custom_minimum_size(Vector2(200,60))
 	pass # Replace with function body.
 
-func set_character(chara, eligible:bool) :
+func set_character(chara, eligible: bool, rejection_reason := "") :
 	selectable = eligible
 #	print("charîckbutton setcharacter ", chara)
 	character = chara
 	$NameLabel.text = chara.name
 	$LevelnLabel.text = str(chara.level)
-	$RaceClassLabel.text = chara.racegd.classrace_name+' '+chara.classgd.classrace_name
+	var race_name: String = (
+		str(chara.get_display_race_name())
+		if chara.has_method("get_display_race_name")
+		else str(chara.racegd.classrace_name)
+	)
+	var caste_name: String = (
+		str(chara.get_display_caste_name())
+		if chara.has_method("get_display_caste_name")
+		else str(chara.classgd.classrace_name)
+	)
+	$RaceClassLabel.text = race_name + " " + caste_name
 	$PortraitSprite.texture = chara.portrait
+	tooltip_text = rejection_reason
 	if GameGlobal.honest_mode :
 		$BusyLabel.text = chara.cur_campaign
 		

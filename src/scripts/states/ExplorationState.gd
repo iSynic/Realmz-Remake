@@ -1,6 +1,10 @@
 extends State
 class_name ExplorationState
 
+const ClassicCampaignGlobalScript = preload(
+	"res://scripts/classic_runtime/classic_campaign_global.gd"
+)
+const ClassicMapBridgeScript = preload("res://scripts/classic_runtime/classic_map_bridge.gd")
 
 
 var map : Map
@@ -21,24 +25,45 @@ func exit() :
 
 func enter(_msg : Dictionary = {}) -> void:
 	if _msg.has("campaign_start") or  _msg.has("campaign_continue") :
-		var is_start : bool = _msg["campaign_start"] if _msg.has("campaign_start") else false
 		var campaign : String = GameGlobal.currentcampaign
-		var onstartGD : GDScript = load(Paths.campaignsfolderpath + GameGlobal.currentcampaign + "/on_campaign_start.gd" )
-		if is_start :
-			onstartGD.before_loading_ressources()
-		GameGlobal.campaign_global_script = load(Paths.campaignsfolderpath + GameGlobal.currentcampaign + "/campaign_global_script.gd" ).new()
+		var classic_campaign := GameGlobal.is_classic_campaign(campaign)
+		if not classic_campaign:
+			push_error(
+				"Campaign '%s' cannot start without a realmz-remake-scenario v2 manifest" % campaign
+			)
+			StateMachine.transition_to("Inactive", {})
+			return
+		GameGlobal.campaign_global_script = ClassicCampaignGlobalScript.new()
 		GameGlobal.cmp_resources.load_campaign_ressources( campaign )
-
-		GameGlobal.load_shops_script(campaign)
-		GameGlobal.campaign_start_load_shops_data(GameGlobal.cmp_resources.items_book)
+		for pc: PlayerCharacter in GameGlobal.player_characters:
+			pc.resolve_classic_learned_spell_identities(
+				GameGlobal.cmp_resources.spells_book,
+				SpellsIdDivinity.mappings
+			)
 		map = GameGlobal.map
-		if is_start :
-			onstartGD.after_loading_ressources()
-		map.load_map( campaign, GameGlobal.currentmap_name )
+		var saved_payload_value: Variant = _msg.get("classic_save_payload", {})
+		var saved_payload: Dictionary = saved_payload_value \
+			if saved_payload_value is Dictionary else {}
+		var legacy_location_value: Variant = _msg.get("classic_legacy_location", {})
+		var legacy_location: Dictionary = legacy_location_value \
+			if legacy_location_value is Dictionary else {}
+		var classic_start: Dictionary = GameGlobal.start_current_classic_campaign(
+			saved_payload,
+			legacy_location
+		)
+		if str(classic_start.get("status", "")) == "error":
+			push_error("Scenario campaign start failed: %s" % classic_start.get(
+				"message",
+				"unknown error"
+			))
+			StateMachine.transition_to("Inactive", {})
+			return
 		map.explore_tiles_from_tilepos(Vector2(map.owcharacter.tile_position_x,map.owcharacter.tile_position_y))
 		map.visible = true
 		UI.show_only(UI.ow_hud)
 		UI.ow_hud.initialize()
+		# A restored command is replayed only after its Godot map and HUD exist.
+		GameGlobal.call_deferred("resume_current_classic_continuation")
 		print("ExplorationState campaign_start or campaign_continue done")
 		for pc in GameGlobal.player_characters :
 			pc.cur_campaign = campaign
@@ -56,7 +81,6 @@ func _on_dir_input_received(input : Vector2i, _is_keyboard : bool) -> void :
 
 func on_trying_to_move_to_tile_stack(_crea : Creature, stack : Array, position : Vector2) : #exporation mode
 	var canwalk : bool = true
-	var soundplayed : bool = false
 	var stacksize = stack.size()
 	var timetowalk : int = 0
 	for i  in range(stack.size()) :
@@ -70,13 +94,8 @@ func on_trying_to_move_to_tile_stack(_crea : Creature, stack : Array, position :
 		if GameGlobal.is_sailing_boat :
 			if idef['water'] == 0 and idef['dock'] == 0 :
 				canwalk = false
-		canwalk = not ( idef['wall'] != 0 or idef['swall'] != 0 )
-		if not soundplayed and idef['sound'] != [] :
-			soundplayed = true
-			var soundslist : Array = idef['sound']
-			soundslist.shuffle()
-			SfxPlayer.stream = GameGlobal.cmp_resources.sounds_book[soundslist[0]]
-			SfxPlayer.play()
+		canwalk = canwalk and not ( idef['wall'] != 0 or idef['swall'] != 0 )
+	_play_tile_stack_sound(stack)
 			
 	# check for scripts checked the map :
 	var canwalk_path : bool = GameGlobal.map.mapsecretpaths.has(Vector2i(position))
@@ -85,10 +104,51 @@ func on_trying_to_move_to_tile_stack(_crea : Creature, stack : Array, position :
 		if GameGlobal.map.mapsecrets[Vector2i(position)][0]== 1 :
 			canwalk_secret  = true
 	
-	canwalk = (canwalk or canwalk_path or canwalk_secret) 
+	var mapfocuschar: Variant = GameGlobal.map.focuscharacter
+	var current_position := Vector2i(
+		int(mapfocuschar.tile_position_x),
+		int(mapfocuschar.tile_position_y)
+	)
+	var classic_movement: Dictionary = GameGlobal.resolve_classic_map_movement(
+		current_position,
+		Vector2i(position)
+	)
+	if bool(classic_movement.get("handled", false)):
+		canwalk = bool(classic_movement.get("allowed", false))
+		if canwalk and classic_movement.has("movementTime"):
+			timetowalk = int(classic_movement["movementTime"])
+		if str(classic_movement.get("status", "")) == "error":
+			push_error(str(classic_movement.get(
+				"message",
+				"Classic dungeon movement failed"
+			)))
+	else:
+		canwalk = (canwalk or canwalk_path or canwalk_secret)
 	if canwalk :
+		if is_instance_valid(GameGlobal.classic_campaign_session):
+			timetowalk = GameGlobal.classic_movement_pass_time_units(
+				timetowalk,
+				stack
+			)
 		if canwalk_path :
 			GameGlobal.map.set_secretpath_seen( Vector2i(position) )
 		if canwalk_secret :
 			GameGlobal.map.set_secret_seen( Vector2i(position) )
 	return [canwalk, timetowalk ]
+
+
+func _play_tile_stack_sound(stack: Array) -> void:
+	var selection := ClassicMapBridgeScript.select_tile_stack_sound(stack)
+	var native_sounds: Variant = selection.get("nativeSounds", [])
+	if native_sounds is Array and not native_sounds.is_empty():
+		var sounds: Array = native_sounds.duplicate()
+		sounds.shuffle()
+		SfxPlayer.stream = GameGlobal.cmp_resources.sounds_book[sounds[0]]
+		SfxPlayer.play()
+		return
+	var classic_sound_id := int(selection.get("classicSoundId", 0))
+	if classic_sound_id == 0:
+		return
+	var result: Dictionary = GameGlobal.play_classic_map_sound(classic_sound_id)
+	if str(result.get("status", "")) == "error":
+		push_error(str(result.get("message", "Classic map sound playback failed")))

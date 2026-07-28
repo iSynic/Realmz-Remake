@@ -59,18 +59,28 @@ func enter(_msg : Dictionary = {} ) ->void :
 			UI.ow_hud.spellcastMenu.show()
 		"LootMenu" :
 			cur_menu_name = menu_name
-			await GameGlobal.show_loot_menu(_msg["treasure"],_msg["money"],_msg["exp"])
+			await GameGlobal.show_loot_menu(
+				_msg["treasure"],
+				_msg["money"],
+				_msg["exp"],
+				bool(_msg.get("classicBattleReward", false))
+			)
 			#if not GameGlobal.player_allies.is_empty() :
 		"MiniMapsMenu" :
 			cur_menu_name = menu_name
 			UI.ow_hud.minimapRect.show()
 			UI.ow_hud.minimapRect.on_display()
+		"ClassicPlayerMapMenu" :
+			cur_menu_name = menu_name
+			UI.ow_hud.classicPlayerMapRect.show()
 		"SpecEncounter_menu" :
 			cur_menu_name = menu_name
 			UI.ow_hud.encounterControl.disablerButton.hide()
 		"TempleMenu" :
 			cur_menu_name = menu_name
 			UI.ow_hud.temple_rect.show_temple_window()
+		"CharacterInfoMenu", "MultipleChoices" :
+			cur_menu_name = menu_name
 	pass
 
 func exit() :
@@ -91,13 +101,19 @@ func exit() :
 		#UI.ow_hud.botrightpanel.enable_all(selected_character)
 		UI.ow_hud.textRect.set_text('', false)
 	
-	cur_menu_name = ''
-	
 	if cur_menu_name == "MiniMapsMenu" :
 		UI.ow_hud.minimapRect.hide()
+	if cur_menu_name == "ClassicPlayerMapMenu" :
+		UI.ow_hud.classicPlayerMapRect.hide()
 	
 	if cur_menu_name == "TempleMenu" :
 		UI.ow_hud.temple_rect.close_temple_window()
+	if cur_menu_name == "CharacterInfoMenu" :
+		UI.ow_hud.characterStatRect.hide()
+	if cur_menu_name == "MultipleChoices" :
+		UI.ow_hud.textRect.choicesContainer.hide()
+
+	cur_menu_name = ''
 
 
 
@@ -132,24 +148,36 @@ func _on_chara_panel_selected_for_picking(cp : CharaSmallPanel) :
 #func _on_choicebox_choice_picked(ans : String) :
 	#print("answer : " + ans )
 
-func use_inventory_item(item : Dictionary, user : Creature) :  #from inventory menu
-	print('ExMenusState use_inventory_item '+item["name"])
-	if item.has("_on_field_use") :
-		print('ExMenusState use_inventory_item '+item["name"]+" has _on_field_use script")
-		item["_on_field_use"]._on_field_use(user, item)
-		if item.has("delete_on_empty") and (item["delete_on_empty"] == 1) :
-			if item.has("charges") and item["charges"]<=0 :
+func use_inventory_item(item: ItemInstance, user: Creature) -> void:
+	var resources = NodeAccess.__Resources()
+	var definition := resources.get_item_definition(item)
+	if definition == null:
+		return
+	print("ExMenusState use_inventory_item " + definition.display_name_for(item))
+	if resources.item_has_hook(item, "field_use"):
+		var hook_result: Dictionary = resources.run_item_hook(
+			item,
+			"field_use",
+			[user],
+		)
+		if not bool(hook_result.get("ok", false)):
+			for message: Variant in hook_result.get("errors", []):
+				push_error(str(message))
+			return
+		if definition.delete_on_empty:
+			if item.charges <= 0:
 				var dropped = user.drop_inventory_item(item)
 				if dropped :
 					SfxPlayer.stream = NodeAccess.__Resources().sounds_book["drop item.ogg"]
 					SfxPlayer.play()
 			GameGlobal.refresh_OW_HUD()
-			return
-		if item.has("_on_field_use_spell" ) :
+		return
+	var spell_use := resources.item_spell_use(item, "field")
+	if spell_use.size() >= 2:
 			print("ItemSmallBUtton ITEM RIGHT CLICKED HAS A _on_field_use_spell")
 			print("ItemSmallBUtton _on_field_use_spell TBI :(")
-			var spellname : String = item["_on_field_use_spell"][0]
-			var spellpower : int =  item["_on_field_use_spell"][1]
+			var spellname : String = spell_use[0]
+			var spellpower : int = spell_use[1]
 			var spell = GameGlobal.cmp_resources.spells_book[spellname]["script"]
 			
 			
@@ -190,8 +218,10 @@ func get_num_of_targs_of_spell_in_field(spell : Spell, spellpower, user : Creatu
 	how_many_targets = min(how_many_targets, GameGlobal.player_allies.size()+GameGlobal.player_characters.size())
 	return how_many_targets
 
-func on_spell_picked(character : Creature, spell, powerlevel : int, _item : Dictionary) :
+func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dictionary) :
 	print("ExMenus state on_spell_picked : ",character.name," ", spell.name)
+	if item.is_empty() and not spell.get("is_not_spell") and not character.can_cast_spells():
+		return
 	var _spelldata :  Dictionary = character.get_spell_data(spell, powerlevel)
 	var how_many_targets : int = get_num_of_targs_of_spell_in_field(spell, powerlevel, character)
 	var targets : Array = []
@@ -227,6 +257,9 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, _item : Dict
 		
 
 		character.on_ability_use(spell, powerlevel)
+		var uses_group_effect: bool = spell.has_method("apply_classic_group_effect")
+		if uses_group_effect:
+			spell.apply_classic_group_effect(character, targets, powerlevel)
 
 		for target in targets :
 			print ("cast "+spell.name+" on "+target.name)
@@ -238,9 +271,10 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, _item : Dict
 			if spell.get("proj_hit") :
 				print("ExMenusState : OW HUD display spell effect ",spell.proj_hit)
 				await UI.ow_hud.show_spell_effect_on_char_menu( target, spell.proj_hit  )
-			await GameGlobal.do_spell_field_effect(character, target, spell, powerlevel)
+			if not uses_group_effect:
+				await GameGlobal.do_spell_field_effect(character, target, spell, powerlevel)
 			
-			if spell.get("special_effect") : 
+			if not uses_group_effect and spell.get("special_effect") :
 				print("FIELD SPECIAL EFFECT")
 				var _is_over : bool = await spell.special_effect(character, spell, powerlevel, Vector2.ZERO, [], [target], false)
 			

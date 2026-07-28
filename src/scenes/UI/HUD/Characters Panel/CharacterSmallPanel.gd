@@ -87,7 +87,7 @@ func set_type(t : int, showdropmenu : bool = true) :
 				dropbutton.hide()
 		if t==1 :
 			lootRect.show()
-			itemsnumberLabel.text = str(character.inventory.size())
+			itemsnumberLabel.text = str(character.inventory_instances().size())
 			curWeightLabel.text = str(character.get_inventory_weight())
 			maxWeightLabel.text = str(character.get_stat("Weight_Limit"))
 		else :
@@ -119,7 +119,7 @@ func update_display() ->void :
 	else :
 		SPLabel.text = resource_key
 		SPValueLabel.text = "%d/%d" % [character.get_stat(cur_key), character.get_stat(max_key)]
-	itemsnumberLabel.text = str(character.inventory.size())
+	itemsnumberLabel.text = str(character.inventory_instances().size())
 	curWeightLabel.text = str(character.get_inventory_weight())
 	maxWeightLabel.text = str(character.get_stat("Weight_Limit"))
 	
@@ -146,8 +146,14 @@ func set_targeted_number(n : int) :
 		select_several_counter_label.set_text('')
 
 func _can_drop_data(_pos, data):
-	# good enough to prove it's an item !
-	return ( data[1]!=character and ( typeof(data[0]) == TYPE_DICTIONARY and data[0].has("imgdata") ))
+	return (
+		data is Array
+		and data.size() >= 2
+		and data[0] is ItemInstance
+		and data[1] is Creature
+		and data[1] != character
+		and character.can_add_inventory_item(data[0])
+	)
 
 func _drop_data(_pos, data):
 	var item = data[0]
@@ -158,8 +164,7 @@ func _drop_data(_pos, data):
 		print(" smallpanels character is ", character.name)
 #		print(inventoryrect.inventoryBoxLeft.get_parent().get_inventory_owner())  #was nil
 #		print(inventoryrect.inventoryBoxRight.get_parent().get_inventory_owner()) #  was not nil
-		characteritemcamefrom.inventory.erase(item)
-		character.inventory.append(item)
+		characteritemcamefrom.transfer_inventory_item_to(character, item)
 		inventoryrect.fill_inventory_Vbox(inventoryrect.inventoryBoxLeft, inventoryrect.inventoryBoxLeft.get_parent().get_inventory_owner())
 		inventoryrect.fill_inventory_Vbox(inventoryrect.inventoryBoxRight, inventoryrect.inventoryBoxRight.get_parent().get_inventory_owner())
 
@@ -171,19 +176,21 @@ func _on_DropItemButton_pressed():
 	for child in dropVBox.get_children() :
 		dropVBox.remove_child(child)
 		child.queue_free()
-	var char_inventory = character.inventory
+	var char_inventory: Array[ItemInstance] = character.inventory_instances()
 	var prev_ib = null
 	var n = 0
-	for i in char_inventory :
+	for i: ItemInstance in char_inventory:
 		var ibutton = dropItemEntryTSCN.instantiate()
 #		ibutton.set_text_alignment(Button.ALIGN_LEFT)
 #		ibutton.set_flat(true)
-		var text : String = i["name"]
-		if i.has("charges_max") :
-			if i["charges_max"]>0 :
-				text = text + ' X' + str(i["charges"])
+		var definition := NodeAccess.__Resources().get_item_definition(i)
+		if definition == null:
+			continue
+		var text: String = definition.display_name_for(i)
+		if definition.maximum_charges > 0:
+			text += " X" + str(i.charges)
 		ibutton.text = text
-		if i["equipped"]==1 :
+		if i.equipped:
 			ibutton.set_disabled(true)
 		if prev_ib!=null :
 			ibutton.set_focus_neighbor(offset_top,prev_ib.get_path())
@@ -210,7 +217,7 @@ func _on_DropItemButton_pressed():
 	#set_focus_neighbor
 	
 
-func _on_dropentry_pressed(i : Dictionary) :
+func _on_dropentry_pressed(i: ItemInstance) -> void:
 #	print("_on_dropentry_pressed")
 	character.drop_inventory_item(i)
 	update_display()
@@ -270,7 +277,17 @@ func _on_portrait_button_pressed():
 	elif character.is_summoned :
 		cdata["data"]["subtitle"] = "Summoned by " + character.summoner_name
 	elif character.classgd != null and character.racegd != null :
-		cdata["data"]["subtitle"] = character.racegd.classrace_name + " · " + character.classgd.classrace_name
+		var race_name: String = (
+			str(character.get_display_race_name())
+			if character.has_method("get_display_race_name")
+			else str(character.racegd.classrace_name)
+		)
+		var caste_name: String = (
+			str(character.get_display_caste_name())
+			if character.has_method("get_display_caste_name")
+			else str(character.classgd.classrace_name)
+		)
+		cdata["data"]["subtitle"] = race_name + " · " + caste_name
 
 	# Description: short flavor + progression info. The special-skill stats live
 	# in their own panel via cdata["special_skills"], not here.
@@ -281,8 +298,16 @@ func _on_portrait_button_pressed():
 		descr_parts.append("A creature summoned by " + character.summoner_name + ".")
 	else :
 		descr_parts.append("One of your characters.")
-	if character.get("selection_pts") and character.selection_pts != 0 :
-		descr_parts.append("%d unused Ability Selection Points." % character.selection_pts)
+	if character.has_method("get_ability_selection_points"):
+		var selection_points := int(character.get_ability_selection_points())
+		if selection_points != 0:
+			descr_parts.append(
+				"%d unused %s."
+				% [
+					selection_points,
+					character.get_ability_selection_points_label(),
+				]
+			)
 	if character.get("exp_tnl") :
 		descr_parts.append("Experience to next level: %d" % character.exp_tnl)
 	cdata["data"]["description"] = "\n".join(descr_parts)
@@ -298,7 +323,7 @@ func _on_portrait_button_pressed():
 	for s in skills_abs :
 		var v : float = character.get_stat(s)
 		if v != 0.0 :
-			special_skills.append([s.replace("_", " "), "%+g" % v])
+			special_skills.append([s.replace("_", " "), str(v)])
 	cdata["special_skills"] = special_skills
 
 	for s in character.stats :
@@ -306,4 +331,8 @@ func _on_portrait_button_pressed():
 	# Mutually exclusive with the bestiary — never overlap.
 	if UI.ow_hud.bestiaryRect.visible :
 		UI.ow_hud.bestiaryRect.hide()
+	if StateMachine._state_name == "Exploration" :
+		StateMachine.enter_ex_menu_state({"menu_name": "CharacterInfoMenu"})
+	elif StateMachine._state_name == "CbDecideAction" :
+		StateMachine.enter_cb_menu_state({"menu_name": "CharacterInfoMenu"})
 	UI.ow_hud.characterStatRect.show_for_character(cdata)

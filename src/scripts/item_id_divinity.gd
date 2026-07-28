@@ -104,6 +104,8 @@ var mapping : Dictionary = {
 100: "Staff of Merlin +3",
 101: "Quarter Staff +2",
 102: "Quarter Staff",
+# Data ID records 98 and 102 as the same stock item; keep 102 as the primary identity.
+98: "Quarter Staff",
 103: "Quarter Staff +3",
 104: "Bow",
 105: "Perrins Eye +3",
@@ -335,6 +337,7 @@ var mapping : Dictionary = {
 472: "Helm of Feona +7",
 473: "Razor Claws +4",
 600: "Invisible Skin",
+601: "Adrenalin",
 602: "Heal Poison",
 603: "Heat Resistance",
 604: "Cold Resistance",
@@ -343,6 +346,10 @@ var mapping : Dictionary = {
 607: "Improvement",
 608: "Poison",
 609: "Vaporous Form",
+610: "Waterworld",
+611: "Heal Small Wounds",
+612: "Heal Medium Wounds",
+613: "Heal Large Wounds",
 614: "Heal Massive Wounds",
 615: "Aqua Luck Stone +3",
 616: "Copper Luck Stone +3",
@@ -521,6 +528,43 @@ var mapping : Dictionary = {
 797: "Acid Bath",
 798: "Ball Lightning",
 799: "Fog of Doom",
+805: "Torch",
 
 
 }
+
+
+func enrich_item_book(item_book: Dictionary) -> Dictionary:
+	var enriched_book := item_book.duplicate(true)
+	var ids_by_catalog_key: Dictionary = {}
+	for item_id_value: Variant in mapping:
+		var item_id: int = abs(int(item_id_value))
+		var catalog_key := str(mapping[item_id_value])
+		if item_id == 0 or not enriched_book.has(catalog_key):
+			continue
+		if not ids_by_catalog_key.has(catalog_key):
+			ids_by_catalog_key[catalog_key] = []
+		var item_ids: Array = ids_by_catalog_key[catalog_key]
+		if not item_ids.has(item_id):
+			item_ids.append(item_id)
+	for catalog_key: String in ids_by_catalog_key:
+		var source_value: Variant = enriched_book[catalog_key]
+		if not (source_value is Dictionary):
+			continue
+		var source: Dictionary = source_value
+		var merged_ids: Array = []
+		if source.has("classicItemId"):
+			merged_ids.append(abs(int(source["classicItemId"])))
+		var authored_aliases: Variant = source.get("classicItemIds", [])
+		if authored_aliases is Array:
+			for authored_id_value: Variant in authored_aliases:
+				var authored_id: int = abs(int(authored_id_value))
+				if authored_id != 0 and not merged_ids.has(authored_id):
+					merged_ids.append(authored_id)
+		for mapped_id_value: Variant in ids_by_catalog_key[catalog_key]:
+			var mapped_id: int = abs(int(mapped_id_value))
+			if mapped_id != 0 and not merged_ids.has(mapped_id):
+				merged_ids.append(mapped_id)
+		source["classicItemId"] = merged_ids[0]
+		source["classicItemIds"] = merged_ids
+	return enriched_book

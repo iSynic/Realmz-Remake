@@ -1,6 +1,11 @@
 extends Node
 class_name ScriptHelperFuncsClass
 
+
+const NativeEncounterBranch = preload(
+	"res://scripts/native_encounters/native_encounter_branch.gd"
+)
+
 static func get_random_creature_of_size(needed_size : Vector2i, pickstrongest : bool, picks_to_compare : int) -> String :
 	var bestiary : Dictionary = GameGlobal.cmp_resources.crea_book
 	var right_size_crea_namesandlvl : Array = []
@@ -57,8 +62,13 @@ static func display_text_wait_noise(txt : String, sfxname : String) -> void :
 	await textRect.interruption_over
 
 static func display_multiple_choices(choices : Array, answers : Array = []) :
-	UI.ow_hud.textRect.display_multiple_choices(choices, answers)
-	var answer = await UI.ow_hud.textRect.choice_pressed
+	if answers.is_empty():
+		answers = range(choices.size())
+	var choices_container = UI.ow_hud.textRect.choicesContainer
+	choices_container.show()
+	choices_container.display_multiple_choices(choices, answers)
+	var answer = await choices_container.choice_pressed
+	choices_container.hide()
 	return answer
 
 ## Divinity Code 3 Player Option , option
@@ -66,12 +76,10 @@ static func yesno_branch_Divinity(continue_on_yes : bool, tg_type : int, tg_id :
 	#return true iff branching, if continuing return false does nothing
 	#continue_option=, target_type=, target=, left_prompt=, right_prompt=
 	# 0: back  a step, 1: continue normally,  2:simple enc, 3:complex_end ; 4 : exit  and disable script
-	var textRect : TextRect = UI.ow_hud.textRect
-	if lefttxt=='' and righttxt=='' :
-		textRect.display_multiple_choices(["YESNO"],["YESNO"])
-	else :
-		textRect.display_multiple_choices([lefttxt, righttxt],["YES", "NO"])
-	var answer = await textRect.choice_pressed
+	var answer = await display_multiple_choices(
+		["YESNO"] if lefttxt == '' and righttxt == '' else [lefttxt, righttxt],
+		["YESNO"] if lefttxt == '' and righttxt == '' else ["YES", "NO"]
+	)
 	if (continue_on_yes and answer=='YES') or (not continue_on_yes and answer=='NO') :
 		return ''
 	else:
@@ -87,8 +95,7 @@ static func yesno_branch_Divinity(continue_on_yes : bool, tg_type : int, tg_id :
 			print("ScriptHelperFuncs returns "+GameGlobal.prev_simple_enc_name+'XAP'+str(tg_id))
 			return GameGlobal.prev_simple_enc_name+'XAP'+str(tg_id)
 		if tg_type == 3 :
-			printerr("yesno_branch to complex encounter "+str(tg_id)+", pleae fix manually and set the 2nd parameter 3 (complex enc) to 1 (continue manually)")
-			assert(false)
+			return await run_complex_result_Divinity(tg_id)
 		if tg_type==4 :
 			printerr("yesno_branch flag script as disabled, make sure to add a check at script start")
 			flag_disabled_current_script()
@@ -99,18 +106,87 @@ static func yesno_branch_Divinity(continue_on_yes : bool, tg_type : int, tg_id :
 
 ## Divinity Code 4, Simple Encounter  , simple_enc
 static func display_simple_encounter_Divinity(enc_id : int) :
-	await display_simple_encounter_from_data("SE"+str(enc_id))
+	return await display_simple_encounter_from_data("SE"+str(enc_id))
 
 
 ## Divinity Code 5: Complex Encounter, complex_enc
 ## Use: Send party to a Complex Encounter.
-static func start_complex_encounter( comp_enc_name : String) :
+static func start_complex_encounter(comp_enc_name: String) -> void:
 	StateMachine.enter_ex_menu_state({"prev_state" : "Exploration", "menu_name" : "SpecEncounter_menu"})
 	UI.ow_hud.encounterControl.show()
-	UI.ow_hud.encounterControl.initialize(comp_enc_name)
+	await UI.ow_hud.encounterControl.initialize(comp_enc_name)
 
-static func start_complex_encounter_Divinity( ce_id : int) :
+static func start_complex_encounter_Divinity(ce_id: int) -> void:
 	await start_complex_encounter("CE"+str(ce_id))
+
+
+static func complex_encounter_branch(ce_id: int) -> Dictionary:
+	return NativeEncounterBranch.create(ce_id)
+
+
+static func is_complex_encounter_branch(branch: Variant) -> bool:
+	return NativeEncounterBranch.is_branch(branch)
+
+
+static func transition_complex_encounter_Divinity(ce_id: int) -> bool:
+	return UI.ow_hud.encounterControl.transition_to("CE%d" % ce_id)
+
+
+static func dispatch_complex_result_Divinity(result_index: int) -> Variant:
+	return await UI.ow_hud.encounterControl.run_result(result_index)
+
+
+static func run_complex_result_Divinity(result_index: int, code_index := 0) -> String:
+	if code_index != 0:
+		push_error(
+			"Native GDScript encounters cannot branch to instruction %d within result %d"
+			% [code_index, result_index]
+		)
+		return "STOP"
+	await dispatch_complex_result_Divinity(result_index)
+	return "STOP"
+
+
+static func complex_result_replacement_flag(encounter_name: String, result_index: int) -> String:
+	return "complex_encounter.%s.result_%d.replaced" % [
+		encounter_name.trim_suffix(".gd"),
+		result_index,
+	]
+
+
+static func get_complex_result_replacement_Divinity(
+	encounter_name: String,
+	result_index: int
+) -> String:
+	return str(GameGlobal.stuff_done.get(
+		complex_result_replacement_flag(encounter_name, result_index),
+		""
+	))
+
+
+static func run_replacement_action_point_Divinity(script_name: String) -> Variant:
+	var map_scripts: Variant = get_current_map_scripts_Divinity()
+	if map_scripts == null:
+		push_error("Cannot run replacement action point %s without loaded map scripts" % script_name)
+		return null
+
+	var previous_script_name := GameGlobal.current_map_script_name
+	var next_script: Variant = script_name
+	var result: Variant = null
+	while next_script is String and not str(next_script).is_empty() and next_script != "STOP":
+		var method_name := str(next_script)
+		if not map_scripts.has_method(method_name):
+			push_error("Replacement action point %s was not found on the loaded map" % method_name)
+			break
+		GameGlobal.current_map_script_name = method_name
+		result = await map_scripts.call(method_name)
+		if is_complex_encounter_branch(result):
+			transition_complex_encounter_Divinity(int(result["encounter"]))
+			result = true
+			break
+		next_script = result
+	GameGlobal.current_map_script_name = previous_script_name
+	return result
 
 
 static func play_sound(sfx_name : String, stop : bool) :
@@ -188,16 +264,47 @@ static func set_walk_back_once(should : bool) :
 static func do_RR_battle(rr_dict : Dictionary) :
 	var answer = "YES"
 	var randi : int = randi()%100
+	var offered_encounter := false
+	var classic_adapter: Object = null
+	var classic_session: Object = GameGlobal.classic_campaign_session
+	if is_instance_valid(classic_session):
+		classic_adapter = classic_session.get("command_adapter")
 	#printerr("ScriptHelperFuncs do_RR_battle chance : " ,rr_dict["option_chance"],'>=',randi,' : start fight ? ', rr_dict["option_chance"]<=randi )
 	if rr_dict["option_chance"]>=randi :
-		play_sound("generation error.wav", false)
+		offered_encounter = true
+		if is_instance_valid(classic_adapter) \
+				and classic_adapter.has_method("play_classic_map_sound"):
+			classic_adapter.call("play_classic_map_sound", int(rr_dict.get("sfx_id", 0)))
+		else:
+			play_sound("generation error.wav", false)
 		var textRect : TextRect = UI.ow_hud.textRect
 		textRect.display_multiple_choices([rr_dict['text'],"YESNO"],["TEXT","YESNO"])
 		answer = await textRect.choice_pressed
 		textRect.choicesContainer.hide()
 	if answer == "YES" :
-		start_battle_in_range(rr_dict["battle_range"][0], rr_dict["battle_range"][1], 10049, '', 0)
-		await GameGlobal.battle_end
+		var battle_range: Array = rr_dict.get("battle_range", [])
+		if battle_range.size() < 2 or int(battle_range[0]) <= 0:
+			return
+		if is_instance_valid(classic_adapter) \
+				and classic_adapter.has_method("start_classic_random_battle"):
+			var result: Variant = await classic_adapter.call(
+				"start_classic_random_battle",
+				battle_range,
+				offered_encounter
+			)
+			if result is Dictionary and str(result.get("status", "")) == "error":
+				push_error("Classic random battle stopped: %s" % result.get(
+					"message",
+					"unknown compatibility error"
+				))
+			return
+		await start_battle_in_range(
+			int(battle_range[0]),
+			int(battle_range[1]),
+			10049,
+			'',
+			0
+		)
 
 ## Divinity Code 2 : battle
 static func start_battle_in_range(low : int, high : int, sfx_id : int, displaytext : String, give_treasure : int) :
@@ -273,29 +380,74 @@ static func randomrect_battle(b : Array, o : int, s : String, t : String, battle
 #3) Extra Action Point ID that contains the new codes
 #4) For AP replacement: 0 = Default to same land type, 1 = Land Level, 2 = Dungeon Level
 #5) For Encounter Script Replacement: Result Code to Replace
-static func add_Divinity_script_branch_flag( map_id : int, source_id : int, modified_script_id : int, thing, sexap_result_to_replace : int = 0) :
-	var aptype : String = "AP"
+static func add_Divinity_script_branch_flag(
+	map_id: int,
+	target_id: int,
+	replacement_xap_id: int,
+	level_type: int,
+	result_to_replace: int = 0
+) -> bool:
+	var new_ap_name := get_extra_ap_name(replacement_xap_id)
+	if new_ap_name.is_empty():
+		push_error("Code 7 replacement XAP%d was not found on the loaded map" % replacement_xap_id)
+		return false
 
-	if map_id == -3 :
-		printerr("ScriptHelperFuncs add_Divinity_script_branch_flag (Code 7) : can't handle  complex encounters, "+str(source_id)+","+str(modified_script_id))
-		assert(false)
-	if map_id== -2 :
-		var sourceapname = get_ap_name_starting_with("SE"+str(source_id)+'XAP'+str(sexap_result_to_replace))
-		var new_ap_name = get_ap_name_starting_with("AP"+str(modified_script_id)+'x')
-		#aptype = "SEXAP or CEXAP"
-		#printerr("USING SCRIPTHELPERFUNCS.add_Divinity_script_branch_flag to change a SIMPLE ENCUNTER or COMPLEX ENCOUNTER ",map_id,",  pls do it manually !!!!!",
-		#' source id : ',source_id,', replacement id : ', modified_script_id)
-		#assert(false)
-	else :
-		var sourceapname = get_ap_name_starting_with(aptype+str(source_id)+'x')
-		var new_ap_name = get_ap_name_starting_with("XAP"+str(modified_script_id)+'x')
-		add_AP_replaced_flag('map_'+str(map_id), sourceapname, new_ap_name )
+	if map_id == -3:
+		GameGlobal.stuff_done[
+			complex_result_replacement_flag("CE%d" % target_id, result_to_replace)
+		] = new_ap_name
+		return true
+	if map_id == -2:
+		var encounter_data_key := GameGlobal.currentmap_name + ".SEdata"
+		var encounter_name := "SE%d" % target_id
+		var encounter_book: Variant = GameGlobal.stuff_done.get(encounter_data_key)
+		if not encounter_book is Dictionary:
+			var encounter_path := Paths.campaignsfolderpath.path_join(
+				GameGlobal.currentcampaign
+			).path_join("Maps").path_join(GameGlobal.currentmap_name).path_join(
+				"map_SimpleEncounters.json"
+			)
+			encounter_book = Utils.FileHandler.read_json_dic_from_file(encounter_path)
+			GameGlobal.stuff_done[encounter_data_key] = encounter_book
+		if not encounter_book is Dictionary or not encounter_book.has(encounter_name):
+			push_error("Code 7 simple encounter %s was not found" % encounter_name)
+			return false
+		var result_scripts: Array = encounter_book[encounter_name][2]
+		if result_to_replace < 0 or result_to_replace >= result_scripts.size():
+			push_error(
+				"Code 7 result %d is outside simple encounter %s"
+				% [result_to_replace, encounter_name]
+			)
+			return false
+		result_scripts[result_to_replace] = new_ap_name
+		return true
 
-static func add_AP_replaced_flag(_mapname : String, _ap_name : String, _newap_name : String) :
-	var script_name = "script_"+str(_ap_name)
-	var flag_name : String = _mapname+'.'+script_name+'.replaced'
-	GameGlobal.stuff_done[flag_name] = _newap_name
-	printerr("\n   USED ScriptHelperFuncs add_AP_replaced_flag !!!\n    "+flag_name+':'+str(_newap_name))
+	var map_prefix := "mapd_" if level_type == 2 else "map_"
+	if level_type == 0 and GameGlobal.currentmap_name.begins_with("mapd_"):
+		map_prefix = "mapd_"
+	var map_name := map_prefix + str(map_id)
+	GameGlobal.stuff_done[
+		"%s.action_point_%d.replaced" % [map_name, target_id]
+	] = new_ap_name
+	return true
+
+
+static func get_extra_ap_name(ap_id: int) -> String:
+	var exact_name := "XAP%d" % ap_id
+	var coordinate_prefix := exact_name + "x"
+	var map_scripts: Variant = get_current_map_scripts_Divinity()
+	if map_scripts == null:
+		return ""
+	for method: Dictionary in map_scripts.get_script_method_list():
+		var method_name := str(method["name"])
+		if method_name == exact_name or method_name.begins_with(coordinate_prefix):
+			return method_name
+	return ""
+
+
+static func get_current_map_scripts_Divinity() -> Variant:
+	# Campaign-folder GDScript execution ended with scenario format v2.
+	return null
 
 ## Divinity Code 29: Give/Display Map  id:int , if negative, give |id| and also display
 static func give_minimap(id : int) :
@@ -380,8 +532,10 @@ static func filter_PCs_Divinity(type : int, parameter : int, who : int, previous
 				while(true) :{
 				}
 			for pc in pc_picked_pre_filter :
-				for i in pc.inventory :
-					if i["name"]==parameter :
+				for i: ItemInstance in pc.inventory_instances():
+					var definition := NodeAccess.__Resources().get_item_definition(i)
+					if definition != null \
+							and definition.display_name == str(parameter):
 						picked_array.append(pc)
 						break
 		3 : #%chance
@@ -475,8 +629,7 @@ static func branch_on_quest_Divinity(quest_id : int, go_on_if_done : int, target
 			var cur_se = GameGlobal.prev_simple_enc_name
 			next_ap_name = cur_se+'XAP'+str(target)
 		2  : #Complex :
-			printerr("ScriptHelperFuncs branch_on_quest_Divinity : can twork in complex encounter, need manual fix")
-			assert(false)
+			return await run_complex_result_Divinity(target, code_index)
 	return next_ap_name
 
 ## Divinity Code 12: Change Land Tile
@@ -547,17 +700,37 @@ static func castSpellOnPickedDivinity(spell_id, power, drv_modifier, can_drv) :
 	CastSpellOnPickedCharacters(GameGlobal.last_picked_characters, spell_name, power)
 
 
-static func CastSpellOnPickedCharacters(characters : Array, spell_name : String, power : int) :
-	var spell = NodeAccess.__Resources().spells_book[spell_name]
+static func CastSpellOnPickedCharacters(
+	characters : Array,
+	spell_name : String,
+	power : int,
+	damage_scale := 1.0
+) :
+	var spell_entry = NodeAccess.__Resources().spells_book[spell_name]
+	var spell = spell_entry.get("script") if spell_entry is Dictionary else spell_entry
+	await ApplySpellOnPickedCharacters(characters, spell, power, damage_scale)
+
+
+static func ApplySpellOnPickedCharacters(
+	characters : Array,
+	spell : Spell,
+	power : int,
+	damage_scale := 1.0
+) :
 	var character = Creature.new()
+	var uses_group_effect: bool = spell.has_method("apply_classic_group_effect")
+	if uses_group_effect:
+		spell.apply_classic_group_effect(character, characters, power, damage_scale)
 	for target in characters :
+		if spell.sounds.size() > 1 \
+				and GameGlobal.cmp_resources.sounds_book.has(spell.sounds[1]) :
 			SfxPlayer.stream = GameGlobal.cmp_resources.sounds_book[spell.sounds[1]]
 			SfxPlayer.play()
-			if spell.get("proj_hit") :
-				await UI.ow_hud.show_spell_effect_on_char_menu( target, spell.proj_hit  )
-			await GameGlobal.do_spell_field_effect(character, target, spell, power)
-			if spell.get("special_effect") :
-				var is_over : bool = await spell.special_effect(character, spell, power, Vector2.ZERO, [], [target], false)
+		var projectile_hit: Variant = spell.get("proj_hit")
+		if projectile_hit != null and int(projectile_hit) >= 0 :
+			await UI.ow_hud.show_spell_effect_on_char_menu(target, projectile_hit)
+		if not uses_group_effect:
+			await GameGlobal.do_spell_field_effect(character, target, spell, power, damage_scale)
 
 # Divinity code : Code 32: Offer Temple
 static func enable_default_temple(price_mult) :
@@ -657,7 +830,7 @@ static func give_Divinity_condition(affect_who : int, condition_id : int, powerp
 		6: #Slow
 			traitscript_filename += "slow.gd"
 		7:#Shield from hits :
-			traitscript_filename += "pro_hits"
+			traitscript_filename += "pro_hits.gd"
 			trait_array = [power] # permanent still stacks !
 		8: #Shielded from Projectiles
 			traitscript_filename += "pro_proj.gd"
@@ -726,7 +899,7 @@ static func give_Divinity_condition(affect_who : int, condition_id : int, powerp
 			traitscript_filename += "increased_def.gd"
 			trait_array = [power]
 		39: #Silenced
-			traitscript_filename += "dumb.gd"
+			traitscript_filename += "silenced.gd"
 			trait_array = [power]
 	var traitscript = load("res://shared_assets/traits/"+traitscript_filename)
 	for c in affected_characters :
@@ -766,9 +939,16 @@ static func pick_chara_Divinity_misc(type:int, challenge : int, checkwho : int, 
 			if item_poss_name.is_empty() :
 				printerr("ScriptHelperFunc pick_chara_Divinity_misc : "+GameGlobal.current_map_script_name+' : please manually fix by adding the item name as argument : '+str(challenge))
 				return []
-			var item_dict : Dictionary = GameGlobal.cmp_resources.items_book[item_poss_name]
+			var definition_id := (
+				GameGlobal.cmp_resources.item_catalog.resolve_active_catalog_key(
+					item_poss_name
+				)
+			)
 			for c : Creature in tested_charas :
-				if not c.get_item(item_dict).is_empty() : picked_charas.append(c)
+				for carried: ItemInstance in c.inventory_instances():
+					if carried.definition_id == definition_id:
+						picked_charas.append(c)
+						break
 		3: # %chance
 			for c : Creature in tested_charas :
 				if randi()%100>=challenge : picked_charas.append(c)
@@ -892,7 +1072,7 @@ static func branch_item_possession_divinity(item_id : int, cont_not_poss : int, 
 		1 :
 			return "SEXAP"+str(xap_id)
 		2 :
-			return "CEXAP"+str(xap_id)
+			return await run_complex_result_Divinity(xap_id, code_no)
 		_:
 			return ''
 
@@ -941,6 +1121,8 @@ static func branch_on_random_divinity(type:int, low:int, high:int, sound_id:int,
 			return 'XAP'+str(rand_id)
 		1 :#SEeeee
 			return 'SE'+str(rand_id)
+		2: #Complex encounter
+			return complex_encounter_branch(rand_id)
 
 
 #Code 42: Branch on Percent Chance
@@ -961,10 +1143,8 @@ static func branch_on_random_divinity(type:int, low:int, high:int, sound_id:int,
 #if not branch.is_empty() :
 	#return branch
 static func branch_percent_chance_divinity(percent : int, whatdo : int, type : int, number : int, lineskip : int) :
-	if lineskip != 0 :
-		printerr("ScriptHelperFunc branch_percent_chance_divinity :"+GameGlobal.currentSpecialEncounterName+"\nLine skip is not supported,\nfix manually !")
-		assert(false)
-	if randf()<= float(percent)/100.0 : return ''
+	if randf() > float(percent) / 100.0:
+		return ''
 	match whatdo :
 		1 :
 			match type :
@@ -973,13 +1153,13 @@ static func branch_percent_chance_divinity(percent : int, whatdo : int, type : i
 				1 : #SEXAP :
 					return GameGlobal.prev_simple_enc_name+'XAP'+str(number)
 				2 : #CEXAP :
-					printerr("ScriptHelperFunc branch_percent_chance_divinity :"+GameGlobal.currentSpecialEncounterName+"\nbranching in Special Encounter is not supported,\nfix manually !")
-					assert(false)
+					return await run_complex_result_Divinity(number, lineskip)
 		2 :
-			return ""
+			return "STOP"
 		-2 :
 			flag_disabled_current_script()
-			return ''
+			return "STOP"
+	return ''
 
 
 #Code 54: Alter Time Encounter
@@ -1036,8 +1216,7 @@ static func branch_NPC_in_party_Divinity(creature_name : String, ifpresenttype :
 			1 : #SEXAP
 				return GameGlobal.prev_simple_enc_name+str(ifpresentto)
 			2: #complex :
-				printerr("ScriptHelperFuncs branch_NPC_in_party_Divinity : cant  handle  special encounter "+str(ifpresentto)+", fix manually")
-				assert(false)
+				return complex_encounter_branch(ifpresentto)
 	else :
 		match ifabsenttype :
 			0 : #like in item 2 if present
@@ -1047,12 +1226,11 @@ static func branch_NPC_in_party_Divinity(creature_name : String, ifpresenttype :
 					1 : #SEXAP
 						return GameGlobal.prev_simple_enc_name+str(ifabsentto)
 					2: #complex :
-						printerr("ScriptHelperFuncs branch_NPC_in_party_Divinity : cant  handle  special encounter "+str(ifabsentto)+", fix manually")
-						assert(false)
+						return complex_encounter_branch(ifabsentto)
 			1 : #continue
 				return ''#GameGlobal.prev_simple_enc_name+str(ifabsentto)
 			2: #complex :
-				printerr("ScriptHelperFuncs branch_NPC_in_party_Divinity : cant  handle  special encounter "+str(ifabsentto)+", fix manually")
+				printerr("ScriptHelperFuncs branch_NPC_in_party_Divinity : displaying an absent-ally string is not supported")
 				assert(false)
 	return ''
 

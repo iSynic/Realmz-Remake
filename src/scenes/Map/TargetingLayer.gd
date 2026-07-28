@@ -14,7 +14,7 @@ var spell
 #var spell_chain : Array = []
 var power : int = 0
 var caster : CombatCreaButton
-var used_item : Dictionary = {}
+var used_item: Variant = null
 
 var spell_max_targets : int = 0
 var spell_targettile : Spell.TARGET_TILE = Spell.TARGET_TILE.ANY
@@ -129,13 +129,13 @@ func update_targeting()->void:
 	
 	if spell_allow_rotation :
 		if Input.is_action_just_pressed("RotateAoE") :
-			if spell_aoe==Spell.AoE_WALL_H :
+			if _same_aoe(spell_aoe, Spell.AoE_WALL_H) :
 				spell_aoe=Spell.AoE_WALL_L
-			if spell_aoe==Spell.AoE_WALL_L :
+			elif _same_aoe(spell_aoe, Spell.AoE_WALL_L) :
 				spell_aoe=Spell.AoE_WALL_V
-			if spell_aoe==Spell.AoE_WALL_V :
+			elif _same_aoe(spell_aoe, Spell.AoE_WALL_V) :
 				spell_aoe=Spell.AoE_WALL_J
-			if spell_aoe==Spell.AoE_WALL_J :
+			elif _same_aoe(spell_aoe, Spell.AoE_WALL_J) :
 				spell_aoe=Spell.AoE_WALL_H
 	
 	if Input.is_action_just_pressed("LeftClick") :
@@ -211,6 +211,15 @@ func update_targeting()->void:
 		execute_spell(caster,spell,power,all_picked_tiles, used_item, true, aoe_override)
 		return
 	return
+
+
+func _same_aoe(left: Array, right: Array) -> bool:
+	if left.size() != right.size():
+		return false
+	for point: Variant in left:
+		if not right.has(Vector2i(point)):
+			return false
+	return true
 
 #	print(mousepos,', ',caster.creature.position )
 
@@ -369,7 +378,12 @@ func merge_aoes(aoe_1:Array[Vector2i], aoe_2:Array[Vector2i] ) -> Array[Vector2i
 	return returned_aoe
 
 
-func start_targ(tspell : Spell, tspellpower : int, tcaster : CombatCreaButton, _used_item : Dictionary) :
+func start_targ(
+	tspell: Spell,
+	tspellpower: int,
+	tcaster: CombatCreaButton,
+	_used_item: Variant,
+) -> void:
 	print("TargetingLayer start_targ ", tspell.name)
 	picked_targets.clear()
 	picked_tiles.clear()
@@ -559,7 +573,15 @@ func get_cbs_touching_tiles(effected_tiles : Array) -> Array:
 #old gameglobal execute : (caster : CombatCreaButton,spell,power : int ,clickedtile : Vector2i, aoe_shape : Array, picked_targets : Dictionary, picked_tiles:Dictionary, chain_start : bool, must_add_terrain : bool) :
 #msg frmat : {"type" : "Spell", "caster" : Crea, "Effected Tiles" : [], "Effected creas" : [], "targeted_tiles" : [], "spell":GDScript, "s_plvl" : 1, "used_item" : null , "add_terrain" : true}
 
-func execute_spell(_caster : CombatCreaButton, s_spell, s_power : int, trgt_tiles : Array, spell_used_item : Dictionary, must_add_terrain : bool, override_aoe : Array) :
+func execute_spell(
+	_caster: CombatCreaButton,
+	s_spell,
+	s_power: int,
+	trgt_tiles: Array,
+	spell_used_item: Variant,
+	must_add_terrain: bool,
+	override_aoe: Array,
+) -> void:
 	#"Override AoE is for wall rotations
 	#print("TargetingLayer execute_spell : "+s_spell.name+" trgt_tiles : ", trgt_tiles)
 	#print("TargetingLayer aoe_shape ", aoe_shape)

@@ -1,6 +1,9 @@
 extends Control
 class_name OW_HUD
 
+const ClassicItemBehaviorsScript = preload(
+	"res://scripts/classic_runtime/classic_item_behaviors.gd"
+)
 
 var charsmallpanelTSCN : PackedScene = preload("res://scenes/UI/HUD/Characters Panel/CharacterSmallPanel.tscn")
 
@@ -24,6 +27,7 @@ var selected_character = null
 @onready var bestiaryRect = $BestiaryRect
 @onready var characterStatRect = $CharacterStatRect
 @onready var minimapRect = $VBoxScreen/HBoxTop/MapArea/MinimapsRect
+@onready var classicPlayerMapRect = $VBoxScreen/HBoxTop/MapArea/ClassicPlayerMapRect
 @onready var pictureRect = $VBoxScreen/HBoxTop/MapArea/PictureRect
 
 @onready var turnorderPanel : TurnOrderPanel = $VBoxScreen/HBoxTop/MapArea/TurnOrderPanel
@@ -43,7 +47,9 @@ var selected_character = null
 
 @onready var charSwapRect = $CharSwapRect
 
-@onready var honestStorageControl = $VBoxScreen/HBoxTop/MapArea/StorageRect
+@onready var honestStorageControl: Honest_Storage = (
+	$VBoxScreen/HBoxTop/MapArea/StorageRect
+)
 
 @onready var treasureControl = $TreasureControl
 @onready var settingsControl = $SettingsRect
@@ -52,13 +58,19 @@ var selected_character = null
 @onready var spellcastButton : Button = $VBoxScreen/HBoxBot/BotRightPanel/SpellButton
 @onready var abilistButton   : Button = $VBoxScreen/HBoxBot/BotRightPanel/AbiListButton
 @onready var templeButton    : Button = $VBoxScreen/HBoxBot/BotRightPanel/TempleButton
+@onready var shopButton      : Button = $VBoxScreen/HBoxBot/BotRightPanel/ShopButton
+@onready var classicSearchButton: Button = (
+	$VBoxScreen/HBoxBot/BotRightPanel/GlobalEffectsRect/SearchButton
+)
+@onready var classicTorchButton: ClassicTorchButton = (
+	$VBoxScreen/HBoxBot/BotRightPanel/ClassicTorchButton
+)
+@onready var campButton: Button = $VBoxScreen/HBoxBot/BotRightPanel/CampButton
+@onready var restButton: Button = $VBoxScreen/HBoxBot/BotRightPanel/RestButton
 @onready var temple_rect : TempleMenu = $VBoxScreen/HBoxTop/MapArea/TempleRect
 @onready var spellcastMenu = $SpellsRect
 @onready var abilitesmngtMenu = $VBoxScreen/HBoxTop/MapArea/AbilitiesMngtRect
 @onready var restTimer : Timer = $VBoxScreen/HBoxBot/BotRightPanel/RestButton/RestTimer
-@export var storage_rect : Honest_Storage
-
-
 @onready var levelupWindow : Window = $LevelUpWindow
 @onready var levelupCtrl : LevelupRect = $LevelUpWindow/LevelUpRect
 @onready var alliesWindow : Window = $AlliesWindow
@@ -97,9 +109,11 @@ func initialize() : # takes an array of Characters GD class objects !
 	set_party_swap_enabled(false)
 	settingsControl._initialize()
 	bestiaryRect._initialize()
+	charSwapRect._initialize()
 	characterStatRect.close_requested.connect(_on_character_stat_close_requested)
 	if GameGlobal.allow_character_swap_anywhere :
 		set_party_swap_enabled(true)
+	update_classic_camping_permission()
 #	spellcastMenu.connect("spell_picked", self,"_on_spell_picked"
 	#Error connect(signal: String,Callable(target: Object,method: String).bind(binds: Array = [  ),flags: int = 0)
 	combatBRPanel.hud = self
@@ -171,7 +185,7 @@ func hide_owhudcontrol() :
 
 func update_fatigue_bar() :
 	#print("ow_hud update_fatigue_bar : ", GameGlobal.fatigue ,", bar:", GameGlobal.fatigue * 128 / 172800, "/128" )
-	fatigueBar.value = GameGlobal.fatigue * 128 / GameGlobal.max_fatigue
+	fatigueBar.value = GameGlobal.fatigue * 128 / GameGlobal.fatigue_limit()
 
 func fillCharactersRect() :
 	for child in charsVContainer.get_children() :
@@ -237,6 +251,7 @@ func updateTimeDisplay() :
 	var mapdisplay = NodeAccess.__Map()
 	xPosLabel.text = str(mapdisplay.focuscharacter.tile_position_x)
 	yPosLabel.text = str(mapdisplay.focuscharacter.tile_position_y)
+	_sync_classic_torch_control()
 
 func updateCharPanelDisplay() :
 	for p in charsVContainer.get_children() :
@@ -244,6 +259,72 @@ func updateCharPanelDisplay() :
 
 func updateGlobalEffectsDisplay() :
 	globaleffectsRect.update_display()
+	_sync_shop_control()
+	_sync_classic_search_control()
+	_sync_classic_torch_control()
+
+
+func _sync_shop_control() -> void:
+	var shop_available := (
+		not GameGlobal.currentShop.is_empty()
+		and GameGlobal.shops_dict.has(GameGlobal.currentShop)
+	)
+	shopButton.visible = shop_available
+	shopButton.disabled = not shop_available
+	# Classic uses one service control and gives an available shop precedence.
+	templeButton.visible = not shop_available
+
+
+func _sync_classic_search_control() -> void:
+	var available := is_instance_valid(GameGlobal.classic_campaign_session)
+	classicSearchButton.visible = available
+	classicSearchButton.set_pressed_no_signal(
+		available and GameGlobal.is_classic_party_condition_active(5)
+	)
+
+
+func _sync_classic_torch_control() -> void:
+	var classic_active := is_instance_valid(GameGlobal.classic_campaign_session)
+	var torch := (
+		ClassicItemBehaviorsScript.find_party_torch(
+			GameGlobal.player_characters,
+			NodeAccess.__Resources()
+		)
+		if classic_active
+		else {}
+	)
+	classicTorchButton.sync_status(
+		classic_active,
+		GameGlobal.classic_light_condition,
+		not torch.is_empty(),
+		not torch.is_empty() and StateMachine._state_name == "Exploration"
+	)
+
+
+func _on_classic_torch_button_pressed() -> void:
+	if StateMachine._state_name != "Exploration":
+		GameGlobal.play_sfx("target error.wav")
+		_sync_classic_torch_control()
+		return
+	var result := ClassicItemBehaviorsScript.activate_party_torch(
+		GameGlobal.player_characters,
+		NodeAccess.__Resources()
+	)
+	if not bool(result.get("ok", false)):
+		GameGlobal.play_sfx("target error.wav")
+		var message := str(result.get("message", "The Torch could not be used"))
+		if not message.is_empty():
+			push_warning(message)
+		_sync_classic_torch_control()
+		return
+	GameGlobal.refresh_OW_HUD()
+
+
+func _on_classic_search_button_toggled(enabled: bool) -> void:
+	if not is_instance_valid(GameGlobal.classic_campaign_session):
+		return
+	GameGlobal.set_classic_search_enabled(enabled)
+	updateGlobalEffectsDisplay()
 
 func called_on_CharPanel_SelectButton_pressed(panel) :
 	print("called_on_CharPanel_SelectButton_pressed. Selecting several?", selecting_several_characters, ', ',panel.character.name)
@@ -332,7 +413,7 @@ func request_pc_pick(n : int) :
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	pass
+	classicSearchButton.toggled.connect(_on_classic_search_button_toggled)
 #	var i : int = 0
 
 #		print(c.charname)
@@ -383,6 +464,7 @@ func set_party_swap_enabled(enabled : bool) :
 
 func set_temple_availlable(enabled : bool) :
 	templeButton.disabled = !enabled
+	_sync_shop_control()
 
 func _on_CharSwapButton_pressed():
 	print('_on_CharSwapButton_pressed')
@@ -405,7 +487,12 @@ func _on_CharSwapButton_pressed():
 #		GameState.set_paused(false)
 
 
-func show_loot_menu(items:Array, money : Array, experience : int) :
+func show_loot_menu(
+	items: Array,
+	money: Array,
+	experience: int,
+	classic_battle_reward := false
+) :
 #	if GameState.paused :
 #		return
 ##	if inventoryRect.visible :
@@ -417,7 +504,12 @@ func show_loot_menu(items:Array, money : Array, experience : int) :
 	
 	
 	#GameState.set_paused(true)
-	treasureControl.display(items, money, experience)
+	treasureControl.display(
+		items,
+		money,
+		experience,
+		classic_battle_reward
+	)
 	MusicStreamPlayer.play_music_type("Treasure")
 	await treasureControl.done_looting
 	MusicStreamPlayer.play_music_map()
@@ -473,25 +565,70 @@ func close_special_encounter(go_to_exploration_mode : bool) :
 	if go_to_exploration_mode :
 		StateMachine.transition_to("Exploration")
 
-func _on_CampButton_pressed():
+func _on_CampButton_pressed(movement_exit := false):
 	#if GameState.paused :
 	#	return
+	if not GameGlobal.camping and GameGlobal.classic_camping_disabled:
+		return
 	GameGlobal.camping = ! GameGlobal.camping
 	if GameGlobal.camping :
-		MusicStreamPlayer.play_music_type("Camp")
+		_play_camp_audio()
 	else :
+		restTimer.stop()
+		restTimer.set_paused(true)
 		MusicStreamPlayer.play_music_map()
 	NodeAccess.__Map().set_ow_character_icon(GameGlobal.player_characters[0].icon)
+	update_classic_camping_permission()
+	if movement_exit and not GameGlobal.camping:
+		await GameGlobal.advance_classic_camp_movement_exit()
+	else:
+		await GameGlobal.advance_classic_camp_transition(GameGlobal.camping)
+
+
+func update_classic_camping_permission() -> void:
+	if campButton != null:
+		campButton.disabled = (
+			GameGlobal.classic_camping_disabled
+			and not GameGlobal.camping
+		)
+	if restButton != null:
+		restButton.disabled = (
+			GameGlobal.is_classic_runtime_active()
+			and (
+				GameGlobal.classic_camping_disabled
+				or not GameGlobal.camping
+			)
+		)
+		if restButton.disabled:
+			restTimer.stop()
+			restTimer.set_paused(true)
+
+
+func _play_camp_audio() -> void:
+	# Realmz plays sound 10001 when entering camp, not on every Rest timer tick.
+	var resources := NodeAccess.__Resources()
+	if resources != null and resources.sounds_book.has("camp.wav"):
+		ScriptHelperFuncsClass.play_sound("camp.wav", false)
+	else:
+		push_warning("Camp sound is unavailable")
+	MusicStreamPlayer.play_music_type("Camp")
 
 
 
 func _on_RestTimer_timeout():
-	GameGlobal.rest()
-	restTimer.start(timebetweenrests)
+	var rested := await GameGlobal.rest()
+	if rested and not restTimer.is_paused():
+		restTimer.start(timebetweenrests)
 
 func _on_RestButton_button_down():
 	#if GameState.paused :
 	#	return
+	if GameGlobal.is_classic_runtime_active() \
+			and (
+				not GameGlobal.camping
+				or GameGlobal.classic_camping_disabled
+			):
+		return
 	restTimer.set_paused(false)
 	restTimer.start(0.00001)
 
@@ -571,8 +708,19 @@ func _on_bestiary_button_pressed():
 
 
 func _on_character_stat_close_requested() -> void :
+	if (
+		StateMachine._state_name == "ExMenus"
+		and StateMachine.ex_menu_state.cur_menu_name == "CharacterInfoMenu"
+	) :
+		StateMachine.exit_ex_menu_state({})
+		return
+	if (
+		StateMachine._state_name == "CbMenus"
+		and StateMachine.cb_menu_state.cur_menu_name == "CharacterInfoMenu"
+	) :
+		StateMachine.exit_cb_menu_state({})
+		return
 	characterStatRect.hide()
-	StateMachine.transition_to("Exploration/ExWalking")
 
 func enter_battle_mode() :
 	textRect.hide()
@@ -702,12 +850,12 @@ func set_allow_honest_storage(yes : bool) :
 	inventoryRect.set_allow_honest_storage(yes)
 
 func open_storage_rect() :
-	storage_rect.initialize()
+	honestStorageControl.initialize()
 	inventoryRect.hide()
-	storage_rect.show()
+	honestStorageControl.show()
 
 func close_storage_rect() :
-	storage_rect.hide()
+	honestStorageControl.hide()
 	inventoryRect.hide()
 	_on_InventoryButton_pressed()
 	inventoryRect.show()
@@ -721,13 +869,42 @@ func _on_turn_order_button_toggled(toggled_on : bool) :
 func _on_minimaps_button_pressed() -> void:
 	print("owhud _on_minimaps_button_pressed")
 	if StateMachine._state_name == "Exploration" :
+		var session: Object = GameGlobal.classic_campaign_session
+		if is_instance_valid(session) and session.has_method("acquired_player_map_entries"):
+			var entries: Variant = session.call("acquired_player_map_entries")
+			if entries is Array and classicPlayerMapRect.display_catalog(entries):
+				StateMachine.enter_ex_menu_state({"menu_name": "ClassicPlayerMapMenu"})
+				return
 		print("owhud show minimaps panel")
 		StateMachine.enter_ex_menu_state(({"menu_name" : "MiniMapsMenu"}))
 
 
+func _on_classic_player_map_closed() -> void:
+	if StateMachine._state_name == "ExMenus" \
+			and StateMachine.ex_menu_state.cur_menu_name == "ClassicPlayerMapMenu":
+		StateMachine.exit_ex_menu_state({})
+
+
 func _on_temple_button_pressed() -> void:
 	if temple_rect.visible :
-		temple_rect.hide()
+		temple_rect.close_temple_window()
 		StateMachine.exit_ex_menu_state()
 	else :
 		StateMachine.enter_ex_menu_state(({"menu_name" : "TempleMenu"}))
+
+
+func _on_shop_button_pressed() -> void:
+	if (
+		GameGlobal.currentShop.is_empty()
+		or not GameGlobal.shops_dict.has(GameGlobal.currentShop)
+		or StateMachine._state_name != "Exploration"
+	):
+		GameGlobal.play_sfx("target error.wav")
+		_sync_shop_control()
+		return
+	_on_InventoryButton_pressed()
+	await get_tree().process_frame
+	if not inventoryRect.visible:
+		GameGlobal.play_sfx("target error.wav")
+		return
+	inventoryRect._on_ButtonShop_pressed()
