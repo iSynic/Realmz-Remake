@@ -11,6 +11,9 @@ const CoreHandlerCatalogScript = preload(
 const CombatOpcodeRuntimeScript = preload(
 	"res://scripts/scenario_runtime/handlers/classic_combat_opcode_runtime.gd"
 )
+const InventoryOpcodeRuntimeScript = preload(
+	"res://scripts/scenario_runtime/handlers/classic_inventory_opcode_runtime.gd"
+)
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
 const MAX_RANDOM_RECTANGLES := 20
@@ -154,6 +157,7 @@ var trace: Array = []
 var last_error := ""
 var halted := false
 var _combat_opcode_runtime: RefCounted
+var _inventory_opcode_runtime: RefCounted
 
 
 func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeState) -> void:
@@ -162,6 +166,9 @@ func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeStat
 	if _combat_opcode_runtime == null:
 		_combat_opcode_runtime = CombatOpcodeRuntimeScript.new()
 		_combat_opcode_runtime.configure(self)
+	if _inventory_opcode_runtime == null:
+		_inventory_opcode_runtime = InventoryOpcodeRuntimeScript.new()
+		_inventory_opcode_runtime.configure(self)
 	if compatibility_instruction_registry == null:
 		compatibility_instruction_registry = ScenarioInstructionRegistry.new()
 		if not CoreHandlerCatalogScript.register_all(
@@ -178,6 +185,8 @@ func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeStat
 func classic_handler_runtime(handler_id: String) -> Object:
 	if handler_id == "core.combat":
 		return _combat_opcode_runtime
+	if handler_id == "core.inventory":
+		return _inventory_opcode_runtime
 	return self
 
 
@@ -674,93 +683,11 @@ func resume_teleport() -> Dictionary:
 
 
 func resume_item_check(possessed: bool) -> Dictionary:
-	if pending_item_check.is_empty():
-		return _error_result("No classic item check is waiting for a response")
-	var item_check := pending_item_check
-	pending_item_check = {}
-	var values: Array = item_check["values"]
-	match str(item_check.get("kind", "")):
-		"possession_branch":
-			if possessed:
-				var possessed_result := _branch_item_possession_target(
-					values,
-					int(values[3]),
-					bool(item_check.get("gosub", false))
-				)
-				if str(possessed_result.get("status", "")) != "continue":
-					return possessed_result
-				return run_until_yield()
-			match int(values[2]):
-				0:
-					var missing_result := _branch_item_possession_target(
-						values,
-						int(values[4]),
-						bool(item_check.get("gosub", false))
-					)
-					if str(missing_result.get("status", "")) != "continue":
-						return missing_result
-					return run_until_yield()
-				1:
-					return run_until_yield()
-				2:
-					_clear_control_flow()
-					return _yield_result("show_text", {
-						"messageId": int(values[4]),
-						"message": bundle.get_message(int(values[4])),
-					})
-				_:
-					return _halt_with_error(
-						"Item possession branch has invalid failure mode %d" % int(values[2])
-					)
-		"result_branch":
-			var test_mode := int(values[1])
-			if not [0, 1].has(test_mode):
-				return _halt_with_error(
-					"Item result branch has invalid test mode %d" % test_mode
-				)
-			var should_branch := (test_mode == 0 and not possessed) \
-				or (test_mode == 1 and possessed)
-			if not should_branch:
-				return run_until_yield()
-			var branch_result := _branch_from_extra_code(values, false)
-			if str(branch_result.get("status", "")) != "continue":
-				return branch_result
-			return run_until_yield()
-		"charge_branch":
-			var target_id := int(values[3]) if possessed else int(values[4])
-			if target_id == -1:
-				return run_until_yield()
-			var charge_branch_result := _branch_item_possession_target(
-				values,
-				target_id,
-				bool(item_check.get("gosub", false))
-			)
-			if str(charge_branch_result.get("status", "")) != "continue":
-				return charge_branch_result
-			return run_until_yield()
-		_:
-			return _halt_with_error("Classic item check has an invalid continuation")
+	return _inventory_opcode_runtime.resume_item_check(possessed)
 
 
 func resume_wealth_payment(paid: bool) -> Dictionary:
-	if pending_wealth_payment.is_empty():
-		return _error_result("No classic wealth payment is waiting for a response")
-	var payment := pending_wealth_payment
-	pending_wealth_payment = {}
-	var values: Array = payment["values"]
-	if not paid and int(values[1]) == -1:
-		_set_cursor(current_trigger, 7)
-		return run_until_yield()
-	var test_mode := int(values[1])
-	var should_branch := test_mode == 2 \
-		or (test_mode == 0 and not paid) \
-		or (test_mode == 1 and paid)
-	if not should_branch:
-		return run_until_yield()
-	var branch_result := _branch_from_extra_code(values, false)
-	if str(branch_result.get("status", "")) != "continue":
-		return branch_result
-	return run_until_yield()
+	return _inventory_opcode_runtime.resume_wealth_payment(paid)
 
 
 func resume_party_condition_check(active: bool) -> Dictionary:
@@ -1016,22 +943,7 @@ func _execute_combat_fumble(extra_code_id: int) -> Dictionary:
 
 
 func _execute_take_gold(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Take Gold action references missing Extra Code row %d" % extra_code_id
-		)
-	var authored_amount := int(values[0])
-	pending_wealth_payment = {
-		"extraCodeId": extra_code_id,
-		"values": values,
-	}
-	return _yield_result("take_party_wealth", {
-		"extraCodeId": extra_code_id,
-		"currency": 0 if authored_amount > 0 else 1,
-		"amount": abs(authored_amount),
-		"warningId": 50,
-	})
+	return _inventory_opcode_runtime._execute_take_gold(extra_code_id)
 
 
 func _execute_give_condition(extra_code_id: int) -> Dictionary:
@@ -1086,189 +998,52 @@ func _execute_battle_round_macro(extra_code_id: int) -> Dictionary:
 
 
 func _execute_load_shop(signed_shop_id: int, accept_ranges: Array = []) -> Dictionary:
-	var shop_id: int = abs(signed_shop_id)
-	var shop: Dictionary = bundle.get_shop(shop_id)
-	if shop.is_empty():
-		return _halt_with_error("Shop action references missing shop %d" % shop_id)
-	shop = runtime_state.get_effective_shop(shop)
-	var item_texts: Array = []
-	if accept_ranges.is_empty():
-		var seen_item_ids: Dictionary = {}
-		for item_id_value: Variant in shop.get("itemIds", []):
-			var item_id: int = abs(int(item_id_value))
-			if item_id == 0 or seen_item_ids.has(item_id):
-				continue
-			seen_item_ids[item_id] = true
-			var item_text: Dictionary = bundle.get_item_text(item_id)
-			if not item_text.is_empty():
-				item_texts.append(item_text)
-	else:
-		item_texts.assign(bundle.item_texts_by_id.values())
-	var shop_accept_ranges := [0, 0, 0, 0] if accept_ranges.is_empty() \
-		else accept_ranges.duplicate()
-	return _yield_result("load_shop", {
-		"shopId": shop_id,
-		"shop": shop,
-		"itemTexts": item_texts,
-		"openImmediately": signed_shop_id < 0,
-		"acceptRanges": shop_accept_ranges,
-	})
+	return _inventory_opcode_runtime._execute_load_shop(
+		signed_shop_id,
+		accept_ranges
+	)
 
 
 func _execute_shop_mutation(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Shop mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var shop_id := int(values[0])
-	var shop := bundle.get_shop(shop_id)
-	if shop.is_empty():
-		return _halt_with_error("Shop mutation references missing shop %d" % shop_id)
-	var inflation_delta := int(values[1])
-	var item_id := int(values[2])
-	var quantity_delta := int(values[3])
-	var effective := runtime_state.alter_shop(
-		shop,
-		inflation_delta,
-		item_id,
-		quantity_delta
-	)
-	return _yield_result("alter_shop", {
-		"extraCodeId": extra_code_id,
-		"shopId": shop_id,
-		"shop": effective,
-		"inflationDelta": inflation_delta,
-		"itemId": item_id,
-		"quantityDelta": quantity_delta,
-	})
+	return _inventory_opcode_runtime._execute_shop_mutation(extra_code_id)
 
 
 func _execute_restricted_shop(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Restricted shop action references missing Extra Code row %d" % extra_code_id
-		)
-	return _execute_load_shop(int(values[0]), [
-		int(values[1]),
-		int(values[2]),
-		int(values[3]),
-		int(values[4]),
-	])
+	return _inventory_opcode_runtime._execute_restricted_shop(extra_code_id)
 
 
 func _execute_item_possession_branch(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Item possession branch references missing Extra Code row %d" % extra_code_id
-		)
-	pending_item_check = {
-		"kind": "possession_branch",
-		"values": values,
-		"gosub": gosub,
-	}
-	return _yield_result("check_party_item", {
-		"extraCodeId": extra_code_id,
-		"itemId": abs(int(values[0])),
-		"itemTexts": _item_texts_for_ids([values[0]]),
-	})
+	return _inventory_opcode_runtime._execute_item_possession_branch(
+		extra_code_id,
+		gosub
+	)
 
 
 func _execute_item_charge_branch(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.size() < 5:
-		return _halt_with_error(
-			"Item-charge branch references malformed Extra Code row %d"
-			% extra_code_id
-		)
-	if int(values[1]) < 0 or int(values[1]) > 2:
-		return _halt_with_error(
-			"Item-charge branch has invalid target mode %d" % int(values[1])
-		)
-	pending_item_check = {
-		"kind": "charge_branch",
-		"values": values,
-		"gosub": gosub,
-	}
-	return _yield_result("check_party_item", {
-		"extraCodeId": extra_code_id,
-		"itemId": abs(int(values[0])),
-		"minimumCharges": int(values[2]),
-		"itemTexts": _item_texts_for_ids([values[0]]),
-	})
+	return _inventory_opcode_runtime._execute_item_charge_branch(
+		extra_code_id,
+		gosub
+	)
 
 
 func _execute_item_mutation(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Item mutation references missing Extra Code row %d" % extra_code_id
-		)
-	return _yield_result("alter_party_items", {
-		"extraCodeId": extra_code_id,
-		"itemId": abs(int(values[0])),
-		"maxMatches": int(values[1]),
-		"operation": int(values[2]),
-		"chargeDelta": int(values[3]),
-		"replacementItemId": abs(int(values[4])),
-		"itemTexts": _item_texts_for_ids([values[0], values[4]]),
-	})
+	return _inventory_opcode_runtime._execute_item_mutation(extra_code_id)
 
 
 func _execute_item_result_branch(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Item result branch references missing Extra Code row %d" % extra_code_id
-		)
-	var test_mode := int(values[1])
-	if not [0, 1, 2].has(test_mode):
-		return _halt_with_error(
-			"Item result branch has invalid test mode %d" % test_mode
-		)
-	if test_mode == 2:
-		return _branch_from_extra_code(values, false)
-	pending_item_check = {
-		"kind": "result_branch",
-		"values": values,
-	}
-	return _yield_result("check_party_item", {
-		"extraCodeId": extra_code_id,
-		"itemId": abs(int(values[0])),
-		"itemTexts": _item_texts_for_ids([values[0]]),
-	})
+	return _inventory_opcode_runtime._execute_item_result_branch(extra_code_id)
 
 
 func _branch_item_possession_target(values: Array, target: int, gosub: bool) -> Dictionary:
-	match int(values[1]):
-		0:
-			return _branch_to_extra_action_point(target, gosub, 0)
-		1, 2:
-			if gosub:
-				var push_result := _push_call_frame()
-				if str(push_result.get("status", "")) != "continue":
-					return push_result
-			return _execute_encounter("simple" if int(values[1]) == 1 else "complex", target)
-		_:
-			return _halt_with_error(
-				"Item possession branch has invalid target mode %d" % int(values[1])
-			)
+	return _inventory_opcode_runtime._branch_item_possession_target(
+		values,
+		target,
+		gosub
+	)
 
 
 func _item_texts_for_ids(item_ids: Array) -> Array:
-	var item_texts: Array = []
-	var included_ids: Dictionary = {}
-	for item_id_value: Variant in item_ids:
-		var item_id: int = abs(int(item_id_value))
-		if item_id == 0 or included_ids.has(item_id):
-			continue
-		included_ids[item_id] = true
-		var item_text := bundle.get_item_text(item_id)
-		if not item_text.is_empty():
-			item_texts.append(item_text)
-	return item_texts
+	return _inventory_opcode_runtime._item_texts_for_ids(item_ids)
 
 
 func _execute_battle(extra_code_id: int) -> Dictionary:
@@ -1482,86 +1257,15 @@ func _eliminate_complex_result(result_index: int) -> Dictionary:
 
 
 func _execute_treasure(treasure_id: int) -> Dictionary:
-	var treasure := bundle.get_treasure(treasure_id)
-	if treasure.is_empty():
-		return _halt_with_error("Missing treasure record %d" % treasure_id)
-	var item_texts: Array = []
-	var item_ids: Variant = treasure.get("itemIds", [])
-	if item_ids is Array:
-		for item_id_value: Variant in item_ids:
-			var item_id: int = abs(int(item_id_value))
-			if item_id == 0:
-				continue
-			var item_text := bundle.get_item_text(item_id)
-			if not item_text.is_empty():
-				item_texts.append(item_text)
-	return _yield_result("give_treasure", {
-		"treasureId": treasure_id,
-		"treasure": treasure,
-		"itemTexts": item_texts,
-		"lootMode": 1,
-	})
+	return _inventory_opcode_runtime._execute_treasure(treasure_id)
 
 
 func _execute_currency_clear(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Currency-clear action references missing Extra Code row %d" % extra_code_id
-		)
-	var currency := int(values[0]) - 1
-	if currency < 0 or currency > 2:
-		return _halt_with_error(
-			"Currency-clear action has invalid currency %d" % int(values[0])
-		)
-	return _yield_result("clear_party_currency", {
-		"extraCodeId": extra_code_id,
-		"currency": currency,
-		"selectedOnly": int(values[1]) != 0,
-	})
+	return _inventory_opcode_runtime._execute_currency_clear(extra_code_id)
 
 
 func _execute_random_items(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Random-item action references missing Extra Code row %d" % extra_code_id
-		)
-	var authored_count := int(values[0])
-	var count := randi_range(1, absi(authored_count)) if authored_count < 0 \
-		else authored_count
-	var first_item_id := int(values[1])
-	var last_item_id := int(values[2])
-	if count < 0 or count > 20:
-		return _halt_with_error("Random-item action count must be between 0 and 20")
-	if first_item_id <= 0 or last_item_id < first_item_id:
-		return _halt_with_error("Random-item action has an invalid item range")
-	var item_ids: Array[int] = []
-	var item_texts: Array = []
-	var seen_texts: Dictionary = {}
-	for _item_index: int in range(count):
-		var item_id := randi_range(first_item_id, last_item_id)
-		item_ids.append(item_id)
-		var item_text := bundle.get_item_text(item_id)
-		if not item_text.is_empty() and not seen_texts.has(item_id):
-			seen_texts[item_id] = true
-			item_texts.append(item_text)
-	return _yield_result("give_treasure", {
-		"extraCodeId": extra_code_id,
-		"treasureId": -1,
-		"treasure": {
-			"id": -1,
-			"itemIds": item_ids,
-			"exp": 0,
-			"gold": 0,
-			"gems": 0,
-			"jewelry": 0,
-		},
-		"itemTexts": item_texts,
-		"lootMode": 1,
-		"randomItemCount": count,
-		"randomItemRange": [first_item_id, last_item_id],
-	})
+	return _inventory_opcode_runtime._execute_random_items(extra_code_id)
 
 
 func _execute_spellcasting_flags(extra_code_id: int) -> Dictionary:
