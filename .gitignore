@@ -1,6 +1,9 @@
 # Godot 4+ specific ignores
 .godot/
 
+# Local environment settings and credentials
+.env
+
 # Godot-specific ignores
 [Pp]ublish/
 
@@ -16,13 +19,19 @@ asset_scripts/spells2.csv
 asset_scripts/spells.txt
 asset_scripts/message.txt
 asset_scripts/engine_strings/*
-asset_scripts/__pycache__/
+__pycache__/
+*.py[cod]
 asset_scripts/descriptions.json
 asset_scripts/expansion_tiles
 asset_scripts/The Family Jewels*
 asset_scripts/tileset_outdoor.png
 asset_scripts/expansion_tiles
 .venv/
+
+# Generated local audit reports
+tmp/classic-spell-parity-audit.json
+tmp/classic-spell-parity-audit.md
+tmp/classic-damage-spell-scaffold/
 
 
 # External addons
@@ -35,5 +44,3 @@ src/Profiles/Default Profile/Characters/*
 src/Profiles/Default Profile/Saves/*
 !src/Profiles/Default Profile/Saves/.gitkeep
 !src/Profiles/Default Profile/Characters/.gitkeep
-
-# Git LFS ignores
