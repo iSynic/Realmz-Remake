@@ -1,0 +1,925 @@
+# Classic behavior in scenario runtime v2
+
+This directory contains the source-backed Classic mechanics consumed by the
+modular scenario runtime. The public execution, extension, port, rules, and save
+contracts live under `scripts/scenario_runtime`; Providence produces the
+`realmz-remake-scenario` v2 package consumed here.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the ownership boundary between the
+scenario VM, six Godot ports, trusted extensions, and gameplay rules.
+[BUNDLE_CONTRACT.md](BUNDLE_CONTRACT.md) defines the versioned
+Providence-to-Remake runtime artifact. [INSTALLING_CLASSIC_CAMPAIGNS.md](INSTALLING_CLASSIC_CAMPAIGNS.md)
+defines its self-contained layout below Remake's `Campaigns` directory and the
+normal campaign-start lifecycle. The
+[Classic support matrix and porting workflow](CLASSIC_PORTING_GUIDE.md) is the
+public entry point for version compatibility, readiness, installation, safe
+updates, current boundaries, and the evidence required for broader claims.
+The custom-rule audit command inventories a supplied scenario library's spell,
+race, and caste payloads without turning preserved definitions into inferred
+runtime usage.
+
+`ClassicCampaignBundle` validates and indexes format v2. `ClassicExecutionAudit`
+inventories executable map, encounter, and combat actions without turning those
+counts into a playability percentage. `ClassicRuntimeState` owns source-specific
+mutations. `ScenarioInterpreter` is the public AP/XAP engine; handler families
+own Classic opcodes and namespaced semantic operations. The internal
+`ClassicOpcodeRuntime` supplies the source-backed mechanics invoked by those
+handlers, but trigger stepping and continuation routing remain in the VM.
+`ClassicRuntimeHost` drives the VM through `ScenarioCommandRouter`, whose six
+ports call `ScenarioGodotServices` for native map, combat, inventory, character,
+presentation, and persistence behavior.
+
+Implemented opcodes in this slice:
+
+- `1` Text
+- `2` Battle request
+- `3` Choice and choice continuation
+- `4` Simple encounter request and result-block continuation
+- `5` Complex encounter request and result-block continuation
+- `6` Load a Classic shop into Remake's native shop state
+- `7` Copy Data ED3 actions into a map AP or encounter result
+- `8` Execute another AP from the currently loaded map
+- `9` Play sound
+- `10` Give fixed treasure
+- `11` Award party experience
+- `12` Mutate a land or dungeon tile
+- `13` Enable or disable one or more map triggers
+- `14` and `-14` Pick characters or the inverse of a picked group
+- `15` Damage or heal picked characters
+- `16` Damage or heal the party
+- `19` Display a random string from an inclusive message range
+- `20` Teleport and destination recheck
+- `21` Branch on whether the party carries an item
+- `22` Remove, recharge, or replace matching party items
+- `23` Alter a land or dungeon random-encounter rectangle
+- `24` Keep codes / script completion
+- `25` Remove and persist the active action point at its destination
+- `26` Wait for a click or key acknowledgement
+- `27` Display a scenario picture
+- `28` Remove the scenario picture and redraw the current map view
+- `29` Acquire a player map and optionally display it
+- `30` Pick characters by an attribute or special-ability check
+- `32` Make Classic temple services available at the authored prices
+- `33` Take pooled and carried gold or gems, then follow the authored result branch
+- `35` Eliminate and persist an option in the current simple encounter
+- `36` Capture or restore party equipment and wealth
+- `37` Move between land and dungeon maps with Classic heading/view state
+- `38` Branch on an item-possession result
+- `39` Extend actions through a Data ED3 AP
+- `40` Branch on a live party condition
+- `41` Eliminate and persist an option in any simple encounter
+- `42` Branch on percent chance
+- `44` Eliminate and persist one complex-encounter result
+- `45` Teleport only
+- `46` Branch on quest flag
+- `47` Set or clear quest flag
+- `49` Enable Remake's native banking controls
+- `52` Pick characters by movement, position, item, chance, save, or current selection
+- `54` Alter a persistent timed-encounter schedule
+- `56` Battle request with victory, coward-branch, and coward-penalty continuation
+- `57` Change a land level's visual set and darkness
+- `58` Branch on Classic difficulty level
+- `73` Load a Classic shop with two item-acceptance ranges
+- `82` Disable priest turning
+- `83` Enable priest turning
+- `85` Branch to a random AP or encounter in an inclusive range
+- `87` Branch on whether a compiled monster is a party ally
+- `89` Add a compiled monster as a party ally
+- `93` Enable compass updates
+- `94` Disable compass updates
+- `95` Set or randomize the current view direction
+- `96` Require the 3D view
+- `97` Allow the full map view
+- `84`, `98`, `99` Continue past the open-source runtime's disabled registration gates
+- `100` End the active battle as a victory with experience-only rewards
+- `106` Set per-map darkness
+- `111` Return from GOSUB
+- `112` Pop one GOSUB frame without returning
+- `121` Remove lower undead from the active battle
+- `123` Rout named monsters on the acting creature's faction
+- `124` Spawn compiled monsters in the active battle
+- `125` Remove matching monsters from the active battle
+- `126` Schedule and activate a battle-round macro
+- `127` End a combat macro when its required monster is absent
+
+The interpreter preserves Classic's unusual stack semantics: a negative action enables a sticky GOSUB mode, positive actions only clear that mode when the stack is empty, and branch opcodes may therefore push even when their own action code is positive. Returns are explicit through opcode `111`; merely reaching the end of an action point does not unwind the stack. Stack depth is capped at Classic's 20 frames with a safe runtime error instead of writing past the original fixed-size arrays. A focused War in the Sword Lands fixture exercises a shipped three-frame GOSUB chain and verifies the exact XAP return order.
+
+Opcode `25` follows Classic's deferred door rewrite. It clears the GOSUB stack, captures the party position, and waits for the action point to finish. If the active door then moves the party, the current action list is copied into the destination map's matching door slot and its target is changed to the captured position. Data ED3 branches replace only that action list; the originating map door header remains active. These replacements live in runtime state and snapshots, leaving the compiled campaign bundle immutable. A focused Twin Sands of Time fixture exercises the shipped same-level relocation case.
+
+Opcodes `26` through `28` use Remake's existing HUD presentation. Get Click displays Classic's acknowledgement prompt and waits for the normal text input. Show Picture prefers the catalog record's validated `runtimeMedia` image, retains the legacy `Splash Images` lookup for native campaigns, and leaves the image visible while later actions run. Providence exports scenario-owned PICT resources as deterministic PNG runtime media while preserving their immutable Classic bytes separately. Redraw Screen hides that picture and queues the current map for redraw. Sound actions likewise prefer validated WAV, Ogg Vorbis, or MP3 runtime media before using Remake's shared sound mapping. Immutable `classic-resource-data` payloads are never passed to Godot's media loaders. Pictures without decoded runtime media report the resource gap and preserve progression.
+
+Opcode `7` copies a Data ED3 action list into the selected map AP, simple result, or complex result while preserving the target record's other fields. The replacement is persistent and included in runtime snapshots, matching Classic's scenario-file mutation without changing the compiled bundle. Opcode `8` is deliberately transient: it borrows another AP's actions from the currently loaded map, retains the active AP's header and percentage, repeats Classic's percentage check, and then executes the copied list from its first slot. City of Bywater exercises both paths directly.
+
+Opcode `11` sends its authored total through Remake's existing loot and experience flow, which splits the award among living party members that can receive experience and preserves the normal level-up UI. The City of Bywater child-grave sequence awards 1,500 experience and then continues into its persistent action-point replacement.
+
+Opcodes `6` and `73` convert Classic's five fixed 200-slot stock categories into Remake's native shop categories and apply the authored inflation to purchase and resale prices. A positive shop ID makes the Shop control available until movement; a negative ID opens it immediately. Opcode `73` resolves the shop ID and two inclusive item ranges from Extra Code, then applies the resulting transfer rule to both purchases and sales. It preserves Classic's original two-range test: an item is rejected only when it misses both populated ranges, so a record with only one populated range remains unrestricted. Purchases spend pooled gold before character gold, remove depleted stock from the native UI, and retain the reduced quantity when the shop is reopened or loaded again. The active restriction is replaced or cleared by each load. Every stocked or accepted item must resolve to a loaded Remake resource. The current full City of Bywater bundle does not include names for its scenario-specific items, so affected shops remain an explicit resource boundary rather than silently omitting their merchandise.
+
+Opcode `32` exposes Classic's nine temple services through Remake's native temple menu. The authored value is a percentage applied to Classic's base prices, including City of Bywater's standard 100-percent temple and its 300-percent hostile temple. Service payments combine pooled and selected-character gold and spend the pool first, matching Classic. Opcode `49` enables the native bank until movement and preserves the source sound and built-in warning IDs. When both services are available, banked wealth moves into the temple pool on entry and the remaining pool returns to the bank on exit, matching Classic.
+
+Opcode `33` charges gold for a positive authored amount or gems for a negative
+amount. It spends the matching pooled currency first, then removes carried units
+round-robin in party order. An insufficient party total leaves every balance
+unchanged before the interpreter applies the authored failure branch. City of
+Bywater's seven uses all charge gold; focused fixtures also preserve the source's
+gem form and its special failure continuation at the eighth result slot.
+
+Opcodes `21` and `38` check all party inventories, including worn items, and resume the interpreter through their authored branch or fallthrough. Opcode `22` walks characters and inventory slots in party order, limits the number of matches, and can remove an item, add a signed charge value, or replace it from a fresh native template. Replacement resets identification and attempts to restore the prior worn state. Opcode `36` captures every inventory, worn state, and wealth type into adapter-local storage, then restores the original possessions and offers anything acquired in the interim through Remake's treasure UI. Repeated capture or restore actions are harmless when storage is already in the requested state. The active capture is included in the Classic save envelope, with native textures rebuilt from the saved item data on load. These commands stop explicitly when a scenario item ID has no shared mapping or exported item name.
+
+Opcode `16` rolls its inclusive Extra Code range separately for each party member, multiplies each result by the authored signed value, and applies the resulting damage or healing through Remake's normal character health method. Its optional sound and message use the existing adapter paths. The standalone City of Bywater macro at `Data ED3:macro:142` provides a deterministic one-point party-damage proof.
+
+Opcodes `14`, `-14`, `30`, and `15` share a transient selected-character set. Interactive picks use Remake's character panels; a negative pick ID allows dead characters, while opcode `-14` keeps the unchosen complement. Opcode `30` filters the current selection, whole party, or living party through the authored attribute or special-ability check. Opcode `15` then applies an independent signed health roll to each selected character. The City of Bywater shaft at `Data DD:7:54` exercises the native picker, while its temple sphere and pit records cover inverse and checked selections.
+
+Opcode `52` replaces that selection from the whole party, living characters, or the previous selected set. Its selectors cover maximum movement, one-based party position, carried or worn items, percent chance, failed attribute or spell saves, the native HUD focus, and an exact party slot. The construction-set contract for checking the previous selection is preserved despite Classic's duplicate `track` clear making that source path ineffective. City of Bywater uses the opcode for two rockfalls: one selects movement below 10, while the other authors undefined attribute selector `5` alongside explicit “not fast enough” text. The adapter treats that one compatibility value as Dexterity rather than reproducing an uninitialized Classic comparison.
+
+Opcodes `17` and `18` apply a packed Classic spell to the current selected set or whole party. The interpreter preserves the spell ID, power, save adjustment, force-affect flag, and target mode; the party variant also replaces the transient selection, matching Classic's `track` behavior. The adapter maps the ID through Remake's existing Divinity spell table and resolves every character separately. It adds the authored adjustment once per power level to the native Classic-save approximation, halves a damaging spell when the target saves, skips a saved condition-only effect, and bypasses the save when force-affect is set. Native field-spell resources declare their Classic save index and whether a save negates the effect, halves its damage, or is not available; readiness blocks mapped resources without that metadata.
+
+Encounter result values select the corresponding eight-action block from `Data ED` or `Data ED2`. When a result block falls through naturally, the encounter repeats up to its authored `maxTimes`; explicit keep/remove actions still terminate it. On the last attempt, Classic's complex-encounter Result 4 timeout quirk selects Result 3 instead. Map Action Points are disabled after ordinary fallthrough, while opcode `24` exits through Keep Codes and leaves the source active. Opcode `35` removes an option from the active simple encounter and reopens it without consuming an attempt. Opcode `41` applies the same persistent mutation to the encounter and option named by its Extra Code row, while opcode `44` replaces one complex result row with Keep Codes. These replacements are included in runtime snapshots. Battle outcome branches remain suspended until the host reports victory or cowardice. Persistent tile, trigger, encounter, player-map, and action-point mutations are included in runtime snapshots; the bundle records themselves remain immutable.
+
+Percent branches use Classic's inclusive 1-100 roll. Their success action can redirect to Data ED3, keep or consume the source action point, or replace the current result code with a row from the most recently loaded simple or complex encounter. Those loaded encounter references are transient interpreter state, matching the original engine's separate global encounter buffers; redirecting a result row does not start or add an encounter loop.
+
+Difficulty branches compare their threshold with Classic's saved five-step difficulty setting, represented internally from `-2` (easiest) through `2` (hardest), with `0` as the default. They use the same success outcomes as percent branches. City of Bywater does not author opcode `58`, so this handler does not change its compatibility coverage count.
+
+Opcode `40` reads all ten Classic party conditions through an exact native-state mapping; City of Bywater's shipped use checks Waterworld against Remake's active WaterBreath effect before branching to complex encounter 8. Opcode `43` applies any of Classic's forty signed character conditions to the whole party, the current picked set, or every living character. The rules preserve Classic's pre-target clearing of positive durations, accumulation of permanent values, combat-round and field-hour expiry, and save/load state. Existing native traits own matching effects, while narrow Classic traits cover otherwise missing curse, slow, and elemental-protection state. The complete source and runtime ownership matrix is in `CONDITION_COMPATIBILITY.md`. Opcode `85` selects an inclusive random AP, simple encounter, or complex encounter and preserves its optional sound and message before branching. The only City of Bywater slot is inside malformed `Data ED3:macro:197` data and remains a signed missing-row diagnostic rather than being guessed into valid scenario logic. Opcode `87` compares the monster name byte stored on each ally, while opcode `89` selects a Data MD monster record to create. The adapter therefore stores both identities on imported allies and in save files instead of deriving one from the other. Adding an ally requires an exact native bestiary identity; stable bestiary metadata or the existing numeric bestiary ID is preferred over a unique display-name fallback. City of Bywater's Vodalian resolves through the shared `Vodalian 71` entry; a scenario-local ally with no shared or campaign match remains a visible resource boundary. Opcodes `84`, `98`, and `99` are intentionally no-ops because the open-source Classic dispatcher disables all three registration checks.
+
+Opcodes `82` and `83` persist Classic's global permission to turn undead and nether spawn, then present their fixed message and sound through the native HUD. New campaigns start with turning enabled, and older snapshots use the same default. Battle requests carry the current value into native combat, where eligible player characters receive a Turn Undead action only while that gate is enabled. Each character can attempt it once per battle. Materialized compiler monsters supply the original undead/nether-spawn flags, hit dice, magic resistance, and summon sentinel, allowing the native action to use Classic's exact threshold and destroy-versus-turn outcomes. Destroyed hostiles continue through normal death macros and battle rewards; turned targets switch to the player's faction and no longer count as defeated enemies. Classic's two half-action cost maps to one Remake action.
+
+Opcode `48` starts its inclusive battle range through Remake's native combat lifecycle with only the currently picked living characters. Selective losses are allowed to return to exploration so the unselected party is not treated as a whole-party game over. Native battle cleanup presents the normal defeated-enemy rewards; surviving participants then receive the action's optional fixed treasure through the existing loot UI. If nobody survives, the fixed treasure is skipped, Classic's warning is shown, and the active encounter result resumes. The same adapter now services ordinary and branching Classic battle requests, preserving pre-battle sound and text, loot suppression, surprise, and outcome responses. When a hand-converted `Battle_<id>` resource is absent, the adapter materializes one from the compiler's 13x13 `Data BD` grid, resolving each monster through the native bestiary while retaining its Classic record ID, name ID, and signed side flip. Static distance and battle-macro fields enter native battle state, and request-specific priest-turning availability is attached when combat starts. Authored cowardice outcomes show Classic's two core warnings and mapped party-loss sound, then remove 2,000 experience per character level once before the suspended action list continues. Because Remake tracks experience remaining until the next level, the adapter applies that loss by increasing `exp_tnl`. Successful exploration movement is carried into the Classic trigger context, allowing a land cowardice outcome to reverse that movement and return the party to its previous tile. Classic does not perform this retreat in dungeons. A trigger started without movement context reports the skipped retreat rather than guessing a direction.
+
+Compiler-produced monsters retain their six Classic spell saves and immunities as compatibility-owned metadata, including the separate Charm and Mental values that Remake's native stat model combines. Classic spell and encounter checks use those exact values; native-only effects continue to use Remake's ordinary elemental stats. Monsters also retain permanent Classic regeneration from condition 10 and spell-protection conditions 16 through 20. Regeneration restores the source amount at each normal combat-round boundary without reviving a defeated monster. Spell resolution uses the cast spell's learned or exact Classic level before ordinary magic resistance, matching Classic's rule that a screen stops spells at or below its level. Positive condition counters still require their own mutable lifecycle, and other nonzero starting conditions remain installation blockers.
+
+Unarmed monster special attacks `1` through `10`, `16`, `18`, and `19` execute through the native combat hit path. Conditions reuse Remake traits while preserving Classic saves and duration rules. Spell-point drain transfers three points per attacker hit die, victory drain removes twenty experience per attacker maximum stamina from party targets, and Charm changes allegiance for the battle and makes a monster attacker select a new target. Blindness and petrification reuse the same permanent-condition paths as their Classic spell equivalents. Magic resistance over 100 still blocks these effects against Classic monsters. Weapon-coupled specials and aging special `17` remain explicit installation blockers.
+
+Opcode `54` copies a compiled timed encounter into compatibility-owned state before changing its chance, increment, or next day. Negative chance, increment, and day-offset values leave the effective value unchanged; a nonzero reset flag starts the day calculation from Remake's current scenario day. Imported movement costs retain their source `timeclick()` units at rest. The live Classic movement seam converts each click to five in-game minutes on outdoor landlooks or one minute on indoor landlooks, and normalizes every successful dungeon step to the source's one indoor click. An enabled Search pass pays its separate four-click source cost using the current landlook scale. Native Remake campaigns retain their existing clock scale. Remake's native time loop submits each crossed scenario day to the active Classic campaign session. The scheduler reads effective records in source order and preserves `timeclick()`'s control flow: chance, item, and quest failures write the next scheduled day and end that day's scan, while a location mismatch continues without writing the candidate increment. A matching record persists its next day and dispatches its `Data ED3` action point through the normal host. A completed macro resumes the same ordered scan so opcode `54` can affect a later record. Combat queues crossed days without starting another encounter; the queue and scan cursor survive the normal Classic save envelope and resume once the host is available. Compiled records remain immutable.
+
+Opcode `61` applies its signed X/Y shift to the current land or dungeon
+position, or independently rolls a signed magnitude for both axes when the
+source random flag is set. The existing native map bridge moves the party,
+refreshes exploration, and redraws the loaded map before later action slots
+continue. Missing rows, non-positive random ranges, impossible shifts, and
+runtime destinations outside the compiled map remain explicit errors.
+
+Opcode `63` sets selected day, hour, and minute fields or applies their signed
+offsets without treating the change as ordinary elapsed rest or movement time.
+The native clock preserves seconds, normalizes the result, refreshes the HUD,
+and returns the new fields to the active interpreter. A following opcode `64`
+therefore branches against the updated day and hour in the same action point.
+Both inclusive latest-day/latest-hour outcomes branch to compiled Data ED3
+targets; negative opcode `64` retains the normal GOSUB return path.
+
+Opcode `66` enables or disables the normal Camp button, preserves that
+permission in native saves, and presents Classic's notice only when the state
+changes. Opcode `103` tests the live boat and camp states, skips the remaining
+action slots on a mismatch, and then independently applies its authored boat
+state change. The existing native camp and boat fields remain the runtime
+authority, including normal save/load behavior and exploration redraws.
+
+Opcode `101` reverses the successful land movement that entered the current
+action point, redraws exploration at the restored tile, and ends the action
+point without applying its ordinary destination or later slots. It remains a
+source no-op in dungeons. Triggers started without an entry movement complete
+without guessing a direction and report that the backup was skipped.
+
+Combat opcodes `121`, `123`, `125`, and `127` use the live native roster. Opcodes `121` and `123` select Data MD record IDs; opcodes `125` and `127` compare the separate monster name byte. Spawned combatants preserve both values, and name-byte checks do not fall back to a record ID when the values differ. Presence checks ignore defeated creatures. Monster destruction and lower-undead deanimation remove combatants through Remake's normal combat-state method, and hostile removals remain eligible for battle rewards. Rout filters its five compiled monster record IDs to the acting creature's faction and applies Remake's permanent fleeing trait, which switches each match to the native retreat AI. An explicit actor faction can be supplied for queued and on-death macros; otherwise the adapter uses the active native combatant. Once a routed combatant reaches the battlefield's outer inset, native cleanup removes it from the live roster and initiative without firing a death macro; Classic's ally sentinel still prevents the exit. Routed hostiles remain eligible for normal battle rewards, while routed allies do not. Opcode `100` ends its combat macro as a forced victory through Remake's normal battle cleanup, using an experience-only reward mode that omits defeated-enemy money and items. The adapter carries Classic's slot-8 sentinel through the native battle result so the suspended outer action point ends without running any remaining actions.
+
+Opcode `124` resolves its compiled monster and fixed or inclusive-random count, then creates native combatants near the macro actor and adds them to the live roster and initiative order. It preserves Classic's battle-lifetime 100-monster slot ceiling, explicit faction override, actor-faction inheritance for direct and queued macros, and template faction for battle-round macros. Removed monsters do not reopen slots. Each successfully created combatant starts hidden, plays its authored sound, and then receives a short native conjuration reveal before the next combatant begins, preserving Classic's per-creature sound-then-effect order. The neutral opacity-and-scale effect restores the creature's original modulation instead of tinting its artwork. The battle bridge captures the dead actor's position and faction before removal, then supplies them when it drains the death-macro queue; other macro entry points fall back to the active combatant when no actor context is available.
+
+Opcode `126` evaluates a battle macro against the number of completed rounds or an inclusive percent roll, selects its fixed or random Data ED3 target, and preserves repeating schedules while clearing one-shot schedules from the live battle data. The battle bridge invokes it at native round boundaries and supplies the current one-based combat round and live battle-macro value as execution context. The seven City of Bywater uses cover exact-round and repeating chance forms.
+
+Dungeon moves change the runtime's map family as well as its level and coordinates. Entering a dungeon preserves Classic's heading, multiview, and fixed-view fields; leaving for land keeps that dungeon view state dormant. The transfer ends the active action point immediately, matching the original map loader. The Godot adapter resolves land and dungeon levels to the existing `map_<level>` and `mapd_<level>` resource convention and delegates visible transitions to `GameGlobal.change_map()`. `ClassicRuntimeHost.activate_start_location()` uses that same path for a compiled campaign start after native resources are loaded.
+
+Map areas use a compiled trigger's stable ID as `scriptToLoad`.
+`game_state.check_map_script()` retains coordinate, secret, random-rectangle,
+and chance selection, then hands every selected ID to the registered scenario
+VM. Unregistered names are errors; campaign-folder map scripts and returned
+script-name chains are no longer executable. Opcode `20` performs Classic's
+immediate destination Action Point recheck after the visible transition. It
+replaces the source action point without pushing it, preserves older GOSUB frames
+for an explicit destination return, and ends the chain when the destination
+percentage fails. Opcode `45` remains teleport-only and continues later source
+slots. Before entering a map, the host reapplies saved darkness, landlook,
+random-rectangle, moved Action Point, trigger-percent, and tile mutations.
+
+Generated land maps turn source-backed `needBoat=1` cells into native boat placements over Classic water tile 60. The normal map resource loader retains those placements, and campaign start seeds Remake's existing boarding, sailing, docking, and save-state lifecycle only when that map has no restored boat state. Hand-authored native maps without generated boat metadata are unchanged.
+
+Look Direction updates that persisted heading and requests a native view refresh before the action point continues. Authored directions `1` through `4` are used directly; other values select one of those four directions at random, matching Classic. The map bridge now redraws the native map for view and compass changes; Remake's current top-down renderer does not otherwise expose Classic's heading, multiview, or fixed-view presentation.
+
+Compass and map-view actions preserve Classic's separate compass, multiview, and signed `viewtype` fields. Requiring 3D changes `viewtype` from `-1` to `1`; allowing the full map does not force the current view to change. The map redraw occurs before the corresponding built-in warning `96` through `99`, and the action list waits for native mouse or keyboard acknowledgement. Darkland and land-look changes are keyed by map and use each compiled random-level record as their initial value. An authored no-change guard ends a Darkland action point before later slots, matching Classic. The map bridge applies darkness to both the loaded map and its native resource entry, but selecting a different landlook still requires an exported native tileset. Random-encounter changes address Classic's 20 fixed rectangle slots even when an unused zero-valued row is omitted from the normalized bundle; negative battle IDs leave the existing low or high bound unchanged. Compatible native random areas receive their updated bounds, per-10,000 chance, and battle range. Trigger percentages update matching native Action Point areas. Replayed Action Point replacements remove the obsolete native rectangle and project the effective coordinate, chance, and stable trigger ID. Tile mutations copy the matching stack from a cached reference cell in the compiled/native map pair; that immutable palette deliberately survives native resource reloads so replay stays independent of both earlier changes and replay count.
+
+The complex-encounter adapter exposes the eight Classic action-text fields through Remake's existing HUD choice control and routes each selection to the record's shared action result. This covers the active non-rogue library, cave-in, and pool encounters in City of Bywater. Spoken responses reuse Remake's speech input and preserve Classic's case-insensitive, first-space-terminated prefix comparison; a mismatch selects Result 4. The City of Bywater archive at `Data DD:6:28` exercises its `waterford` response, grants player map 2, removes the successful response through opcode `44`, and reopens with its remaining choices. New parties own player map 0, matching Classic's startup state. Positive map IDs use Classic's acquisition notice. Negative IDs display immediately. Records with decoded artwork use it directly; records with `pictId` zero reproduce Classic's dynamic map view from the materialized level, authored markers, and current party position. Acquired Classic records are browseable from Maps/Notes in stable ID order. A compatible native minimap remains the fallback when a campaign has no acquired Classic records. Encounters with magic responses can open Remake's native spell picker, match the selected spell against the packed Classic IDs, consume its normal spell-point cost, and continue through the paired result block. Native Scroll entries use Classic's separate scroll response, so a party does not need a conscious spellcaster to supply a spell answer. Item responses use Remake's encounter inventory picker and match ordinary items by stable Classic metadata, shared mapping, or scenario item text against the five Classic response slots. Type-20 scenario items enter the spell-response path from that item picker. Both paths consume one finite charge, and disposable items leave inventory when empty. Type-23 door items consume a charge and leave the encounter for the compiled Data ED3 action point, whose mutations are included in compatibility snapshots. Unmatched spells and ordinary items use Classic's Result 4 fallback. Low spell IDs `1` through `6` use explicit Classic spell-class metadata rather than guessing from a shared display name; the readiness report identifies a class for which no native spell exists. Mixed rogue encounters keep action, spell, scroll, and item choices beside their `Data TD2` controls. By maintainer decision, rogue lock controls use Remake's native chance interaction instead of Classic's timed tumbler minigame. Each choice identifies the selected character and computed chance; the resolver uses that character's Remake stat plus the Classic modifier, preserves Classic's 90-percent cap for interactive lock/trap actions, and routes success or failure into the four `Data ED2` result rows. Dynamic choices accept normal mouse activation and wraparound keyboard focus/navigation. Sprung trap spells use the same mapped native spell and save flow as Classic field-spell actions, with the compiled rogue-only or whole-party target mode. Consumed rogue actions persist in runtime snapshots while the compiled record remains immutable. The source-backed CoB lock at `Data DD:5:12` exercises Detect Trap, Force Lock, Pick Lock, and the Necklace of Keys response. The trapped chest at `Data DD:5:3` applies its shipped 4-12 damage to the selected rogue, clears the armed state, and leaves Pick Lock available before continuing through result 2.
+
+Native item entries may declare `classicItemId` or `classicItemIds`; the loader preserves those fields on inventory instances so checks, mutations, treasure, shops, and encounter responses survive native renaming. Bestiary entries accept `classicMonsterId` or `classicMonsterIds`, either at the entry level or inside `data`, while the existing numeric `data.id` remains a stable record identity. Generated entries also retain `classicSpellSaves` and `classicSpellImmunities` for compatibility-owned checks without adding duplicate Charm and Mental stats to Remake. Spell scripts expose `classic_spell_class` for the distinct low-ID complex-encounter response namespace. They may also declare `classic_spell_ids` when a shared display name covers Classic spell records with different mechanics. Runtime consumers prefer an exact-ID resource before falling back to the mapped display name, which lets compatibility-only variants preserve Classic behavior without changing the native campaign spell. Readiness rejects name matches that represent a different packed variant. A native learned spell can separately declare `classic_spell_response_ids` when equivalent entries from other caster lists are valid encounter answers but have different casting mechanics. Field-cast resources additionally use `classic_spell_save_index`, `classic_spell_save_mode`, `classic_save_bonus`, and `classic_save_adjust` to preserve the relevant Classic damage-type save and its negate, half-damage, or no-save behavior. Before spell-class immunity, screens, general resistance, and the ordinary damage-type save, class-zero spells check the target's charm resistance. Spells opting into Classic's opposed-level rule compare player level or preserved monster hit dice between the target and caster. Animated targets then completely resist Classic charm and mental spell classes.
+
+Scenario-local race and caste profiles preserve their two packed Classic item-permission masks. Generated items retain the first source category used by Classic's `canuse()` path, and the player-character permission gate requires that category in both active masks before either ordinary inventory activation or Remake's class, race, type, hand, and slot equipment checks. Native-only items bypass this compatibility precondition. Encounter item responses retain Classic's separate permission bypass. The profile and category survive ordinary character and inventory save/load.
+
+Changed race profiles also preserve Classic's eight foe-type bonuses. Each matching type on a generated or native-tagged monster contributes five percentage points to melee accuracy and one point of melee damage per source point; multi-type monsters stack the matching entries. Native characters without this profile retain ordinary Remake combat.
+
+Changed caste profiles preserve all thirty authored victory-point requirements. Normal Remake reward delivery still owns the level-up UI and overflow loop, but each completed Classic level loads the next requirement from the active caste and caps levels above thirty to the final source row. Leaving the scenario table does not rewrite progress already stored on the character.
+
+The one-time creation-resource adapter replaces Remake's native race and class gifts with the active Classic caste's `startItems` and `startMoney`. It resolves every nonzero item ID through the installed campaign and shared item book before changing the character, then preserves source order, identification, carry-capacity rejection, and automatic equipment attempts. Starting gold is assigned after the item weight checks, matching Realmz. Inventory, money, and the applied guard survive ordinary save/load. The selected-campaign character flow invokes the ordered creation adapters, then applies these resources after spell selection; producer-resolved scenario-local identities are admitted while unresolved older tables remain conservative.
+
+Classic's fourteen race/caste special abilities remain a dedicated character array rather than being flattened into native stats. Creation enables ordinary skills from the caste's starting row, adds the race value only to enabled skills, and applies the exact Strength and Dexterity tables from `updatespec.c`; the first twelve percentage skills are capped at 100. Pick Pocket and Turn Undead retain their uncapped source behavior. A racial Turn Undead value applies even when the caste starts at zero, and each level preserves `bandaid()`'s deterministic race-plus-caste floor after rolling the caste's authored per-level maxima. The complete array and its rule profile survive ordinary save/load. Creation is still an explicit adapter, while normal compatible level-ups invoke progression automatically.
+
+Core spell coverage is independent of the scenario regression corpus because a character may enter a campaign already knowing any player spell. An existing Remake spell is reused when its mechanics match the exact Classic record. A narrow compatibility variant retains shared native code and assets when only part of the behavior differs; otherwise a new native or data-driven spell implements representable mechanics. Significant engine gaps remain explicit review items rather than approximate substitutions. Scenario-authored custom spells are a separate compatibility tier: generic records can use campaign-scoped spell instances, while unimplemented special effects remain readiness diagnostics. The checked custom-rule manifest separates campaign-scoped definitions from active field, encounter, trap, combatant, ally, summon, and item consumers; an inactive unsupported special is a fidelity warning rather than a launch blocker. Race and caste override tables must not be partially applied.
+
+Equivalent Enchanted Blade `1102`/`3104` and Cosmic Blast `1401`/`3303` records reuse one native resource while retaining their packed identities. Fearful Thoughts keeps the single-target Priest `2103` resource separate from the fixed-area `1603`/`3505` resource and the opposed-level Priest area variant `2403`. Priest Power Drain `2708` likewise uses a compatibility resource for its larger 30-40-per-power drain and source save and resistance penalties instead of inheriting the weaker `1408`/`3311` behavior.
+
+Learned spell entries may carry both `classicSpellId` and `resourceName`. Classic campaign entry reconciles legacy name-only entries after native campaign resources load. A single matching identity is selected directly; same-name identities use the character class's own spell-school rule together with the saved learned level when those establish one source record. Ambiguous entries without sufficient evidence keep their saved implementation and emit a diagnostic instead of being assigned guessed mechanics. Character saves omit runtime objects but retain the exact ID, native resource key, display name, and self-contained source. Restore prefers the exact-ID resource, so spell selection, casting, spell-point cost, and complex-encounter responses all consume the same resolved script. Compatibility-only variants keep empty learning metadata and therefore do not appear in ordinary Remake learning lists.
+
+`classic_spell_support_matrix.json` records checked core and scenario source records, usage contexts, behavior classification, exact resources, and support status. New audits extend that corpus without relaxing exact-ID readiness checks or treating current scenario usage as the core coverage boundary.
+
+`classic_core_spell_inventory.json` is the immutable audit baseline for the 252 named Sorcerer, Priest, and Enchanter spells in the shared Classic library. It preserves each packed ID, name, class, level, slot, every decoded field from the 30-byte `Data S` record, and source offset. The inventory distinguishes the 79 records whose source `special` field is zero from the 173 records that require a named special-behavior audit; that distinction identifies review shape, not support. Executable status remains in the support matrix so an inventory row cannot become supported merely because its bytes can be decoded.
+
+`classic_core_spell_catalog.json` is the empty migration sentinel for the original reviewed generic-spell batch. Those identities now execute through native spell resources, while `ClassicCoreSpellCatalog` continues to expose the immutable inventory to coverage and provenance tools. Scenario-authored generic records remain campaign-scoped `ClassicSpellOverride` instances; they do not repopulate the core spell book.
+
+Immediate-damage records with no special handler, queued effect, duration, or
+missile specialization share `ClassicCoreDamageSpell`. Each thin spell resource
+selects one exact packed ID; the base then configures its damage, cost, range,
+targeting, save and resistance rules, area shape, presentation, and provenance
+from the immutable `Data S` inventory. The parity audit keeps queued-area,
+missile, and source-no-effect records in separate review lanes so
+the generator cannot silently treat those mechanics as ordinary damage spells.
+`asset_scripts/scaffold_classic_damage_spells.py` reproduces the audited family
+as review-required drafts; generation alone never changes support status.
+
+Queued damage records use `ClassicCoreQueuedAreaSpell` and the source `Data AD`
+7x7 masks instead of the ordinary radius approximation. Casting resolves the
+spell immediately and retains its absolute battlefield footprint. A creature
+then retriggers each touching field once during its movement phase, including
+large creatures whose non-origin tile enters the mask; occupants also retrigger
+at the next round boundary. Durations expire when the original caster's next
+initiative phase begins, with a round-boundary fallback when that phase owner
+has left combat, and the retained queue observes Classic's 60-entry limit.
+All 20 core queue-icon records use this path. Their queue-icon identities map
+to the corresponding existing Remake battlefield art, while damage type `8`
+uses the same neutral magical fallback as Remake's established miscellaneous
+damage spells and correctly carries no Classic DRV save. Same-name rows share
+a resource only when their mechanics and presentation bytes are equal.
+
+The seven special-`57` healing identities use their exact per-power `Data S`
+dice, costs, casting contexts, and presentation. They bypass saves and magic
+resistance as Classic's `cannot = 4` records require. Remake's existing
+character-panel targeting and life-status transition let those spells return
+an unconscious character to combat while ordinary healing still cannot revive
+a dead character. Exact variants remain separate where casting cost or sound
+bytes differ; the two identical Heal Small Wounds rows share one resource.
+
+The 15 negative-cost, noncombat utility records use
+`ClassicCoreEncounterResponseSpell`. In Classic, their negative cost fixes the
+cast at power 1 and their effect is selected by the active complex encounter's
+spell-ID/result table; the records do not define a universal map operation.
+Remake therefore exposes Leap, Superfly, Dig Hole, Fantastic Wings, Shape
+Earth, both Hands to Clay and Teleport Party variants, Watergate, Splinters,
+Voiceover, and Speak Language only while an encounter requests a spell. Each
+resource retains its exact packed identity and fixed spell-point cost, then the
+existing encounter adapter runs the scenario-authored result. Ordinary field
+and combat casting remain disabled, avoiding invented behavior outside an
+authored encounter.
+
+Flame Missile uses the narrower `ClassicCoreMissileSpell` specialization. Its
+class-9 delivery bypasses magic resistance and spell screens, carries the
+Projectile attribute used by Remake's existing projectile-protection traits,
+and preserves Classic's extra 1-through-half-level damage for the standard
+Archer and Marksman castes. The source `toHitBonus` of 127 suppresses ordinary
+projectile dodge while its negative range fields retain the no-line-of-sight
+rule.
+
+Priest Stun `2712` corrects a verified defect in the shipped Classic data. Its
+record has no damage and special code zero, so `resolvespell.c` reaches
+`spelllist(target, 0)` and returns without applying the helpless condition named
+by the spell description. The exact-ID resource retains the source resistance,
+special-save, range, and cost rules, then applies Remake's native helpless trait
+for one round. That duration follows Classic's own spell-info display, which
+shows the record's signed `-1` duration through `abs(...)`. The raw record and
+its defect remain in the inventory and support matrix as provenance.
+
+Multi Sandman, Sandman, both identical Paralyzing Wall records, Time Trap, and
+Noxious Cloud use Classic condition `2` (Helpless). Their shared adapter rolls
+duration once per cast, then preserves each target's resistance and saving
+throw before stacking Remake's native helpless trait. It also reproduces the
+separate `spelllist.c` movement cancellation and Classic's exclusive player and
+monster condition caps. Paralyzing Wall and Noxious Cloud retain their exact
+Data AD footprints as queued Web and Gas Cloud fields, so entering or remaining
+on an affected tile resolves the spell again without creating another field.
+
+The Sorcerer and Priest Slug records use Classic condition `7` (Slow). They
+share the same duration, save, resistance, area, and queued Web-field behavior,
+but retain their distinct launch art and sounds through separate exact-ID
+resources. A successful resolution halves the target's remaining movement
+immediately; the native Slow trait then halves later movement and applies the
+source's fixed 15-point physical attack and defense penalties. Although the
+spell description also promises fewer actions, the Classic combat code never
+changes the target's attack count, so the adapter leaves actions unchanged.
+
+Tangle Weed uses the same queued Web-field and immediate movement-halving path,
+but applies Classic condition `3` (Tangled). Its Data S special byte stores the
+signed value `-3` as `253`; the adapter preserves that raw byte while resolving
+the described Tangle branch. Each remaining condition point removes one later
+movement point and one percentage point from physical attack and defense, then
+decays once per combat round. The source force-affect code bypasses both magic
+resistance and saving throws.
+
+Destroy Trap is available only as a complex-encounter response. In a rogue
+encounter it rolls the Data TD2 disarm modifier once per selected power level.
+Success clears the armed flag and uses the disarm result. Failure displays the
+disarm feedback, falls through to a separate Open Lock roll, and springs an
+armed trap before resolving that roll. Records without a disarm modifier retain
+their ordinary authored spell result. A zero TD2 result exits the encounter as
+it does in Classic; it does not reopen the spell picker. Native casts, scrolls,
+and type-20 spell items all enter the same resolver-owned state transition.
+
+Open Lock uses that same complex-encounter service. Its chance is the Data TD2
+open-lock modifier times the selected power level. Classic saves that chance
+before an armed trap applies damage or a spell, springs the trap, and then rolls
+the saved chance for the authored Open Lock result. Records without an Open
+Lock modifier retain their ordinary authored spell result. Native casts,
+scrolls, and type-20 spell items share this path.
+
+Sleepwalk is a field/camp spell with no selected target. Classic special `68`
+sets the party-wide fatigue value to exactly `1` and returns before damage,
+duration, resistance, or saving-throw resolution. Remake applies the same
+assignment through its party-fatigue setter and refreshes the fatigue display.
+
+Destroy / Turn Undead `3504` uses Remake's native undead eligibility and
+faction handling. After normal magic resistance and the special DRV, each
+hostile undead or nether-spawn target rolls against
+`max(25, 100 - (5 * power + 3 * caster level) + 5 * hit dice)`. Success
+margins from 1 through 29 destroy the target; margins of 30 or more turn it to
+the caster's faction. Classic's summon sentinel `255` remains ineligible, and
+the spell does not grant the experience awarded by the separate priest action.
+
+Dumbstruck and Mind Blank use Classic condition `6`, stored at character
+condition index `5`. Despite the latter's protective-sounding name, both are
+offensive mental effects that prevent spellcasting and leave movement, attacks,
+and player control unchanged. Dumbstruck targets one creature and preserves its
+signed mental opposed-level check; Mind Blank targets one creature per selected
+power and applies its source resistance penalty. Both retain individual
+resistance and mental saves while sharing one duration roll across a cast. The
+native temporary and permanent Dumb traits now participate in Remake's existing
+spellcasting-eligibility seam and use the Classic round/game-hour condition
+clock.
+
+Magic Aura uses Classic condition `5`, stored at character condition index `4`.
+Its all-friendly target type reaches every ally in combat or camp, bypasses
+resistance and saving throws, and shares one duration roll of one to two rounds
+per power across the cast. While active it adds five percentage points to both
+physical hit chance and physical defense. Remake's opposed-roll formula assigns
+five percentage points to each native accuracy or evasion stat point, so the
+Aura traits add one native point rather than the legacy script's five-point,
+twenty-five-percentage-point bonus. Temporary Aura follows the Classic
+round/game-hour condition clock and cannot replace permanent Aura.
+
+Poison `2408` now uses a native source-record adapter instead of the stale
+generated spell-book definition. An unresisted hit deals two chemical damage;
+a successful chemical save halves only that immediate damage. The spell then
+replaces temporary poison with a permanent two-damage condition, which ticks
+once per combat round or crossed game hour until Heal Poison removes it.
+Classic's special cleanup is retained: permanent animation clears poison from
+party members, while any animation or mental-class immunity clears it from
+monsters. Chemical class immunity remains part of the earlier spell-resistance
+stage and prevents the hit entirely.
+
+Major Charm Foe `1607`, its Priest area variant `2507`, and the Sorcerer and
+Priest Multi Mutiny records `1709` and `2707` reuse Remake's battle-charm trait
+through a source-record-backed adapter. The Sorcerer Major Charm Foe uses the
+fixed Data AD area mask `7`; the other three use power-scaled areas. Each
+affected creature retains its own Classic charm and general-resistance checks.
+The same-name variants keep separate exact-ID resources because their ranges,
+caster lists, and launch presentation differ. Major Soul Bind `2405` similarly
+reuses Remake's helpless trait, with a power-scaled area, its signed mental
+opposed-level check and save, and the original one-duration-roll-per-cast
+behavior before applying helplessness to each successful target.
+
+Identify Objects `1106` and `3307` share one native field-spell resource. A
+cast selects one party member and marks every item in that character's
+inventory as identified, matching Classic's `track`-selected inventory loop.
+The negative source cost fixes the spell at power one and 25 spell points. The
+Enchanter row's otherwise-identical record contains a duration value of one,
+but special `48` never consumes duration; both exact IDs therefore retain one
+behavioral resource. Remake's existing inventory Identify button resolves this
+same resource name and continues to identify the selected item for 25 points.
+
+Banish `2601`, Death `2701`, Finger of Death `3606`, and Poison Cloud `3609`
+now share a source-record-backed lethal adapter for Classic special `49`.
+Unresisted lethal effects set the target to minus ten health and mark it dead.
+Banish retains its opposed target-level-versus-caster-level check and its
+self-centered Data AD mask; the original handler does not restrict it to
+summoned creatures. Death and Finger of Death retain their individual range,
+line-of-sight, save, and resistance adjustments. Poison Cloud keeps its
+chemical class immunity and fixed area. Its description and otherwise-unused
+damage fields promise death or `1-2` chemical damage per power, while the
+current Classic handler accidentally overwrites even a successful save with
+lethal damage. Following the corrected-intent policy already used for Stun, a
+successful chemical save instead takes half of that source damage roll.
+
+Transmute Other `3612` and Multi Morph Other `3705` share the native
+transformation path for Classic special `46`. A failed resistance and special
+save replaces each affected monster with a random summonable creature of the
+same footprint. When an installed Classic campaign supplies materialized
+monster records, the form pool stays within that active Data MD set; otherwise
+the shared native bestiary is the fallback. Transformation keeps the existing
+battlefield object, position, allegiance, active non-innate conditions, and
+turn bookkeeping, so combat queues and UI selections remain valid. The new
+form supplies identity, statistics, attacks, spells, AI, inventory, graphics,
+and Classic monster metadata, while carried money is cleared as in
+`spelllist.c`. Because combat creatures are discarded at battle end, the form
+naturally has Classic's battle-only lifetime. Multi Morph differs only by using
+the source record's power-scaled area targeting.
+
+Limited Phase `1208`/`2305`/`3106` and Phase `1509`/`2511`/`3309` use one
+source-backed combat relocation path for Classic special `56`. Both variants
+target an otherwise unobstructed tile without requiring line of sight, update
+the creature, battlefield control, camera, and navigation positions together,
+and preserve the source range and spell-point scaling. Limited Phase exhausts
+the caster's remaining actions after arrival; Phase leaves actions other than
+the casting action available. Classic treats a phase into a solid or occupied
+destination as lethal, so a stale or externally supplied invalid target moves
+the caster to that destination, sets health to minus ten, and marks the caster
+dead rather than silently finding a nearby tile.
+
+Weakness `2612` and Improved Power Drain `2703` extend the existing Power
+Drain behavior through the same clamped spell-point mutation path. Improved
+Power Drain selects one creature per power and drains `3 + 1-5` points per
+power from each. Weakness uses Classic's type-`6` ray and a fixed `30-50`
+drain. Its source record stores that range in the duration fields even though
+special `60` reads the damage fields, making the original executable path a
+no-op; the compatibility resource treats those values as the intended drain
+described by the spell rather than preserving the data-entry defect. Both
+effects are halved by a successful special save.
+
+Sorcerer Power Surge `1409` and Enchanter Power Surge `3312` restore `5-8`
+spell points per power through one source-backed special-`59` adapter. Both
+work in combat and camp, target one creature at range one, and bypass magic
+resistance and saving throws. Player characters stop at their maximum spell
+points; Classic does not apply that upper bound to monsters, so the adapter
+preserves their ability to exceed the starting pool. Separate resources retain
+the two source records' different spell schools, launch art, and sounds.
+
+The eleven special-`58` summon identities use one combat summoning path while
+retaining each source record's range, cost, school, presentation, and tier.
+Realmz selects a summonable monster from the active scenario's Data MD set by
+hit-dice band, widens to any summonable monster after 101 unsuccessful picks,
+and gives every creature in a power-scaled cast the same selected form. The
+adapter applies that selection to the campaign bestiary, inherits the caster's
+current faction, uses Remake's ordinary creature and combat-button lifecycle,
+places the complete creature footprint at the selected tile, adds it to the
+current initiative, and honors Classic's 100-monster allocation limit. Summons
+remain battle-only because they never enter Remake's persistent ally list.
+Creature Summon 5 `3604` is the sole corrected record: its tier byte is zero
+between the tier-four and tier-six spells, so the adapter uses the described
+and structurally evident tier five rather than preserving the accidental retry
+fallback. A campaign with no summonable bestiary record reports the missing
+dependency at cast time and does not substitute a shared monster.
+
+The three special-`61` Destroy Magic identities share a source-backed dispel
+adapter while retaining their individual school, level, art, sounds, and
+force-affect byte. Each power selects one creature at range ten without a
+line-of-sight requirement, in combat or camp. Realmz clears every positive
+condition counter and preserves permanent negative counters. The native path
+therefore removes temporary `t_` condition traits while retaining permanent
+conditions and non-condition traits such as Guard or Parry. Realmz also resets
+a hostile party character to the party faction, but does not undo a monster's
+changed allegiance; the adapter preserves that distinction. All three records
+bypass resistance and saving throws.
+
+Special `62` supplies the Sorcerer Remove Item and Priest Remove Items spells.
+Despite their names, both source records perform the same operation on every
+selected character: they clear temporary and permanent curse conditions, then
+force every equipped cursed item off through the ordinary unequip lifecycle.
+The items remain in inventory, unequipped cursed items are unchanged, and all
+other equipment stays worn. Each power adds one range-one target; both spells
+work in combat and camp and bypass resistance and saving throws.
+
+Sparkling Armor and the three Vorpal Plate identities share Classic condition
+`7` (Shield from Hits). Each remaining condition point subtracts two percentage
+points from melee hit chance without changing ranged attacks. Remake represents
+that percentage in its native accuracy formula as `0.4` melee-evasion points per
+condition point. Temporary effects stack up to Classic's player and monster
+condition caps, decay once per combat round or crossed game-hour boundary, and
+do not replace a permanent Shield from Hits condition. Area variants roll their
+duration once per cast and share it across every affected target.
+
+Shield from Projectiles `2210` and Missile Screen `3508` share Classic character
+condition `8`. Despite the broader wording in their spell descriptions, the
+Classic resolver consults that condition specifically for spell class `9`;
+ordinary ranged attacks do not enter that check. The compatibility resistance
+stage therefore stops class-9 missiles after their spell-screen bypass, while
+the trait callback retains Remake's existing behavior for native spells marked
+`Projectile`. Both temporary and permanent traits now use the current four-arg
+spell-hit callback. Temporary protection stacks to the source condition caps,
+persists through saves, and decays once per round or crossed game hour.
+
+`ClassicCoreSpellCoverage` joins that inventory to the curated support matrix and
+the shared spell-resource catalog. Its report separates proven support from
+exact-ID resources awaiting behavior review, name-only reuse candidates,
+same-name variant conflicts, generic implementation candidates, and special
+behaviors that still need an adapter or engine decision:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --path src --script res://scripts/classic_runtime/tests/report_classic_core_spell_coverage.gd -- --json
+```
+
+For implementation planning, `asset_scripts/audit_classic_spell_parity.py`
+groups the same inventory by exact source mechanics and ranks the remaining
+generic and special-code batches. It also compares simple values from the older
+generated spell scripts, but treats those files only as migration hints. Its
+deterministic JSON and Markdown reports default to `tmp/` and do not change the
+support matrix or native resources.
+
+The report is a work queue, not a launch gate. A resource declaring the right
+ID remains in review until its complete Classic behavior is represented in the
+support matrix.
+
+Materialized monster inventories resolve all six source item slots against the campaign item book before the shared Divinity mapping. A concrete positive `weapon` ID equips the matching native inventory object. Realmz permits that active weapon to remain separate from the six carried slots; Remake represents it as an adapter-only equipped item and excludes it from victory loot. Missing items, unsupported item definitions, unresolved or non-equippable weapons, and negative random-weapon table selectors remain readiness blockers; Classic's detected-magic sign marker is retained only as a fidelity diagnostic.
+
+Package installation reuses a shared Remake monster only for a non-authored
+Classic library record whose numeric ID and normalized name both match. Authored
+records always materialize into the campaign book, so a scenario can redefine a
+stock identity without being silently replaced. Scenario items without exported
+item text keep their stable `classicItemId`, receive a generated display name,
+and report `missingItemText` as a launchable fidelity fallback.
+
+Against the checked City of Bywater baseline, the supported handler set covers
+2,264 of 2,734 active action slots. The other 470 slots are skipped only because
+source-backed dispatcher evidence identifies them as Realmz no-ops. Together,
+the runtime defines behavior for all 2,734 active trigger action slots. This is
+a semantic coverage measurement, not a playability percentage. Opcodes `35`,
+`42`, and `44` also occur inside encounter results and those uses are not
+reflected in this trigger-slot count.
+
+The execution audit deliberately reports result rows and combat macro roots
+separately from that trigger baseline. Its initial full City of Bywater inventory
+found 15 actions in four missing result handlers. Opcodes `33`, `43`, and `48`
+cover all seven Take Gold uses, both Give Condition uses, and all four Selective
+Combat uses. Opcode `54` covers the final two Alter Time Encounter uses, leaving
+no executable unknowns in the full bundle or the checked vertical fixture. This
+result-path inventory does not revise the 2,734-trigger claim.
+
+The [compatibility gap register](COMPATIBILITY_GAPS.md) tracks required integration work and recommended fidelity improvements separately from opcode coverage.
+
+The interpreter will still stop explicitly when a selected encounter result contains an unsupported opcode. The player-map panel consumes producer-decoded images, embedded scrolling text, and acquired records from Maps/Notes. Opcode `62` opens the same panel for a decoded `TEXT` resource; readiness treats a referenced resource that was not exported by the producer as a launch blocker. Terrain-composed previews and embedded marker overlays remain explicit follow-up modes. Producer-generated decoded media, exact native identities for scenario allies, and unmigrated spell resources remain explicit boundaries. Remake's chance-based rogue lock interaction is an intentional product choice, not an unimplemented timed-minigame fallback. The original runtime's hidden developer command words are intentionally not exposed through scenario speech input. This keeps the compatibility boundary visible while more handlers are added.
+
+## Campaign readiness report
+
+`ClassicCampaignReadiness` combines the executable-action inventory with bundle,
+record, identity, and native-resource checks. Every result carries a source file,
+record index, slot when applicable, severity, and one of two player-facing
+classifications:
+
+- `progression-blocker` means the missing data or behavior can stop execution or
+  change an authored result.
+- `fidelity-fallback` means play can continue with missing or reduced
+  presentation.
+
+Run the report against any compiled bundle. Supplying the matching native
+campaign directory also checks shared and campaign bestiary, item, spell, and
+sound resources:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --path src --script res://scripts/classic_runtime/tests/report_classic_readiness.gd -- "C:\path\to\compiled-bundle" "F:\Realmz Remake\src\Campaigns\City of Bywater"
+```
+
+Add `--json` for the versioned machine-readable report. Exit status 0 means no
+progression blockers were found, status 1 means the campaign is blocked, and
+status 2 means the command was used incorrectly. The current authoritative City
+of Bywater export passes this gate when checked against the existing native City
+resources. Package installation is a separate gate: every referenced generated-
+map asset must be present in the export or supplied by a defined shared resource
+catalog.
+
+The built-in campaigns have a separate deterministic corpus command that runs
+the normal installation and selection path for all 13 packages:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --path src --script res://scripts/classic_runtime/tests/report_classic_campaign_corpus.gd -- --expected-count=13 --output=C:\path\to\classic-campaign-corpus.json
+```
+
+It emits a human summary and stable JSON with preparation evidence,
+active/inactive diagnostics, installed and compressed-estimate bytes, file
+categories, and content-hash duplication. Commit fixtures and runtime contracts,
+not generated reports or machine-specific walkthrough logs. The representative
+acceptance runners under `playtest/` cover campaign lifecycle, City of Bywater
+presentation and battle flow, scenario routes, and custom-monster combat.
+
+## Spell usage report
+
+`ClassicSpellUsageAudit` inventories spell references separately from launch
+readiness. It records each packed ID or low-ID spell class with its campaign,
+runtime context, source file, record, and slot, then joins packed IDs to the
+curated `classic_spell_support_matrix.json`. The report also scans shared native
+spell resources and distinguishes an explicit exact-ID resource from a
+name-only fallback, a resource for another packed variant, a mapped name with no
+resource, and an unmapped identity. Pass more than one bundle to merge their
+usages into a single report:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --path src --script res://scripts/classic_runtime/tests/report_classic_spell_support.gd -- "C:\path\to\bundle-a" "C:\path\to\bundle-b" --json
+```
+
+Use `--native-campaign "C:\path\to\native-campaign"` to include that
+campaign's `Spells` directory after the shared catalog. Exact-ID resolution is
+identity evidence only; the curated classification still records whether the
+spell's complete Classic behavior has been verified.
+
+The inventory covers field actions, rogue traps, complex responses, referenced
+combatants and allies, scenario spell items, and authored spell overrides.
+The current Classic documents do not expose temple offerings,
+learned-spell lists, or scroll catalogs, so the report names those contexts
+under its source-coverage boundary instead of implying coverage. An
+`unclassified` matrix status is a documentation and implementation-worklist
+gap; the readiness report remains the authority on whether a bundle can launch.
+
+## Godot guard-house playtest
+
+The map bridge playtest loads Remake's existing City of Bywater map resources,
+activates the checked Classic fixture at `land:0`, follows `Data DD:0:83` into
+`dungeon:0`, follows `Data DDD:0:1` back outside, and changes the returned map
+to Classic landlook 10. The normal run leaves the PICT 310 version of the land
+map open after displaying both native maps:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_map_bridge_playtest.tscn
+```
+
+Its automated smoke verifies the native map identities, map families, dungeon
+heading and multiview state, renderable tile textures, distinct captured land
+and dungeon output, and a visibly rendered PICT 310 landlook change:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_map_bridge_playtest.tscn -- --smoke
+```
+
+The Providence producer smoke installs the checked conformance export without
+modifying it, launches it through the normal campaign menu, and captures its
+materialized land, dungeon, and returned-land views:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/tests/providence_export_ui_smoke.tscn
+```
+
+The fixture does not yet author a map-transfer action, so this smoke performs
+the two transfers through the same compatibility adapter used by Classic
+Dungeon Move. It proves producer installation and native map lifecycle without
+claiming fixture-level transition semantics. The real display driver is
+required because the test waits for rendered frames and writes PNG evidence.
+
+The native battle bridge playtest starts from the same real City of Bywater
+map, applies a persistent source-numbered snow landlook, requests native `Battle_24`, and
+runs a compiled opcode `124` macro that adds two combatants. The smoke verifies
+the recorded sound-then-conjuration sequence for each creature and can capture
+the resulting native battle frame. A second combat macro removes the original
+and conjured Zombies from the live roster. Victory continues through Remake's
+loot and allies cleanup, resumes the outer Classic action list, and returns the
+party to its original map tile:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_battle_bridge_playtest.tscn -- --smoke
+```
+
+Append `--capture=C:\path\to\captures` to record the post-conjuration battle
+frame.
+
+The custom-monster acceptance materializes five compiled monster definitions
+into a temporary native bestiary, starts their authored `Battle_7`, and drives
+the real combat lifecycle. It checks hostile and friendly allegiance, live
+spells and equipment, a battle-round macro, active running, death-macro
+dispatch, reward cleanup, and resumption of the outer action list:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_custom_monster_battle_acceptance.tscn -- --smoke
+```
+
+The full City acceptance also has a bounded picture-and-sound mode. It verifies
+that decoded PICT 32128 survives all four authored messages, checks all three
+interleaved stock sounds, and stops after Redraw Screen:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_city_battle_acceptance.tscn -- "C:\path\to\city-bundle" --smoke --presentation-only --capture=C:\path\to\captures
+```
+
+The first in-engine vertical slice loads the CoB fixture, displays `Data DD:0:0` through Remake's existing `TextRect`, presents the four source-backed `Data ED` choices and Classic's Back Out control, feeds the selected result back to the interpreter, and runs that eight-action encounter result block.
+
+Run the standalone scene from the repository root:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_guard_house_playtest.tscn
+```
+
+Pass a compiled campaign directory after `--` to use the full converter output instead of the checked-in fixture:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_guard_house_playtest.tscn -- "C:\path\to\realmz-remake-cob-poc-final"
+```
+
+This adapter intentionally handles text, yes/no prompts, character-panel selection, simple-encounter choices, complex action and spell responses, data-driven rogue encounters, selected and party health changes, party-condition and ally checks, live combat-monster presence, spawning, destruction, routing, lower-undead deanimation, battle-round macro activation, forced battle endings, cowardice experience penalties, priest-turning feedback and native attempts, Classic ally creation when an exact bestiary resource exists, Classic field-spell effects, Classic shops with resolved item resources, temple and banking availability, fixed treasure and standalone experience through Remake's loot UI, and mapped sounds. Other typed commands stop with an explicit adapter error until their map, encounter, or battle resource adapters exist.
+
+Compiled campaigns installed under `src/Campaigns/<campaign>` now use the normal campaign panel. While the package is staged, the installer materializes missing outdoor native maps from complete normalized tile arrays and dungeon maps from signed Classic fields. Stock land maps use decoded Realmz PICT 300, 303, 304, 305, 309, or 310 art in its original 20-by-10 order and apply the compiler's matching tile attributes; they are not renumbered into Remake's independently arranged themed tilesets. Dungeon art is composed from Realmz's shared PICT 302 overhead sprites into a campaign-local native tileset; the raw field remains on each tile as metadata. Entering, teleporting within, or walking through a dungeon clears the source hidden bit for the three-by-three area around the party, matching Realmz's overhead update and preserving the revealed fields in campaign state. Directional secret walls admit only their authored cardinal entry directions and persist their revealed visual state. A decoded 640 x 320 custom-landlook `runtimeMedia` image and its compiled 200-tile behavior table become a normal campaign-local tileset. Movement, sight, water, shore, timing, path, clear-land, combat-build, and numeric sound metadata remain attached to the generated tiles. Native filename-based map sounds retain priority; otherwise exploration sends the generated tile's Classic sound ID through the compatibility adapter, which uses decoded bundle audio or the existing Remake sound mapping. A negative land field with decoded 32 x 32 `runtimeMedia` becomes a campaign-local overlay over the current landlook base terrain. Its raw field and normalized `cicn` identity remain tile metadata, and `Data Solids` retains the source movement rule for the first negative-ID band. Stable Action Point IDs, trigger chances, and random rectangles use Remake's normal map files. Raw custom atlases and special land tiles without suitable decoded media are not flattened into approximate terrain or movement; they remain explicit installation blockers. The selector displays the manifest title, format version, compatibility profile, and readiness state. A structurally valid bundle remains visible but is blocked with an actionable diagnostic when semantic readiness fails or its native start-map files are incomplete. Starting a ready campaign through the normal party flow loads native resources, creates the compatibility session, and enters the compiled start location.
+
+Encoded land paths and directional dungeon secrets are scanned in the
+surrounding three-by-three area during exploration. Ordinary checks use the
+integer party-average Detect Secret ability; Search and Discover Secret make
+the pass certain. Reveals update both the preserved Classic field and Remake's
+loaded map metadata so they remain visible, passable, and saveable.
+
+The UI smoke instances the real `Main.tscn`, discovers a self-contained compiled fixture, selects a party, presses the normal Start path, and verifies the native map and HUD. It is an automated integration harness rather than a separate compatibility playtest UI:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 --path src res://scripts/classic_runtime/tests/classic_campaign_ui_smoke.tscn
+```
+
+The party-condition smoke verifies all ten live GameGlobal slots: Light,
+Waterworld, Dragon Hide, Discover Secret, Wizard Eye, Search, Free Fall,
+Sentry, Thought Lace, and the source-unused slot. It covers signed temporary
+and permanent state, longer-result replacement, combat and hourly decay, native
+HUD durations, the five-point physical weapon-damage reduction, active-search
+time cost, secret detection, exploration through sight blockers, charm
+resistance, wandering-battle suppression, the party-average Detect Secret
+chance, and restoration of the exact Classic counters:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 --path src res://scripts/classic_runtime/tests/classic_party_condition_smoke.tscn
+```
+
+The character-condition smoke verifies the complete forty-index inventory
+against real native character state. It exercises temporary and permanent
+application, clearing, combat-round and crossed-hour expiry, disease strength,
+Classic-only curse, slow, and elemental-protection traits, and the live
+save-snapshot projection:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 --path src res://scripts/classic_runtime/tests/classic_character_condition_smoke.tscn
+```
+
+The generated-ally smoke also applies Shield from Hits and projectile protection
+to a real native player character. It verifies the resulting six-percentage-point
+melee-accuracy change for a three-point condition and the shared class-9 missile
+resolution stage.
+
+The generated-ally smoke derives carried, equipped, and weighted spell-slot
+fields from the authoritative Providence fixture. It installs the result,
+loads the generated monster and scenario item through normal campaign
+resources, and round-trips mutable ally state, both Classic identities,
+carried inventory, the active weapon, and executable native spells:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 --path src res://scripts/classic_runtime/tests/classic_generated_ally_smoke.tscn
+```
+
+Normal profile saves now include a versioned Classic envelope. It records the compiled campaign identity, `ClassicRuntimeState` snapshot, adapter-owned equipment capture, and a suspended interpreter continuation when the current command is safe to replay. The continuation contains plain data for the current action list and slot, GOSUB frames, encounter attempts, pending outcome state, and deferred action-point mutations. Load restores the native map and HUD before replaying the pending presentation, encounter, or battle request, so the existing host resumes the authored outer action list exactly once.
+
+Idle exploration, text and click presentation, yes/no choices, initial encounter response controls, random-branch presentation, and priest-turning feedback are legal save boundaries. A live native battle is not: Remake does not serialize its combat roster or round state, so the save panel asks the player to finish that battle. Rogue encounters also become temporarily unsavable after a rogue roll mutates the TD2 record or applies trap damage. This prevents a reload from duplicating damage or item/spell costs. Version-one Classic envelopes load as idle continuations, older saves without an envelope retain their native map and coordinates with fresh compatibility defaults, and a save from a newer unsupported schema is left untouched and reported in the save panel. Saving and restoring duplicate runtime state without modifying the compiled campaign bundle.
+
+For a non-interactive smoke of the real HUD flow, add `--smoke`. The scene verifies the displayed intro, four encounter choices, selected outcome text, and completed host state, then exits:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_guard_house_playtest.tscn -- --smoke
+```
+
+The lock playtest loads CoB's source-backed `Data ED2:4` and `Data TD2:4` records. It supplies a playtest-only rogue when no party is loaded:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_lock_playtest.tscn
+```
+
+Its two HUD smokes verify the complex prompt, selected-character chance labels, keyboard focus and navigation, deterministic success and failure results, consumed-action persistence through snapshot restore, back-out after failure, and host completion:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_lock_playtest.tscn -- --smoke
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_lock_failure_playtest.tscn -- --smoke
+```
+
+Run either smoke with the desktop renderer and append `--capture=C:\path\to\captures` to save its chance-menu and result frames as PNG evidence.
+
+The trapped-chest playtest loads CoB's source-backed `Data ED2:3` and `Data TD2:1` records. Picking the armed lock springs its rogue-only damage trap; the smoke verifies the 4-12 HP loss, changed choices, persistent state, and host completion:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_trap_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_trap_playtest.tscn -- --smoke
+```
+
+The experience playtest starts at the source-backed 1,500-point award in CoB's child-grave sequence. Its smoke verifies the empty loot panel, party experience change, and following action-point replacement:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_experience_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_experience_playtest.tscn -- --smoke
+```
+
+The services playtest runs CoB's compiled bank and temple actions through the native HUD. Its smoke verifies Classic's built-in banking warning and continuation pause, banking availability, standard and hostile temple prices, and the bank-to-temple transfer lifecycle:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_services_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_services_playtest.tscn -- --smoke
+```
+
+The presentation playtest covers the supported built-in warning catalog through
+the native HUD. It verifies warning `50` before the authored insufficient-funds
+continuation, source-backed view warnings `96` through `99`, keyboard focus and
+acknowledgement, unchanged party wealth, and usable layout at `1100x619`:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_presentation_playtest.tscn -- --smoke
+```
+
+Append `--capture=C:\path\to\captures` to save the warning frame. The guard-house
+and lock smokes accept the same option for simple-encounter and rogue-choice
+placement evidence.
+
+The shop playtest installs a focused compiled restricted-shop record over the CoB fixture. Its smoke verifies mapped stock, inflation, both accepted-item ranges, pooled-first payment, cancellation continuation, and persistent depleted stock:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_shop_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_shop_playtest.tscn -- --smoke
+```
+
+The equipment playtest captures worn and carried items plus party wealth, serializes that active capture through the Classic session envelope, reloads a fresh session, and restores the items through Remake's resource loader. Its smoke verifies worn state, charges, wealth, interim loot, native loot presentation, and continuation completion:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_equipment_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_equipment_playtest.tscn -- --smoke
+```
+
+The party-health playtest runs CoB's standalone fixed-damage macro and verifies the character HP change and completed host state:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_party_health_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_party_health_playtest.tscn -- --smoke
+```
+
+The party-spell playtest runs CoB's source-backed psychic barrier, supplies two playtest targets and a test-only Power Drain resource, and verifies Remake's spell animation, per-character effect, transient party selection, and completed host state:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_party_spell_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_party_spell_playtest.tscn -- --smoke
+```
+
+The character-pick playtest opens Remake's party-panel picker for CoB's hollow-column volunteer and verifies that the chosen character becomes the transient Classic selection:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_character_pick_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_character_pick_playtest.tscn -- --smoke
+```
+
+The miscellaneous-selection playtest runs CoB's movement-based ceiling rockfall with a slow playtest rogue and verifies the transient selection, 1-3 HP loss, and completed host state:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_misc_selection_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_misc_selection_playtest.tscn -- --smoke
+```
+
+The tavern-option playtest selects the barmaid response in CoB's source-backed `Data ED:3`. Opcode `35` removes that response, reopens the encounter without using an attempt, and leaves the party able to back out:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_simple_option_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_simple_option_playtest.tscn -- --smoke
+```
+
+The cave-in playtest exercises a non-rogue complex encounter from its three authored action labels through the selected `Data ED2` result block:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_complex_action_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_complex_action_playtest.tscn -- --smoke
+```
+
+The spell variant supplies a playtest caster with Dig Hole, selects it through Remake's native spell menu, and verifies the packed `1201` response, spell-point cost, and Result 1 continuation:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_complex_spell_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_complex_spell_playtest.tscn -- --smoke
+```
+
+The item variant gives the playtest rogue a Necklace of Keys, selects it through Remake's encounter inventory picker, and verifies the source-backed Result 1 response without consuming the key:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_complex_item_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_complex_item_playtest.tscn -- --smoke
+```
+
+The spoken-word variant opens Remake's speech input for the City of Bywater archives and verifies that `WATERFORD` selects the source-backed Result 1 messages, grants its map, removes that result, and reopens the encounter:
+
+```powershell
+Godot_v4.7.1-stable_win64.exe --path src res://scripts/classic_runtime/playtest/classic_complex_word_playtest.tscn
+Godot_v4.7.1-stable_win64_console.exe --resolution 1100x619 --path src res://scripts/classic_runtime/playtest/classic_complex_word_playtest.tscn -- --smoke
+```
+
+The HUD smoke intentionally uses the normal display driver because the project's shutdown handler persists the active window size to `src/override.cfg`; a headless HUD run would save `0x0` and dirty the worktree.
+
+Run the headless proof from the repository root:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 --path src res://scripts/classic_runtime/tests/run_classic_runtime_tests.tscn
+```
+
+Run only the checked three-scenario loader/interpreter corpus:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --path src --script res://scripts/classic_runtime/tests/run_classic_regression_corpus.gd
+```
+
+Its [corpus contract](CLASSIC_REGRESSION_CORPUS.md) records the scenario matrix,
+provenance boundary, execution-context coverage, and five evidence
+classifications. Use `-- --json` when a machine-readable report is needed.
+
+Pass the path to a full compiled bundle after `--` to run the same loader against all CoB records:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 --path src res://scripts/classic_runtime/tests/run_classic_runtime_tests.tscn -- "C:\path\to\realmz-remake-cob-poc-final"
+```

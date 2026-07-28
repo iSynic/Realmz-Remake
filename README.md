@@ -14,8 +14,16 @@ You can find latest releases [here](https://github.com/Realmz-Castle/Realmz-Rema
 
 ### Prerequisites
 
-[Godot 4.x](https://godotengine.org/download)
-[Git LFS](https://git-lfs.com)
+[Godot 4.7.1](https://godotengine.org/download/archive/4.7.1-stable/)
+
+### Classic scenario compatibility
+
+The [Classic support matrix and porting workflow](src/scripts/classic_runtime/CLASSIC_PORTING_GUIDE.md)
+documents the current Providence export, validation, installation, safe update,
+readiness, regression, and playability-evidence boundaries.
+The checked runtime fixtures and repeatable corpus commands are the maintained
+compatibility evidence; generated reports and scenario walkthrough notes remain
+development artifacts rather than product documentation.
 
 ## Music System
 
