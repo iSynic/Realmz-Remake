@@ -1,7 +1,6 @@
 class_name ClassicOpcodeRuntime
 extends RefCounted
 
-const MapBridgeScript = preload("res://scripts/classic_runtime/classic_map_bridge.gd")
 const CoreHandlerCatalogScript = preload(
 	"res://scripts/scenario_runtime/handlers/core_handler_catalog.gd"
 )
@@ -22,6 +21,9 @@ const EncounterOpcodeRuntimeScript = preload(
 )
 const PresentationOpcodeRuntimeScript = preload(
 	"res://scripts/scenario_runtime/handlers/classic_presentation_opcode_runtime.gd"
+)
+const ControlFlowOpcodeRuntimeScript = preload(
+	"res://scripts/scenario_runtime/handlers/classic_control_flow_opcode_runtime.gd"
 )
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
@@ -157,6 +159,7 @@ var _character_opcode_runtime: RefCounted
 var _map_time_opcode_runtime: RefCounted
 var _encounter_opcode_runtime: RefCounted
 var _presentation_opcode_runtime: RefCounted
+var _control_flow_opcode_runtime: RefCounted
 
 
 func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeState) -> void:
@@ -180,6 +183,9 @@ func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeStat
 	if _presentation_opcode_runtime == null:
 		_presentation_opcode_runtime = PresentationOpcodeRuntimeScript.new()
 		_presentation_opcode_runtime.configure(self)
+	if _control_flow_opcode_runtime == null:
+		_control_flow_opcode_runtime = ControlFlowOpcodeRuntimeScript.new()
+		_control_flow_opcode_runtime.configure(self)
 	if compatibility_instruction_registry == null:
 		compatibility_instruction_registry = ScenarioInstructionRegistry.new()
 		if not CoreHandlerCatalogScript.register_all(
@@ -206,6 +212,8 @@ func classic_handler_runtime(handler_id: String) -> Object:
 		return _encounter_opcode_runtime
 	if handler_id == "core.presentation":
 		return _presentation_opcode_runtime
+	if handler_id == "core.control-flow":
+		return _control_flow_opcode_runtime
 	return self
 
 
@@ -629,11 +637,7 @@ func resume_battle_round_macro() -> Dictionary:
 
 
 func resume_random_branch() -> Dictionary:
-	if pending_random_branch.is_empty():
-		return _error_result("No classic random branch is waiting for presentation")
-	var random_branch := pending_random_branch
-	pending_random_branch = {}
-	return _apply_random_branch(random_branch)
+	return _control_flow_opcode_runtime.resume_random_branch()
 
 
 func resume_back_up_party() -> Dictionary:
@@ -1515,235 +1519,66 @@ func _resume_ally_branch(values: Array, target_id: int, ally_check: Dictionary) 
 
 
 func _execute_random_branch(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Random branch references missing Extra Code row %d" % extra_code_id
-		)
-	var target_mode := int(values[0])
-	if target_mode < 0 or target_mode > 2:
-		return _halt_with_error("Random branch has invalid target mode %d" % target_mode)
-	var first_target := int(values[1])
-	var last_target := int(values[2])
-	if last_target < first_target:
-		return _halt_with_error(
-			"Random branch target range %d-%d is reversed" % [first_target, last_target]
-		)
-	var random_branch := {
-		"targetMode": target_mode,
-		"targetId": randi_range(first_target, last_target),
-		"gosub": gosub,
-	}
-	var sound_id := int(values[3])
-	var message_id := int(values[4])
-	if sound_id == 0 and message_id == 0:
-		return _apply_random_branch(random_branch)
-	pending_random_branch = random_branch
-	return _yield_result("present_random_branch", {
-		"extraCodeId": extra_code_id,
-		"targetMode": target_mode,
-		"targetRange": [first_target, last_target],
-		"targetId": int(random_branch["targetId"]),
-		"soundId": sound_id,
-		"messageId": message_id,
-		"message": bundle.get_message(message_id),
-	})
+	return _control_flow_opcode_runtime._execute_random_branch(
+		extra_code_id,
+		gosub
+	)
 
 
 func _apply_random_branch(random_branch: Dictionary) -> Dictionary:
-	var branch_result := _branch_to_action_or_encounter(
-		int(random_branch["targetMode"]),
-		int(random_branch["targetId"]),
-		bool(random_branch.get("gosub", false))
+	return _control_flow_opcode_runtime._apply_random_branch(
+		random_branch
 	)
-	if str(branch_result.get("status", "")) != "continue":
-		return branch_result
-	return run_until_yield()
 
 
 func _branch_to_action_or_encounter(target_mode: int, target_id: int, gosub: bool) -> Dictionary:
-	match target_mode:
-		0:
-			return _branch_to_extra_action_point(target_id, gosub, 0)
-		1, 2:
-			if gosub:
-				var push_result := _push_call_frame()
-				if str(push_result.get("status", "")) != "continue":
-					return push_result
-			return _execute_encounter("simple" if target_mode == 1 else "complex", target_id)
-		_:
-			return _halt_with_error("Unsupported classic branch target mode %d" % target_mode)
+	return _control_flow_opcode_runtime._branch_to_action_or_encounter(
+		target_mode,
+		target_id,
+		gosub
+	)
 
 
 func _execute_quest_branch(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error("Quest branch references missing Extra Code row %d" % extra_code_id)
-	var quest_is_set := runtime_state.is_quest_set(int(values[0]))
-	var condition := int(values[1])
-	var should_branch := condition == 2 or (condition == 1 and quest_is_set) or (condition == 0 and not quest_is_set)
-	if not should_branch:
-		return _continue_result()
-	return _branch_from_extra_code(values, gosub)
+	return _control_flow_opcode_runtime._execute_quest_branch(
+		extra_code_id,
+		gosub
+	)
 
 
 func _execute_quest_value_mutation(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Quest-value mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var quest_id := int(values[0])
-	if quest_id < 0 or quest_id >= 100:
-		return _halt_with_error("Classic quest index %d is outside 0 through 99" % quest_id)
-	var quest_value := runtime_state.adjust_quest_value(quest_id, int(values[1]))
-	var threshold := int(values[3])
-	if threshold == 0 or quest_value < threshold:
-		return _continue_result()
-	var target_mode := int(values[2]) - 1
-	if target_mode < 0 or target_mode > 2:
-		return _halt_with_error(
-			"Quest-value mutation has invalid branch mode %d" % int(values[2])
-		)
-	return _branch_to_action_or_encounter(
-		target_mode,
-		int(values[4]),
+	return _control_flow_opcode_runtime._execute_quest_value_mutation(
+		extra_code_id,
 		gosub
 	)
 
 
 func _execute_quest_value_branch(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Quest-value branch references missing Extra Code row %d" % extra_code_id
-		)
-	var quest_id := int(values[0])
-	if quest_id < 0 or quest_id >= 100:
-		return _halt_with_error("Classic quest index %d is outside 0 through 99" % quest_id)
-	var threshold_met := runtime_state.get_quest_value(quest_id) >= int(values[1])
-	var target_id := int(values[4] if threshold_met else values[3])
-	if target_id == 0:
-		return _continue_result()
-	var target_mode := int(values[2])
-	if target_mode < 0 or target_mode > 2:
-		return _halt_with_error(
-			"Quest-value branch has invalid branch mode %d" % target_mode
-		)
-	return _branch_to_action_or_encounter(target_mode, target_id, gosub)
+	return _control_flow_opcode_runtime._execute_quest_value_branch(
+		extra_code_id,
+		gosub
+	)
 
 
 func _execute_quest_range_branch(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.size() < 5:
-		return _halt_with_error(
-			"Quest-range branch references malformed Extra Code row %d"
-			% extra_code_id
-		)
-	var first_quest := int(values[0])
-	var last_quest := int(values[1])
-	if first_quest < 0 or last_quest < first_quest or last_quest >= 100:
-		return _halt_with_error(
-			"Quest-range branch has invalid range %d through %d"
-			% [first_quest, last_quest]
-		)
-	for quest_id: int in range(first_quest, last_quest + 1):
-		if not runtime_state.is_quest_set(quest_id):
-			return _continue_result()
-	var target_mode := int(values[3])
-	if target_mode < 0 or target_mode > 2:
-		return _halt_with_error(
-			"Quest-range branch has invalid target mode %d" % target_mode
-		)
-	return _branch_to_action_or_encounter(
-		target_mode,
-		int(values[4]),
+	return _control_flow_opcode_runtime._execute_quest_range_branch(
+		extra_code_id,
 		gosub
 	)
 
 
 func _execute_tile_parameter_branch(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Tile-parameter branch references missing Extra Code row %d" % extra_code_id
-		)
-	var selector := int(values[0])
-	var look_offset: Variant = execution_context.get("lookOffset", {})
-	var look_x := int(look_offset.get("x", 0)) if look_offset is Dictionary else 0
-	var look_y := int(look_offset.get("y", 0)) if look_offset is Dictionary else 0
-	var tile_x := runtime_state.x + look_x
-	var tile_y := runtime_state.y + look_y
-	var tile_record := bundle.get_map_tile(
-		runtime_state.level_type,
-		runtime_state.level_index,
-		tile_x,
-		tile_y
+	return _control_flow_opcode_runtime._execute_tile_parameter_branch(
+		extra_code_id,
+		gosub
 	)
-	if tile_record.is_empty():
-		return _halt_with_error(
-			"Tile-parameter branch cannot resolve the current map field"
-		)
-	var raw_tile := runtime_state.get_tile(
-		runtime_state.level_type,
-		runtime_state.level_index,
-		tile_x,
-		tile_y,
-		int(tile_record.get("value", 0))
-	)
-	var tile_id := MapBridgeScript.normalize_tile_parameter_id(raw_tile)
-	var matches := tile_id == int(values[1]) if selector == 7 else false
-	var landlook := -1
-	var attribute: Dictionary = {}
-	if selector >= 1 and selector <= 6:
-		var map: Dictionary = tile_record.get("map", {})
-		var render: Variant = map.get("render", {})
-		var baseline_landlook := int(render.get("landlook", -1)) \
-			if render is Dictionary else -1
-		landlook = runtime_state.get_landlook(
-			runtime_state.level_type,
-			runtime_state.level_index,
-			baseline_landlook
-		)
-		attribute = bundle.get_land_tile_attribute(landlook, tile_id)
-		if attribute.is_empty():
-			return _halt_with_error(
-				"Tile-parameter branch cannot resolve tile %d attributes for landlook %d"
-				% [tile_id, landlook]
-			)
-		matches = _tile_parameter_is_set(attribute, selector)
-	var target_id := int(values[4] if matches else values[3])
-	if target_id == 0:
-		return _continue_result()
-	var target_mode := int(values[2])
-	if target_mode < 0 or target_mode > 2:
-		return _halt_with_error(
-			"Tile-parameter branch has invalid branch mode %d" % target_mode
-		)
-	return _branch_to_action_or_encounter(target_mode, target_id, gosub)
 
 
 func _tile_parameter_is_set(attribute: Dictionary, selector: int) -> bool:
-	match selector:
-		1:
-			return int(attribute.get("shore", 0)) != 0
-		2:
-			return int(attribute.get(
-				"boatRequirement",
-				attribute.get("needBoat", 0)
-			)) != 0
-		3:
-			return int(attribute.get("pathFlag", attribute.get("isPath", 0))) != 0
-		4:
-			return int(attribute.get("blocksLos", attribute.get("los", 0))) != 0
-		5:
-			return int(attribute.get(
-				"flyFloatRequired",
-				attribute.get("flyFloat", 0)
-			)) != 0
-		6:
-			return int(attribute.get("forestType", attribute.get("forest", 0))) != 0
-	return false
+	return _control_flow_opcode_runtime._tile_parameter_is_set(
+		attribute,
+		selector
+	)
 
 
 func _execute_experience_loss(extra_code_id: int) -> Dictionary:
@@ -1751,82 +1586,39 @@ func _execute_experience_loss(extra_code_id: int) -> Dictionary:
 
 
 func _execute_percent_branch(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Percent branch references missing Extra Code row %d" % extra_code_id
-		)
-	var roll := _roll_percent()
-	if roll < 1 or roll > 100:
-		return _halt_with_error("Percent roll provider returned %d; expected 1 through 100" % roll)
-	if roll > int(values[0]):
-		return _continue_result()
-	return _apply_force_branch_success(values)
+	return _control_flow_opcode_runtime._execute_percent_branch(
+		extra_code_id
+	)
 
 
 func _execute_difficulty_branch(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Difficulty branch references missing Extra Code row %d" % extra_code_id
-		)
-	if runtime_state.difficulty < int(values[0]):
-		return _continue_result()
-	return _apply_force_branch_success(values)
+	return _control_flow_opcode_runtime._execute_difficulty_branch(
+		extra_code_id
+	)
 
 
 func _apply_force_branch_success(values: Array) -> Dictionary:
-	match int(values[1]):
-		-2:
-			return _finish_conditional_branch("dropout-and-erase", true)
-		1:
-			# Percent and difficulty branches do not push GOSUB in Classic.
-			return _branch_from_extra_code(values, false)
-		2:
-			return _finish_conditional_branch("keep-codes", false)
-		_:
-			return _continue_result()
+	return _control_flow_opcode_runtime._apply_force_branch_success(
+		values
+	)
 
 
 func _roll_percent() -> int:
-	if percent_roll_provider.is_valid():
-		return int(percent_roll_provider.call())
-	return randi_range(1, 100)
+	return _control_flow_opcode_runtime._roll_percent()
 
 
 func _finish_conditional_branch(reason: String, consume_codes: bool) -> Dictionary:
-	var in_encounter := not encounter_origins.is_empty()
-	if consume_codes and not in_encounter:
-		_set_origin_action_point_percent(-1)
-	if in_encounter:
-		var repeated_encounter := _repeat_encounter_after_fallthrough()
-		if not repeated_encounter.is_empty():
-			return repeated_encounter
-	_clear_control_flow()
-	return _completed_result(reason)
+	return _control_flow_opcode_runtime._finish_conditional_branch(
+		reason,
+		consume_codes
+	)
 
 
 func _branch_from_extra_code(values: Array, gosub: bool) -> Dictionary:
-	if gosub:
-		var push_result := _push_call_frame()
-		if str(push_result.get("status", "")) != "continue":
-			return push_result
-	match int(values[2]):
-		-1:
-			_set_cursor(current_trigger, 7)
-			return _continue_result()
-		0:
-			return _branch_to_extra_action_point(int(values[3]), false, 0)
-		1, 2:
-			return _branch_to_loaded_encounter_result(
-				"simple" if int(values[2]) == 1 else "complex",
-				int(values[3]),
-				int(values[4])
-			)
-		3:
-			return _finish_action_point("keep-codes", false)
-		_:
-			return _halt_with_error("Unsupported classic branch mode %d" % int(values[2]))
+	return _control_flow_opcode_runtime._branch_from_extra_code(
+		values,
+		gosub
+	)
 
 
 func _branch_to_loaded_encounter_result(
