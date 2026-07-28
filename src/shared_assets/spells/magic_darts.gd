@@ -5,7 +5,12 @@ func _init() -> void :
 	elements = [GameGlobal.ELEMENTS.MAGICAL]
 	tags = ["Magical"]
 	schools = ["Sorcerer", "Enchanter"]
-	targettile = TARGET_TILE.NOWALL
+	classic_spell_class = 6
+	classic_spell_ids = [1108]
+	classic_spell_response_ids = [1108, 3208]
+	classic_spell_save_index = -1
+	classic_spell_save_mode = "none"
+	targettile = TARGET_TILE.CREATURE
 	school_levels = {"Sorcerer": 1, "Priest": 0, "Enchanter": 2}
 	selection_costs = {"Sorcerer": 1, "Priest": 0, "Enchanter": 3}
 	in_combat = true
@@ -13,6 +18,7 @@ func _init() -> void :
 	proj_tex = GFX.SPARK
 	proj_hit = GFX.SPARK
 	sounds = ["energy blast.wav", "boing.wav"]
+	resist = RESIST_TYPE.IGNORE_MRES_DODGE
 
 
 func get_range(_power : int, _caster) -> int :

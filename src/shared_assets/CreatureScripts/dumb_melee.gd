@@ -48,12 +48,19 @@ static func decide_action(crea : Creature) -> Array :
 			var spell_target_pos : Vector2 = target_pos
 			var sp_left = crea.get_stat("curSP")
 			var allspellsArray : Array = crea.get_all_spells()
+			if not crea.can_cast_spells():
+				allspellsArray.clear()
 			if allspellsArray.size()>0 :
 				allspellsArray.shuffle()
 			var selectedSpell = null
 			var selectedplvl : int = 0
-			if crea.current_range_weapon != crea.ITEM_NO_RANGE_WEAPON :
-				var weapon_spell_arr : Array =  crea.current_range_weapon["_on_combat_use_spell"]
+			if crea.current_range_weapon_instance != null:
+				var weapon_spell_arr: Array = NodeAccess.__Resources().item_spell_use(
+					crea.current_range_weapon_instance,
+					"combat",
+				)
+				if weapon_spell_arr.size() < 2:
+					return [0, Vector2i.ZERO]
 				var weapon_spell = NodeAccess.__Resources().spells_book[weapon_spell_arr[0]]["script"]
 				var weapon_power : int = weapon_spell_arr[1]
 				if weapon_spell.get_range(weapon_power, crea) >= targ_range :
@@ -61,8 +68,7 @@ static func decide_action(crea : Creature) -> Array :
 					var affected_creas : Array = GameGlobal.map.targetingLayer.get_cbs_touching_tiles(affected_tiles)
 					if affected_creas.size()>0 :
 						print("    DECIDED TO USE BOW")
-					var aoe_name = weapon_spell.get_aoe(weapon_power, crea)
-					var aoe_shape = GameGlobal.map.targetingLayer.get_aoe_from_name(aoe_name)
+					var aoe_shape = weapon_spell.get_aoe(weapon_power, crea)
 					return [1, weapon_spell, weapon_power, spell_target_pos, aoe_shape, {},Vector2i(target_pos), affected_tiles, affected_creas]
 					#return [1, weapon_spell, weapon_power, spell_target_pos, aoe_shape, {},Vector2i(target_pos), true, true]
 			
@@ -87,8 +93,7 @@ static func decide_action(crea : Creature) -> Array :
 						selectedplvl = plvl
 			if selectedSpell :
 				print("    DECIDED TO USE MAGIC")
-				var aoe_name = selectedSpell.get_aoe(selectedplvl, crea)
-				var aoe_shape = GameGlobal.map.targetingLayer.get_aoe_from_name(aoe_name)
+				var aoe_shape = selectedSpell.get_aoe(selectedplvl, crea)
 				return [1, selectedSpell, selectedplvl, spell_target_pos, aoe_shape, {},Vector2i(spell_target_pos), affected_tiles, affected_creas]
 			#picked_targets : Dictionary, picked_tiles:Dictionary, chain_start : bool, must_add_terrain : bool)
 					

@@ -45,6 +45,7 @@ class RealmzExportPlugin extends EditorExportPlugin:
 
 		_export_dir(base_dir, "Data")
 		_export_dir(base_dir, "Campaigns")
+		_export_dir(base_dir, "ClassicAssets")
 		_export_dir(base_dir, "Profiles")
 
 		if OS.get_name() == "macOS":
@@ -62,7 +63,9 @@ class RealmzExportPlugin extends EditorExportPlugin:
 
 	func _export_dir(export_root: String, source_dir_name: String, dest_dir_name: String = ""):
 		var src_dir_path = ProjectSettings.globalize_path("res://" + source_dir_name)
-		var export_path = ProjectSettings.globalize_path("res://" + export_root)
+		var export_path = export_root
+		if export_path.is_relative_path():
+			export_path = ProjectSettings.globalize_path("res://" + export_root)
 		var dest_dir_path = export_path + "/" + (dest_dir_name if dest_dir_name else source_dir_name)
 		print_verbose("Starting export of data files from '" + src_dir_path + "' to '" + dest_dir_path + "'")
 
@@ -99,7 +102,12 @@ class RealmzExportPlugin extends EditorExportPlugin:
 
 			var file_name = dir.get_next()
 			while file_name != "":
-				if file_name == "." or file_name == ".." or file_name == ".gdignore":
+				if (
+					file_name == "."
+					or file_name == ".."
+					or file_name == ".gdignore"
+					or file_name.ends_with(".import")
+				):
 					file_name = dir.get_next()
 					continue
 
@@ -121,18 +129,16 @@ class RealmzExportPlugin extends EditorExportPlugin:
 			push_error("Could not open directory: " + src)
 
 	func _try_create_dir(parent_path: String, new_dir_path: String) -> bool:
-		var subdir = DirAccess.open(new_dir_path)
-		if not subdir:
-			var dest_dir = DirAccess.open(parent_path)
-			if dest_dir:
-				if dest_dir.make_dir(new_dir_path) != OK:
-					push_error("Could not create destination directory: " + new_dir_path)
-					return false
-				else:
-					print_verbose("Created directory at " + new_dir_path)
-			else:
-				push_error("Could not open destination directory: " + parent_path)
-				return false
+		if DirAccess.dir_exists_absolute(new_dir_path):
+			return true
+		var error = DirAccess.make_dir_recursive_absolute(new_dir_path)
+		if error != OK:
+			push_error(
+				"Could not create destination directory under %s: %s"
+				% [parent_path, new_dir_path]
+			)
+			return false
+		print_verbose("Created directory at " + new_dir_path)
 		return true
 
 

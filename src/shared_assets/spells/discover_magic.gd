@@ -5,6 +5,11 @@ func _init() -> void :
 	elements = [GameGlobal.ELEMENTS.MAGICAL]
 	tags = ["Magical", "Misc."]
 	schools = ["Sorcerer", "Priest", "Enchanter"]
+	classic_spell_class = 8
+	classic_spell_ids = [1101]
+	classic_spell_response_ids = [1101, 2102, 3102]
+	classic_spell_save_index = -1
+	classic_spell_save_mode = "none"
 	targettile = TARGET_TILE.CREATURE
 	school_levels = {"Sorcerer": 1, "Priest": 1, "Enchanter": 1}
 	selection_costs = {"Sorcerer": 1, "Priest": 1, "Enchanter": 1}
@@ -36,8 +41,10 @@ func special_effect(_castercrea, _spell, _power, _main_targeted_tile, _effected_
 	var text : String = ""
 	for c : Creature in _effected_creas :
 		var c_magic_items : Array = []
-		for i : Dictionary in c.inventory :
-			if i["is_magical"] : c_magic_items.append(i["name"])
+		for i: ItemInstance in c.inventory_instances():
+			var definition := NodeAccess.__Resources().get_item_definition(i)
+			if definition != null and definition.magical:
+				c_magic_items.append(definition.display_name_for(i))
 		if c_magic_items.is_empty() :
 			text += c.name + " carries no magic item.\n"
 		else :

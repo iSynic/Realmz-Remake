@@ -25,9 +25,14 @@ static func decide_action(crea : Creature) -> Array :
 		return [0,Vector2i(safe_direction)]
 	else :
 		#use  a ranged weapon ?
-		if crea.current_range_weapon["name"] == "NO_RANGE_WEAPON" :
+		var ranged_item: ItemInstance = crea.current_range_weapon_instance
+		if ranged_item == null:
 			return [0, Vector2i.ZERO]
-		var ranged_spell_array : Array = crea.current_range_weapon["_on_combat_use_spell"]
+		var ranged_spell_array: Array = (
+			NodeAccess.__Resources().item_spell_use(ranged_item, "combat")
+		)
+		if ranged_spell_array.size() < 2:
+			return [0, Vector2i.ZERO]
 		var ranged_spell = GameGlobal.cmp_resources.spells_book[ranged_spell_array[0]]["script"]
 		var ranged_plvl : int = ranged_spell_array[1]
 		var max_range : int = ranged_spell.get_range(ranged_plvl, crea)
@@ -49,8 +54,7 @@ static func decide_action(crea : Creature) -> Array :
 				var affected_creas = tg.get_cbs_touching_tiles(affected_tiles)
 				if affected_creas.is_empty() :
 					return [0, Vector2.ZERO]
-				var aoe_name = ranged_spell.get_aoe(ranged_plvl, crea)
-				var aoe_shape = GameGlobal.map.targetingLayer.get_aoe_from_name(aoe_name)
+				var aoe_shape = ranged_spell.get_aoe(ranged_plvl, crea)
 				return [1, ranged_spell, ranged_plvl, target_crea.position, aoe_shape, {},Vector2i(target_crea.position), affected_tiles, affected_creas]
 			else :
 				return [0, Vector2i.ZERO]

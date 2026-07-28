@@ -1,6 +1,10 @@
 extends Object
 class_name TestCreaScript
 
+const ClassicMonsterDecisionScript = preload(
+	"res://scripts/classic_runtime/classic_monster_decision.gd"
+)
+
 #const target_pos : Vector2i = Vector2i(51,87)
 
 # returns : depends of  fint int in array :
@@ -18,6 +22,35 @@ static func decide_action(crea : Creature) -> Array :
 	var flees_at : int = crea.ai_variables["flees_at"]
 	var target_crea = find_target_crea(crea)
 	var targ_range : int = AiFunctions.get_range_between_creas(crea, target_crea)
+	var is_classic_monster := crea.is_classic_monster_record()
+	var classic_opening_action := ""
+	if is_classic_monster:
+		classic_opening_action = str(
+			crea.creature_script_memory.get("classic_opening_action", "")
+		)
+		if classic_opening_action.is_empty():
+			var has_adjacent_enemy := _has_adjacent_enemy(crea)
+			var missile_roll := randi_range(1, 100)
+			var cast_roll := 101
+			if (
+				has_adjacent_enemy
+				or not ClassicMonsterDecisionScript.chance_succeeds(
+					missile_chance, missile_roll
+				)
+			):
+				cast_roll = randi_range(1, 100)
+			classic_opening_action = ClassicMonsterDecisionScript.opening_action(
+				missile_chance,
+				cast_chance,
+				has_adjacent_enemy,
+				not crea.can_cast_spells() or crea.get_spellsperround_left() <= 0,
+				crea.was_classic_attacked(),
+				missile_roll,
+				cast_roll
+			)
+			crea.creature_script_memory["classic_opening_action"] = (
+				classic_opening_action
+			)
 	
 	printerr(missile_chance,' ',cast_chance,' ',flees_at,' ',target_crea.name,' ',targ_range)
 	
@@ -26,13 +59,24 @@ static func decide_action(crea : Creature) -> Array :
 	#if have a target and it's close enough, walk to it and attack
 	if target_crea :
 		var target_pos : Vector2 = target_crea.position
-		if targ_range<=crea.get_movement_left()*3 and int(crea.ai_variables["cast_chance"])<randi_range(0,100) :
-			var path : Array = GameGlobal.map.find_path(crea.position, target_pos, true, false, false, crea, true)
-			print("TestCreaScript "+crea.name+' path size is ', path.size() )
-
-			if path.size() > 1 :
-				print("ai decideaction : "+crea.name+" 's path is : "+str(path.size())+' long')
-				return [0,Vector2i(path[1])-Vector2i(crea.position) ]
+		var should_advance := (
+			targ_range <= crea.get_movement_left() * 3
+			and int(crea.ai_variables["cast_chance"]) < randi_range(0, 100)
+		)
+		if is_classic_monster:
+			should_advance = (
+				classic_opening_action
+				== ClassicMonsterDecisionScript.ACTION_ADVANCE
+			)
+			if (
+				should_advance
+				and not _classic_can_advance(crea, target_pos)
+				and _prepare_classic_post_movement_retry(crea, cast_chance)
+			):
+				classic_opening_action = ClassicMonsterDecisionScript.ACTION_CAST
+				should_advance = false
+		if should_advance:
+			return _move_toward_target(crea, target_pos)
 		else :
 			# CAST MAGIC or use bow !!!
 			print("test_crea_script.gd "+crea.name+" considers using item or maguc")
@@ -40,14 +84,33 @@ static func decide_action(crea : Creature) -> Array :
 			var spell_target_pos : Vector2 = target_pos
 			var sp_left = crea.get_stat("curSP")
 			var allspellsArray : Array = crea.get_all_spells()
+			if not crea.can_cast_spells():
+				allspellsArray.clear()
 			if allspellsArray.size()>0 :
 				allspellsArray.shuffle()
 			#var allitemspellsArray : Array = []  # array of [spellname : String, spellevel : int]
 			var allitemswspellsArray : Array = []
-			for i:Dictionary in crea.inventory :
-				if i.has("_on_combat_use_spell") and (i["charges_max"]==0 or i["charges"]>0 ) :
-					allitemswspellsArray.append(i)
-			if allitemswspellsArray.size()>0 :
+			if is_classic_monster:
+				var classic_missile_item := (
+					ClassicMonsterDecisionScript.missile_item(
+						crea.inventory_instances(),
+						str(crea.get_meta("classic_missile_item_name", "")),
+						int(crea.get_meta("classic_missile_item_slot", -1))
+					)
+				)
+				if classic_missile_item != null:
+					allitemswspellsArray.append(classic_missile_item)
+			else:
+				for i: ItemInstance in crea.inventory_instances():
+					var definition := NodeAccess.__Resources().get_item_definition(i)
+					if definition != null \
+							and not definition.spell_use("combat").is_empty() \
+							and (
+								definition.maximum_charges == 0
+								or i.charges > 0
+							):
+						allitemswspellsArray.append(i)
+			if not is_classic_monster and allitemswspellsArray.size()>0 :
 				allitemswspellsArray.shuffle()
 			var selectedSpell = null
 			var selectedplvl : int = 0
@@ -55,34 +118,89 @@ static func decide_action(crea : Creature) -> Array :
 			var randint : int = randi_range(0,100)
 			var want_use_item : bool = missile_chance>randint and allitemswspellsArray.size()>0
 			var want_use_spell : bool =  cast_chance>randint and allspellsArray.size()>0
+			if is_classic_monster:
+				want_use_item = (
+					classic_opening_action
+					== ClassicMonsterDecisionScript.ACTION_MISSILE
+					and allitemswspellsArray.size() > 0
+				)
+				want_use_spell = (
+					classic_opening_action
+					== ClassicMonsterDecisionScript.ACTION_CAST
+					and allspellsArray.size() > 0
+				)
 			var ignore_cost : bool = false
 			var used_an_item : bool = false
-			var item_used : Dictionary = {}
+			var item_used: ItemInstance = null
 			print("test crea script.gd want_use_item ? ", want_use_item, " , missile_chance :", missile_chance, '  , randint : ', randint)
 			if want_use_item :
 				#var weapon_spell_arr : Array =  crea.current_range_weapon["_on_combat_use_spell"]
 				item_used = allitemswspellsArray[0]
-				var item_spell_name : String = item_used["_on_combat_use_spell"][0]
+				var item_spell_use := (
+					NodeAccess.__Resources().item_spell_use(item_used, "combat")
+				)
+				var item_spell_name: String = item_spell_use[0]
 				selectedSpell = NodeAccess.__Resources().spells_book[item_spell_name]["script"]
-				selectedplvl  = item_used["_on_combat_use_spell"][1]
+				selectedplvl = item_spell_use[1]
 				ignore_cost = true
 				used_an_item = true
 			if want_use_spell :
-				selectedSpell = allspellsArray[0][0]["script"]
+				selectedSpell = allspellsArray[0]["script"]
 				selectedplvl  = randi_range(1,7)
 			if not (want_use_item or want_use_spell) :
 				print("test crea script.gd decideaction : "+crea.name+" wants to do nothing")
+				if is_classic_monster:
+					_record_classic_spell_pass_failure(crea)
+					return _classic_advance_after_failed_spell(
+						crea, target_pos, cast_chance
+					)
 				return [0, Vector2i.ZERO ]
 			
 			#var spell_cast_message :  Array = [0, Vector2i.ZERO ]
-			if crea.get_spell_resource_cost(selectedSpell,selectedplvl)>=sp_left or ignore_cost :
+			if is_classic_monster and want_use_spell:
+				while (
+					selectedplvl > 0
+					and crea.get_spell_resource_cost(selectedSpell, selectedplvl)
+					> sp_left
+				):
+					selectedplvl -= 1
+				if selectedplvl == 0:
+					_record_classic_spell_pass_failure(crea)
+					return _classic_advance_after_failed_spell(
+						crea, target_pos, cast_chance
+					)
+			if (
+				(
+					is_classic_monster
+					and crea.get_spell_resource_cost(selectedSpell, selectedplvl)
+					<= sp_left
+				)
+				or (
+					not is_classic_monster
+					and crea.get_spell_resource_cost(selectedSpell,selectedplvl)
+					>= sp_left
+				)
+				or ignore_cost
+			):
 				print("test crea script.gd going to get_spell_cast_message")
 				var spell_cast_message : Array = get_spell_cast_message(crea, selectedSpell,selectedplvl, target_crea, used_an_item, item_used)
+				if is_classic_monster and spell_cast_message[0] == 1:
+					spell_cast_message.append({
+						"classicConsumesTurn": (
+							want_use_item
+							or crea.get_spellsperround_left() <= 1
+						),
+					})
+				elif is_classic_monster:
+					_record_classic_spell_pass_failure(crea)
+					return _classic_advance_after_failed_spell(
+						crea, target_pos, cast_chance
+					)
 				return spell_cast_message
 	print("decideaction : "+crea.name+" can do nothing")
 	return [0, Vector2i.ZERO ]
 	
-static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_crea: Creature, used_an_item : bool, item_used : Dictionary) :
+static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_crea: Creature, used_an_item : bool, item_used: ItemInstance) :
 	var targ_range : int = AiFunctions.get_range_between_creas(caster, target_crea)
 	print(spell.name,plvl, ' ',spell.get_range(plvl, caster) , '<=>' ,targ_range)
 	if spell.get_range(plvl, caster) >= targ_range :
@@ -90,10 +208,105 @@ static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_
 		var affected_creas : Array = GameGlobal.map.targetingLayer.get_cbs_touching_tiles(affected_tiles)
 		if affected_creas.size()>0 :
 			print("Test_Crea_Script.gd : "+caster.name + "'s spell hits at least "+ target_crea.name )
-		var aoe_name = spell.get_aoe(plvl, caster)
-		var aoe_shape = GameGlobal.map.targetingLayer.get_aoe_from_name(aoe_name)
+		var aoe_shape = spell.get_aoe(plvl, caster)
 		return [1, spell, plvl, target_crea.position, aoe_shape, item_used,Vector2i(target_crea.position), affected_tiles, affected_creas]
 	return [0, Vector2i.ZERO ]
+
+
+static func _has_adjacent_enemy(crea: Creature) -> bool:
+	var enemies: Array = AiFunctions.get_closest_creas_not_of_side(
+		crea, crea.curFaction
+	)
+	return (
+		not enemies.is_empty()
+		and AiFunctions.get_range_between_creas(crea, enemies[0]) <= 1
+	)
+
+
+static func _move_toward_target(crea: Creature, target_pos: Vector2) -> Array:
+	var path: Array = GameGlobal.map.find_path(
+		crea.position, target_pos, true, false, false, crea, true
+	)
+	print("TestCreaScript "+crea.name+" path size is ", path.size())
+	if path.size() > 1:
+		print(
+			"ai decideaction: "+crea.name+" path is "
+			+str(path.size())+" long"
+		)
+		return [0, Vector2i(path[1]) - Vector2i(crea.position)]
+	return [0, Vector2i.ZERO]
+
+
+static func _classic_can_advance(crea: Creature, target_pos: Vector2) -> bool:
+	var path: Array = GameGlobal.map.find_path(
+		crea.position, target_pos, true, false, false, crea, true
+	)
+	if path.size() <= 1:
+		return false
+	var destination := Vector2i(path[1])
+	var occupant = GameGlobal.who_is_at_tile(destination)
+	if (
+		is_instance_valid(occupant)
+		and occupant != crea.combat_button
+		and occupant.creature.curFaction != crea.curFaction
+	):
+		return true
+	var move_check: Array = (
+		StateMachine.combat_state.on_trying_to_move_to_position(
+			crea, destination, true
+		)
+	)
+	return (
+		bool(move_check[0])
+		and crea.get_movement_left() >= int(move_check[1])
+	)
+
+
+static func _prepare_classic_post_movement_retry(
+	crea: Creature,
+	cast_chance: int
+) -> bool:
+	var failed_spell_passes := int(
+		crea.creature_script_memory.get("classic_failed_spell_passes", 0)
+	)
+	if not ClassicMonsterDecisionScript.should_retry_cast(
+		cast_chance,
+		not crea.can_cast_spells() or crea.get_spellsperround_left() <= 0,
+		crea.was_classic_attacked(),
+		crea.did_classic_attack(),
+		failed_spell_passes
+	):
+		return false
+	# The retry does not make another percentage roll. Setting the pass counter
+	# to two prevents a failed retry from cycling back through movement.
+	crea.creature_script_memory["classic_failed_spell_passes"] = 2
+	crea.creature_script_memory["classic_opening_action"] = (
+		ClassicMonsterDecisionScript.ACTION_CAST
+	)
+	return true
+
+
+static func _record_classic_spell_pass_failure(crea: Creature) -> void:
+	crea.creature_script_memory["classic_failed_spell_passes"] = (
+		int(crea.creature_script_memory.get(
+			"classic_failed_spell_passes", 0
+		)) + 1
+	)
+	crea.creature_script_memory["classic_opening_action"] = (
+		ClassicMonsterDecisionScript.ACTION_ADVANCE
+	)
+
+
+static func _classic_advance_after_failed_spell(
+	crea: Creature,
+	target_pos: Vector2,
+	cast_chance: int
+) -> Array:
+	if _classic_can_advance(crea, target_pos):
+		return _move_toward_target(crea, target_pos)
+	if _prepare_classic_post_movement_retry(crea, cast_chance):
+		return decide_action(crea)
+	return [0, Vector2i.ZERO]
 		
 				
 #	if not crea.scripts_memory.has("prev_dir") :

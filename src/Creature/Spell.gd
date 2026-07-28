@@ -58,9 +58,39 @@ enum RESIST_TYPE {IGNORE_MRES_DODGE = 0, IGNORE_MRES = 1, IGNORE_DODGE = 2, IGNO
 
 var name : String = ""
 var description : String = ""
+# Combat traits use these broad delivery attributes independently from damage
+# elements. Projectile protection, for example, should not depend on whether a
+# missile deals fire or physical damage.
+var attributes : Array = []
 var elements : Array[GameGlobal.ELEMENTS] = []
 var tags : Array = []
 var schools : Array = []
+# Classic spells also carry an effect class. Complex encounters can match
+# classes 1-6 instead of a packed spell-table ID.
+var classic_spell_class : int = 0
+# Classic targeting modes 9, 10, and 12 bypass spell reflection. Native
+# spells retain zero, which follows Remake's ordinary targeted-spell behavior.
+var classic_target_type : int = 0
+# A non-empty list limits this resource to Classic table entries whose
+# mechanics it represents. Empty lists retain the existing name-based fallback.
+var classic_spell_ids : Array[int] = []
+# Response aliases let one native learned spell answer equivalent Classic
+# caster-list entries without claiming that their casting mechanics are equal.
+var classic_spell_response_ids : Array[int] = []
+# Classic field spells use a damage-type save from 0-7. A value of -1 means
+# the spell has no out-of-combat save. Successful saves either negate the
+# effect or halve its damage, matching resolvespell.c.
+var classic_spell_save_index : int = -1
+var classic_spell_save_mode : String = "none"
+var classic_save_bonus : int = 0
+var classic_save_adjust : int = 0
+# Negative non-missile damage types in Classic run a target-versus-caster
+# level check before other resistance and save stages. Native resources opt in
+# to that behavior directly without reproducing the signed byte encoding.
+var classic_opposed_level_check : bool = false
+# Classic general magic resistance is a separate all-or-nothing roll. Native
+# spells leave this at zero; mapped and compiled Classic spells may override it.
+var classic_resist_adjust : int = 0
 
 var targettile : TARGET_TILE = TARGET_TILE.NOWALL
 var school_levels : Dictionary = {"Sorcerer": 0, "Priest": 0, "Enchanter": 0}
@@ -89,6 +119,11 @@ var proj_tex : GFX = -1
 var proj_hit : GFX = -1
 var sounds : Array = []
 var max_focus_loss : int = 0
+# Persistent battlefield spells opt into these fields. Keeping them on the
+# common spell contract lets the combat runtime distinguish an absent effect
+# from a malformed spell resource.
+var terrain_tex : String = ""
+var terrain_walk_type : int = 0
 
 
 func get_targets(_power : int, _caster) -> int :
@@ -130,8 +165,18 @@ func get_target_number(_power : int, _caster) -> int :
 func get_aoe(_power : int, _caster) -> Array[Vector2i] :
 	return AoE_b1
 
+func uses_classic_opposed_level_check() -> bool :
+	return classic_opposed_level_check
+
 func add_traits_to_creature(_caster : Creature, _target : Creature, _power : int) -> void :
 	pass
+
+func supports_classic_spell_id(spell_id : int) -> bool :
+	return classic_spell_ids.is_empty() or spell_id in classic_spell_ids
+
+
+func is_classic_queued_spell() -> bool:
+	return false
 
 
 # Returns this spell's source code as a string, suitable for storing in a
