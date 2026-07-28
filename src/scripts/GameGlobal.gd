@@ -808,12 +808,88 @@ func refresh_OW_HUD() :
 
 
 func register_classic_runtime_host(host: Object) -> void:
+	if is_instance_valid(classic_runtime_host):
+		_disconnect_classic_runtime_host_signals(classic_runtime_host)
 	classic_runtime_host = host
+	if not is_instance_valid(classic_runtime_host):
+		return
+	var command_started_callback := Callable(
+		self,
+		"_on_classic_runtime_command_started"
+	)
+	if classic_runtime_host.has_signal("command_started") \
+			and not classic_runtime_host.is_connected(
+				"command_started",
+				command_started_callback
+			):
+		classic_runtime_host.connect("command_started", command_started_callback)
+	var playthrough_finished_callback := Callable(
+		self,
+		"_on_classic_runtime_playthrough_finished"
+	)
+	if classic_runtime_host.has_signal("playthrough_finished") \
+			and not classic_runtime_host.is_connected(
+				"playthrough_finished",
+				playthrough_finished_callback
+			):
+		classic_runtime_host.connect(
+			"playthrough_finished",
+			playthrough_finished_callback
+		)
 
 
 func clear_classic_runtime_host(host: Object = null) -> void:
 	if host == null or classic_runtime_host == host:
+		if is_instance_valid(classic_runtime_host):
+			_disconnect_classic_runtime_host_signals(classic_runtime_host)
 		classic_runtime_host = null
+		_refresh_classic_camping_controls()
+
+
+func is_classic_action_point_active() -> bool:
+	return (
+		is_instance_valid(classic_runtime_host)
+		and bool(classic_runtime_host.get("active"))
+	)
+
+
+func _disconnect_classic_runtime_host_signals(host: Object) -> void:
+	var command_started_callback := Callable(
+		self,
+		"_on_classic_runtime_command_started"
+	)
+	if host.has_signal("command_started") \
+			and host.is_connected("command_started", command_started_callback):
+		host.disconnect("command_started", command_started_callback)
+	var playthrough_finished_callback := Callable(
+		self,
+		"_on_classic_runtime_playthrough_finished"
+	)
+	if host.has_signal("playthrough_finished") \
+			and host.is_connected(
+				"playthrough_finished",
+				playthrough_finished_callback
+			):
+		host.disconnect("playthrough_finished", playthrough_finished_callback)
+
+
+func _on_classic_runtime_command_started(
+	_command: String,
+	_payload: Dictionary
+) -> void:
+	var hud: Variant = UI.get("ow_hud") if UI != null else null
+	if hud is Object and hud.has_method("suspend_classic_rest_for_action_point"):
+		hud.call("suspend_classic_rest_for_action_point")
+
+
+func _on_classic_runtime_playthrough_finished(_result: Dictionary) -> void:
+	_refresh_classic_camping_controls()
+
+
+func _refresh_classic_camping_controls() -> void:
+	var hud: Variant = UI.get("ow_hud") if UI != null else null
+	if hud is Object and hud.has_method("update_classic_camping_permission"):
+		hud.call("update_classic_camping_permission")
 
 
 func classic_monster_generation_context(mode: String) -> Dictionary:
@@ -939,7 +1015,7 @@ func play_classic_map_sound(sound_id: int) -> Dictionary:
 
 
 func stop_classic_campaign_runtime() -> void:
-	classic_runtime_host = null
+	clear_classic_runtime_host()
 	if is_instance_valid(classic_campaign_session):
 		classic_campaign_session.call("clear")
 		classic_campaign_session.queue_free()
@@ -1400,7 +1476,11 @@ func is_map_tile_walkable_by_char(chara, pos : Vector2)->bool : #battle mode, ch
 
 func rest() -> bool:
 	if is_classic_runtime_active():
-		if not camping or classic_camping_disabled:
+		if (
+			is_classic_action_point_active()
+			or not camping
+			or classic_camping_disabled
+		):
 			return false
 		set_party_fatigue(ClassicRestScript.fatigue_before_rest(fatigue))
 		pass_time(classic_timeclick_pass_time_units(
@@ -1461,6 +1541,7 @@ func check_classic_random_rectangles(
 	context := {}
 ) -> bool:
 	if not is_classic_runtime_active() \
+			or is_classic_action_point_active() \
 			or StateMachine.is_combat_state() \
 			or map == null \
 			or not is_instance_valid(classic_runtime_host) \

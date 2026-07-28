@@ -586,22 +586,33 @@ func _on_CampButton_pressed(movement_exit := false):
 
 
 func update_classic_camping_permission() -> void:
+	var action_point_active := GameGlobal.is_classic_action_point_active()
 	if campButton != null:
 		campButton.disabled = (
-			GameGlobal.classic_camping_disabled
-			and not GameGlobal.camping
+			action_point_active
+			or (
+				GameGlobal.classic_camping_disabled
+				and not GameGlobal.camping
+			)
 		)
 	if restButton != null:
 		restButton.disabled = (
 			GameGlobal.is_classic_runtime_active()
 			and (
-				GameGlobal.classic_camping_disabled
+				action_point_active
+				or GameGlobal.classic_camping_disabled
 				or not GameGlobal.camping
 			)
 		)
 		if restButton.disabled:
 			restTimer.stop()
 			restTimer.set_paused(true)
+
+
+func suspend_classic_rest_for_action_point() -> void:
+	restTimer.stop()
+	restTimer.set_paused(true)
+	update_classic_camping_permission()
 
 
 func _play_camp_audio() -> void:
