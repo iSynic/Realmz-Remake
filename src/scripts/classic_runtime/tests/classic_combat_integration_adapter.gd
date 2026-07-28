@@ -19,13 +19,16 @@ func _combatant_scene_resource() -> Variant:
 	return test_combatant_scene
 
 
-func _show_text(payload: Dictionary) -> Dictionary:
-	shown_messages.append(int(payload.get("messageId", 0)))
-	return {}
-
-
-func _play_sound(payload: Dictionary) -> Dictionary:
-	var sound_id := int(payload.get("soundId", 0))
-	if sound_id != 0:
-		played_sounds.append(sound_id)
-	return {}
+func scenario_presentation_override(
+	operation: String,
+	payload: Dictionary
+) -> Variant:
+	if operation == "show_text":
+		shown_messages.append(int(payload.get("messageId", 0)))
+		return {}
+	if operation == "play_sound":
+		var sound_id := int(payload.get("soundId", 0))
+		if sound_id != 0:
+			played_sounds.append(sound_id)
+		return {}
+	return null
