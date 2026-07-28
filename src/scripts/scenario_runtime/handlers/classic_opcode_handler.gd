@@ -67,7 +67,8 @@ func _coerce_result(value: Variant) -> ScenarioStepResult:
 
 
 func _invoke(runtime: Object, method_name: String, arguments := []) -> Dictionary:
-	if runtime == null or not runtime.has_method(method_name):
+	var operation_runtime := _operation_runtime(runtime, method_name)
+	if operation_runtime == null:
 		return {
 			"status": "error",
 			"message": "Classic handler '%s' requires unavailable operation '%s'" % [
@@ -75,7 +76,7 @@ func _invoke(runtime: Object, method_name: String, arguments := []) -> Dictionar
 				method_name,
 			],
 		}
-	var result: Variant = runtime.callv(method_name, arguments)
+	var result: Variant = operation_runtime.callv(method_name, arguments)
 	if result is Dictionary:
 		return result
 	return {
@@ -85,10 +86,26 @@ func _invoke(runtime: Object, method_name: String, arguments := []) -> Dictionar
 
 
 func _call_void(runtime: Object, method_name: String, arguments := []) -> bool:
-	if runtime == null or not runtime.has_method(method_name):
+	var operation_runtime := _operation_runtime(runtime, method_name)
+	if operation_runtime == null:
 		return false
-	runtime.callv(method_name, arguments)
+	operation_runtime.callv(method_name, arguments)
 	return true
+
+
+func _operation_runtime(runtime: Object, method_name: String) -> Object:
+	if runtime == null:
+		return null
+	if runtime.has_method("classic_handler_runtime"):
+		var candidate: Variant = runtime.call(
+			"classic_handler_runtime",
+			handler_id()
+		)
+		if candidate is Object and candidate.has_method(method_name):
+			return candidate
+	if runtime.has_method(method_name):
+		return runtime
+	return null
 
 
 func _unsupported(instruction: Dictionary) -> Dictionary:

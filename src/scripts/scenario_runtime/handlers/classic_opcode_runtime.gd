@@ -8,6 +8,9 @@ const KnownDataCorrectionsScript = preload(
 const CoreHandlerCatalogScript = preload(
 	"res://scripts/scenario_runtime/handlers/core_handler_catalog.gd"
 )
+const CombatOpcodeRuntimeScript = preload(
+	"res://scripts/scenario_runtime/handlers/classic_combat_opcode_runtime.gd"
+)
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
 const MAX_RANDOM_RECTANGLES := 20
@@ -25,12 +28,6 @@ const HANDLED_OPCODES := [
 	99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 111, 112,
 	119, 120, 121, 122, 123, 124, 125, 126, 127,
 ]
-const PRIEST_TURNING_ENABLED_MESSAGE := \
-	"You regain your ability to turn undead and nether spawn."
-const PRIEST_TURNING_DISABLED_MESSAGE := \
-	"You may not use your ability to turn undead or nether spawn."
-const NO_SELECTIVE_BATTLE_SURVIVORS_MESSAGE := \
-	"There is nobody left to collect any treasure."
 const PARTY_CONDITION_NAMES := [
 	"Torch Lit",
 	"Waterworld",
@@ -156,11 +153,15 @@ var compatibility_instruction_registry: ScenarioInstructionRegistry
 var trace: Array = []
 var last_error := ""
 var halted := false
+var _combat_opcode_runtime: RefCounted
 
 
 func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeState) -> void:
 	bundle = campaign_bundle
 	runtime_state = state
+	if _combat_opcode_runtime == null:
+		_combat_opcode_runtime = CombatOpcodeRuntimeScript.new()
+		_combat_opcode_runtime.configure(self)
 	if compatibility_instruction_registry == null:
 		compatibility_instruction_registry = ScenarioInstructionRegistry.new()
 		if not CoreHandlerCatalogScript.register_all(
@@ -172,6 +173,12 @@ func configure(campaign_bundle: ClassicCampaignBundle, state: ClassicRuntimeStat
 	loaded_simple_encounter_id = -1
 	loaded_complex_encounter_id = -1
 	reset_execution()
+
+
+func classic_handler_runtime(handler_id: String) -> Object:
+	if handler_id == "core.combat":
+		return _combat_opcode_runtime
+	return self
 
 
 func set_percent_roll_provider(provider: Callable) -> void:
@@ -612,69 +619,19 @@ func resume_encounter(outcome: int, encounter_state := {}) -> Dictionary:
 
 
 func resume_battle(coward: bool) -> Dictionary:
-	if pending_battle.is_empty():
-		return _error_result("No classic battle is waiting for an outcome")
-	var battle_context := pending_battle
-	pending_battle = {}
-	if not coward:
-		return _yield_result("give_battle_loot", {
-			"extraCodeId": int(battle_context["extraCodeId"]),
-			"lootMode": 0,
-		})
-
-	var coward_macro_id := int(battle_context["cowardMacroId"])
-	if coward_macro_id == -1:
-		_clear_control_flow()
-		return _yield_result("apply_coward_penalty", {
-			"experiencePerLevel": 2000,
-			"soundId": 26260,
-			"warningIds": [118, 124],
-			"levelType": runtime_state.level_type,
-			"backUpParty": runtime_state.level_type == "land",
-		})
-	var branch_result := _branch_to_extra_action_point(
-		coward_macro_id,
-		bool(battle_context.get("gosub", false)),
-		0
-	)
-	if str(branch_result.get("status", "")) != "continue":
-		return branch_result
-	return run_until_yield()
+	return _combat_opcode_runtime.resume_battle(coward)
 
 
 func resume_selective_battle(survivor_count: int) -> Dictionary:
-	if pending_selective_battle.is_empty():
-		return _error_result("No classic selective battle is waiting for an outcome")
-	if survivor_count < 0:
-		return _error_result("Classic selective battle returned an invalid survivor count")
-	var battle_context := pending_selective_battle
-	pending_selective_battle = {}
-	if survivor_count == 0:
-		return _yield_result("show_text", {
-			"messageId": 0,
-			"message": {
-				"id": 0,
-				"text": NO_SELECTIVE_BATTLE_SURVIVORS_MESSAGE,
-			},
-		})
-	var treasure_id := int(battle_context.get("treasureId", 0))
-	if treasure_id != 0:
-		return _execute_treasure(treasure_id)
-	return run_until_yield()
+	return _combat_opcode_runtime.resume_selective_battle(survivor_count)
 
 
 func resume_forced_battle_end() -> Dictionary:
-	_clear_control_flow()
-	return _completed_result("battle-ended")
+	return _combat_opcode_runtime.resume_forced_battle_end()
 
 
 func resume_forced_battle_at_slot(resume_slot: int) -> Dictionary:
-	if resume_slot != 8:
-		return _error_result("Classic forced battle resume slot must be 8")
-	pending_battle = {}
-	pending_selective_battle = {}
-	_set_cursor(current_trigger, resume_slot)
-	return run_until_yield()
+	return _combat_opcode_runtime.resume_forced_battle_at_slot(resume_slot)
 
 
 func resume_teleport() -> Dictionary:
@@ -934,34 +891,15 @@ func resume_ally_check(present: bool) -> Dictionary:
 
 
 func resume_combat_monster_check(present: bool) -> Dictionary:
-	if pending_combat_monster_check.is_empty():
-		return _error_result("No classic combat-monster check is waiting for a response")
-	pending_combat_monster_check = {}
-	if present:
-		return run_until_yield()
-	_clear_control_flow()
-	return _completed_result("required-combat-monster-absent")
+	return _combat_opcode_runtime.resume_combat_monster_check(present)
 
 
 func resume_combat_revival(party_revived: bool) -> Dictionary:
-	if pending_combat_revival.is_empty():
-		return _error_result("No classic combat revival is waiting for a response")
-	pending_combat_revival = {}
-	if party_revived:
-		_clear_control_flow()
-		return _completed_result("party-revived")
-	return run_until_yield()
+	return _combat_opcode_runtime.resume_combat_revival(party_revived)
 
 
 func resume_battle_round_macro() -> Dictionary:
-	if pending_battle_round_macro.is_empty():
-		return _error_result("No classic battle-round macro is waiting for activation")
-	var target_macro_id := int(pending_battle_round_macro["targetMacroId"])
-	pending_battle_round_macro = {}
-	var branch_result := _branch_to_extra_action_point(target_macro_id, false, 0)
-	if str(branch_result.get("status", "")) != "continue":
-		return branch_result
-	return run_until_yield()
+	return _combat_opcode_runtime.resume_battle_round_macro()
 
 
 func resume_random_branch() -> Dictionary:
@@ -1060,64 +998,21 @@ func _execute_action(action: Dictionary) -> Dictionary:
 
 
 func _execute_combat_monster_check(monster_name_id: int) -> Dictionary:
-	pending_combat_monster_check = {"monsterNameId": abs(monster_name_id)}
-	return _yield_result("check_combat_monster", {
-		"monsterNameId": abs(monster_name_id),
-	})
+	return _combat_opcode_runtime._execute_combat_monster_check(
+		monster_name_id
+	)
 
 
 func _execute_combat_revival() -> Dictionary:
-	pending_combat_revival = {"active": true}
-	var actor_monster_id := int(execution_context.get("actorMonsterId", -1))
-	var payload := {
-		"actorMonsterId": actor_monster_id,
-		"actorMonsterNameId": int(
-			execution_context.get("actorMonsterNameId", -1)
-		),
-		"actorPosition": execution_context.get("actorPosition"),
-		"actorFaction": int(execution_context.get("actorFaction", 0)),
-	}
-	if actor_monster_id >= 0:
-		payload["monster"] = bundle.get_monster(actor_monster_id)
-	return _yield_result("revive_classic_combatants", payload)
+	return _combat_opcode_runtime._execute_combat_revival()
 
 
 func _execute_combatant_mutation(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Combatant mutation references missing Extra Code row %d" % extra_code_id
-		)
-	var target_type := int(values[0])
-	if target_type not in [1, 2]:
-		return _halt_with_error(
-			"Combatant mutation has invalid target type %d" % target_type
-		)
-	return _yield_result("alter_classic_combatants", {
-		"extraCodeId": extra_code_id,
-		"targetType": "ally" if target_type == 1 else "monster",
-		"monsterNameId": int(values[1]),
-		"maxMatches": maxi(0, int(values[2])),
-		"iconId": int(values[3]),
-		"faction": int(values[4]),
-	})
+	return _combat_opcode_runtime._execute_combatant_mutation(extra_code_id)
 
 
 func _execute_combat_fumble(extra_code_id: int) -> Dictionary:
-	var values: Array = [0, 0, 0, 0, 0]
-	if extra_code_id != 0:
-		values = _extra_code_values(extra_code_id)
-		if values.is_empty():
-			return _halt_with_error(
-				"Combat fumble references missing Extra Code row %d" % extra_code_id
-			)
-	var message_id := int(values[0])
-	return _yield_result("fumble_active_combatant", {
-		"extraCodeId": extra_code_id,
-		"messageId": message_id,
-		"message": bundle.get_message(message_id) if message_id != 0 else {},
-		"soundId": int(values[1]),
-	})
+	return _combat_opcode_runtime._execute_combat_fumble(extra_code_id)
 
 
 func _execute_take_gold(extra_code_id: int) -> Dictionary:
@@ -1165,161 +1060,29 @@ func _execute_give_condition(extra_code_id: int) -> Dictionary:
 
 
 func _execute_destroy_combat_monsters(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Destroy-combat-monsters action references missing Extra Code row %d" \
-				% extra_code_id
-		)
-	var monster_name_id := int(values[0])
-	var max_matches := int(values[1])
-	if max_matches == 0:
-		max_matches = 100
-	return _yield_result("destroy_combat_monsters", {
-		"extraCodeId": extra_code_id,
-		"monsterNameId": monster_name_id,
-		"maxMatches": max_matches,
-		"includeAllFactions": int(values[4]) != 0,
-	})
+	return _combat_opcode_runtime._execute_destroy_combat_monsters(
+		extra_code_id
+	)
 
 
 func _execute_deanimate_lower_undead(extra_code_id: int) -> Dictionary:
-	var monster_ids: Array = []
-	for monster_value: Variant in bundle.monsters_by_id.values():
-		if not (monster_value is Dictionary):
-			continue
-		var type_flags: Variant = monster_value.get("typeFlags", [])
-		if not (type_flags is Array) or type_flags.size() <= 5:
-			continue
-		if int(type_flags[1]) == 0 or int(type_flags[5]) != 0:
-			continue
-		monster_ids.append(int(monster_value.get("id", -1)))
-	monster_ids.sort()
-	return _yield_result("deanimate_lower_undead", {
-		"extraCodeId": extra_code_id,
-		"monsterIds": monster_ids,
-	})
+	return _combat_opcode_runtime._execute_deanimate_lower_undead(
+		extra_code_id
+	)
 
 
 func _execute_combat_rout(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Combat-rout action references missing Extra Code row %d" % extra_code_id
-		)
-	var monster_ids: Array = []
-	var monsters: Array = []
-	for value: Variant in values:
-		var monster_id := int(value)
-		if monster_id == 0 or monster_ids.has(monster_id):
-			continue
-		monster_ids.append(monster_id)
-		monsters.append(bundle.get_monster(monster_id))
-	var payload := {
-		"extraCodeId": extra_code_id,
-		"monsterIds": monster_ids,
-		"monsters": monsters,
-		"sameFactionAsActor": true,
-		"permanent": true,
-		"surrenderPercent": 50,
-	}
-	if execution_context.has("actorFaction"):
-		payload["actorFaction"] = execution_context["actorFaction"]
-	return _yield_result("rout_combat_monsters", payload)
+	return _combat_opcode_runtime._execute_combat_rout(extra_code_id)
 
 
 func _execute_spawn_combat_monsters(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Combat spawn action references missing Extra Code row %d" % extra_code_id
-		)
-	var authored_count := int(values[2])
-	var spawn_count := randi_range(1, abs(authored_count)) \
-		if authored_count < 0 else authored_count
-	if spawn_count <= 0:
-		return _continue_result()
-	var monster_id := int(values[1])
-	var monster := bundle.get_monster(monster_id)
-	if monster.is_empty():
-		return _halt_with_error("Missing combat spawn monster %d" % monster_id)
-	# Shipped scenarios contain a small number of active spawn rows aimed at
-	# an explicitly empty Data MD slot. Classic cannot create a viable
-	# combatant from that record, so preserve the row and continue the macro.
-	if monster.has("hitDice") and int(monster.get("hitDice", 0)) <= 0:
-		return _continue_result()
-	var faction_override := int(values[4])
-	var queued_macro := bool(execution_context.get("queuedMacro", false))
-	var battle_macro := int(execution_context.get("battleMacro", 0))
-	var payload := {
-		"extraCodeId": extra_code_id,
-		"monsterId": monster_id,
-		"monster": monster,
-		"authoredCount": authored_count,
-		"spawnCount": spawn_count,
-		"soundId": int(values[3]),
-		"factionOverride": faction_override,
-		"inheritActorFaction": faction_override == 0 and (queued_macro or battle_macro == 0),
-	}
-	for context_key: String in ["actorPosition", "actorFaction"]:
-		if execution_context.has(context_key):
-			payload[context_key] = execution_context[context_key]
-	return _yield_result("spawn_combat_monsters", payload)
+	return _combat_opcode_runtime._execute_spawn_combat_monsters(
+		extra_code_id
+	)
 
 
 func _execute_battle_round_macro(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Battle-round macro action references missing Extra Code row %d" % extra_code_id
-		)
-	if int(execution_context.get("battleMacro", -1)) > 0:
-		_clear_control_flow()
-		return _completed_result("legacy-battle-macro-disabled")
-	if not execution_context.has("combatRound"):
-		return _halt_with_error("Battle-round macro requires the current combat round")
-	var combat_round := int(execution_context["combatRound"])
-	if combat_round < 1:
-		return _halt_with_error("Battle-round macro requires a one-based combat round")
-	# Classic tests the number of completed rounds, not its one-based combat round.
-	var round_index := combat_round - 1
-	var trigger_mode := int(values[0])
-	var trigger_value := int(values[1])
-	var chance_roll := -1
-	var activates := true
-	if trigger_mode == 1:
-		chance_roll = _roll_percent()
-		activates = chance_roll <= trigger_value
-	elif trigger_mode == 0:
-		activates = round_index == trigger_value
-	if not activates:
-		_clear_control_flow()
-		return _completed_result("battle-round-macro-skipped")
-
-	var target_mode := int(values[2])
-	var first_target := int(values[3])
-	var last_target := int(values[4]) if target_mode == 2 else first_target
-	if last_target < first_target:
-		return _halt_with_error(
-			"Battle-round macro target range %d-%d is reversed" % [first_target, last_target]
-		)
-	var target_macro_id := randi_range(first_target, last_target)
-	if bundle.get_extra_action_point(target_macro_id).is_empty():
-		return _halt_with_error("Missing battle-round target macro %d" % target_macro_id)
-	pending_battle_round_macro = {"targetMacroId": target_macro_id}
-	return _yield_result("activate_battle_round_macro", {
-		"extraCodeId": extra_code_id,
-		"combatRound": combat_round,
-		"roundIndex": round_index,
-		"triggerMode": trigger_mode,
-		"triggerValue": trigger_value,
-		"chanceRoll": chance_roll,
-		"repeat": target_mode == 1,
-		"randomTarget": target_mode == 2,
-		"targetRange": [first_target, last_target],
-		"targetMacroId": target_macro_id,
-		"disableSchedule": target_mode != 1,
-	})
+	return _combat_opcode_runtime._execute_battle_round_macro(extra_code_id)
 
 
 func _execute_load_shop(signed_shop_id: int, accept_ranges: Array = []) -> Dictionary:
@@ -1509,49 +1272,11 @@ func _item_texts_for_ids(item_ids: Array) -> Array:
 
 
 func _execute_battle(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error("Battle action references missing Extra Code row %d" % extra_code_id)
-	var first_battle_id := int(values[0])
-	var last_battle_id := int(values[1]) if int(values[1]) != 0 else first_battle_id
-	return _yield_result("start_battle", {
-		"extraCodeId": extra_code_id,
-		"battleIdRange": [abs(first_battle_id), abs(last_battle_id)],
-		"surprise": first_battle_id < 0,
-		"soundId": int(values[2]),
-		"messageId": int(values[3]),
-		"message": bundle.get_message(int(values[3])),
-		"lootMode": int(values[4]),
-		"battle": bundle.get_battle(first_battle_id),
-		"priestTurningEnabled": runtime_state.priest_turning_enabled,
-	})
+	return _combat_opcode_runtime._execute_battle(extra_code_id)
 
 
 func _execute_selective_battle(extra_code_id: int) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Selective battle action references missing Extra Code row %d" % extra_code_id
-		)
-	var first_battle_id := int(values[0])
-	var last_battle_id := int(values[1]) if int(values[1]) != 0 else first_battle_id
-	pending_selective_battle = {
-		"extraCodeId": extra_code_id,
-		"treasureId": int(values[4]),
-	}
-	return _yield_result("start_battle", {
-		"extraCodeId": extra_code_id,
-		"battleIdRange": [abs(first_battle_id), abs(last_battle_id)],
-		"surprise": first_battle_id < 0,
-		"soundId": int(values[2]),
-		"messageId": int(values[3]),
-		"message": bundle.get_message(int(values[3])),
-		"lootMode": 0,
-		"treasureId": int(values[4]),
-		"battle": bundle.get_battle(first_battle_id),
-		"priestTurningEnabled": runtime_state.priest_turning_enabled,
-		"participantMode": "selected",
-	})
+	return _combat_opcode_runtime._execute_selective_battle(extra_code_id)
 
 
 func _execute_encounter(encounter_kind: String, encounter_id: int, start_slot := 0) -> Dictionary:
@@ -2516,74 +2241,24 @@ func _execute_random_text(extra_code_id: int) -> Dictionary:
 
 
 func _execute_priest_turning(enabled: bool) -> Dictionary:
-	runtime_state.set_priest_turning_enabled(enabled)
-	var message := PRIEST_TURNING_ENABLED_MESSAGE if enabled \
-		else PRIEST_TURNING_DISABLED_MESSAGE
-	return _yield_result("set_priest_turning", {
-		"enabled": enabled,
-		"soundId": 20004 if enabled else 10105,
-		"messageId": 0,
-		"message": {"id": 0, "text": message},
-	})
+	return _combat_opcode_runtime._execute_priest_turning(enabled)
 
 
 func _execute_battle_outcome(extra_code_id: int, gosub: bool) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Battle outcome branch references missing Extra Code row %d" % extra_code_id
-		)
-	var first_battle_id := int(values[0])
-	var last_battle_id := int(values[1]) if int(values[1]) != 0 else first_battle_id
-	pending_battle = {
-		"extraCodeId": extra_code_id,
-		"cowardMacroId": int(values[2]),
-		"gosub": gosub,
-	}
-	return _yield_result("start_battle", {
-		"extraCodeId": extra_code_id,
-		"battleIdRange": [abs(first_battle_id), abs(last_battle_id)],
-		"soundId": int(values[3]),
-		"messageId": int(values[4]),
-		"message": bundle.get_message(int(values[4])),
-		"lootMode": 0,
-		"battle": bundle.get_battle(first_battle_id),
-		"priestTurningEnabled": runtime_state.priest_turning_enabled,
-		"outcomeBranch": true,
-		"cowardMacroId": int(values[2]),
-	})
+	return _combat_opcode_runtime._execute_battle_outcome(
+		extra_code_id,
+		gosub
+	)
 
 
 func _execute_improved_selective_battle(
 	extra_code_id: int,
 	gosub: bool
 ) -> Dictionary:
-	var values := _extra_code_values(extra_code_id)
-	if values.is_empty():
-		return _halt_with_error(
-			"Improved selective battle references missing Extra Code row %d"
-			% extra_code_id
-		)
-	var first_battle_id := int(values[0])
-	var last_battle_id := int(values[1]) if int(values[1]) != 0 else first_battle_id
-	pending_battle = {
-		"extraCodeId": extra_code_id,
-		"cowardMacroId": int(values[4]),
-		"gosub": gosub,
-	}
-	return _yield_result("start_battle", {
-		"extraCodeId": extra_code_id,
-		"battleIdRange": [abs(first_battle_id), abs(last_battle_id)],
-		"soundId": int(values[2]),
-		"messageId": int(values[3]),
-		"message": bundle.get_message(int(values[3])),
-		"lootMode": 0,
-		"battle": bundle.get_battle(first_battle_id),
-		"priestTurningEnabled": runtime_state.priest_turning_enabled,
-		"participantMode": "selected",
-		"outcomeBranch": true,
-		"cowardMacroId": int(values[4]),
-	})
+	return _combat_opcode_runtime._execute_improved_selective_battle(
+		extra_code_id,
+		gosub
+	)
 
 
 func _execute_choice(extra_code_id: int, gosub: bool) -> Dictionary:
