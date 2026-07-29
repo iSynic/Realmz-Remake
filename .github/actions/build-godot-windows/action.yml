@@ -24,6 +24,14 @@ runs:
         mkdir -p ${{ inputs.build-dir }}/${{ inputs.platform-name }}
         godot --export-debug "${{ inputs.export-preset }}" --headless
 
+    - name: Build Windows scenario sandbox host
+      shell: pwsh
+      run: |
+        cargo build --release --manifest-path tools/scenario-sandbox-host/Cargo.toml
+        Copy-Item `
+          -LiteralPath "tools/scenario-sandbox-host/target/release/scenario-sandbox-host.exe" `
+          -Destination "${{ inputs.project-dir }}/${{ inputs.build-dir }}/${{ inputs.platform-name }}/scenario-sandbox-host.exe"
+
     - name: Compress Build Output
       id: compress
       shell: pwsh
