@@ -273,9 +273,76 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 		#print("ExMenu : cast "+spell.name+" on  :")
 		#for p in targets :
 			#print("    "+p.name)
-		
 
+		var scenario_spell_handled := false
+		var scenario_host: Variant = GameGlobal.classic_runtime_host
+		if is_instance_valid(scenario_host) \
+				and scenario_host.has_method("has_spell_behavior") \
+				and bool(scenario_host.call("has_spell_behavior", spell)):
+			var cast_context := {
+				"mode": "field",
+				"fromItem": not item.is_empty(),
+			}
+			var validation_result: Dictionary = await scenario_host.call(
+				"run_spell_behavior_hook",
+				spell,
+				"validate",
+				character,
+				targets,
+				powerlevel,
+				cast_context
+			)
+			if str(validation_result.get("status", "")) == "error":
+				push_error(str(validation_result.get(
+					"message",
+					"Scenario spell validation failed"
+				)))
+				return
+			if not bool(validation_result.get("valid", true)):
+				UI.ow_hud.spellcastMenu.hide()
+				return
 		character.on_ability_use(spell, powerlevel)
+		if is_instance_valid(scenario_host) \
+				and scenario_host.has_method("has_spell_behavior") \
+				and bool(scenario_host.call("has_spell_behavior", spell)):
+			var cast_result: Dictionary = await scenario_host.call(
+				"run_spell_behavior_hook",
+				spell,
+				"cast",
+				character,
+				targets,
+				powerlevel,
+				{"mode": "field", "fromItem": not item.is_empty()}
+			)
+			if str(cast_result.get("status", "")) == "error":
+				push_error(str(cast_result.get(
+					"message",
+					"Scenario spell cast behavior failed"
+				)))
+				return
+			var effect_result: Dictionary = await scenario_host.call(
+				"run_spell_behavior_hook",
+				spell,
+				"effect",
+				character,
+				targets,
+				powerlevel,
+				{"mode": "field", "fromItem": not item.is_empty()}
+			)
+			if str(effect_result.get("status", "")) == "error":
+				push_error(str(effect_result.get(
+					"message",
+					"Scenario spell effect behavior failed"
+				)))
+				return
+			scenario_spell_handled = bool(effect_result.get("handled", false))
+		if scenario_spell_handled:
+			UI.ow_hud._on_spell_menu_closed()
+			UI.ow_hud.updateCharPanelDisplay()
+			StateMachine.exit_ex_menu_state()
+			UI.ow_hud.spellcastMenu.hide()
+			UI.ow_hud.textRect.textLabel.parse_bbcode("")
+			return
 		var uses_group_effect: bool = spell.has_method("apply_classic_group_effect")
 		if uses_group_effect:
 			spell.apply_classic_group_effect(character, targets, powerlevel)

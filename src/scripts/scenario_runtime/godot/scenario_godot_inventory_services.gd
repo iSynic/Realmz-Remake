@@ -45,7 +45,8 @@ func restore_classic_save_state(saved_state: Dictionary) -> Dictionary:
 func scenario_item_behavior_context(
 	instance: Object,
 	user: Object = null,
-	target: Object = null
+	target: Object = null,
+	details := {}
 ) -> Dictionary:
 	if instance == null:
 		return _error("Scenario item behavior requires an item instance")
@@ -67,33 +68,37 @@ func scenario_item_behavior_context(
 		var state_value: Variant = instance.call("state_data")
 		if state_value is Dictionary:
 			instance_state = state_value.duplicate(true)
+	var request := {
+		"item": {
+			"definitionId": str(instance.get("definition_id")),
+			"instanceId": str(instance.get("instance_id")),
+			"charges": int(instance.get("charges")),
+			"state": instance_state,
+		},
+		"definition": {
+			"id": str(definition.get("definition_id")),
+			"name": str(definition.get("name")),
+		},
+		"user": _scenario_creature_snapshot(user),
+		"target": _scenario_creature_snapshot(target),
+	}
+	if details is Dictionary and not details.is_empty():
+		request["event"] = details.duplicate(true)
 	return {
 		"status": "ok",
 		"targetIds": target_ids,
-		"request": {
-			"item": {
-				"definitionId": str(instance.get("definition_id")),
-				"instanceId": str(instance.get("instance_id")),
-				"charges": int(instance.get("charges")),
-				"state": instance_state,
-			},
-			"definition": {
-				"id": str(definition.get("definition_id")),
-				"name": str(definition.get("name")),
-			},
-			"user": _scenario_creature_snapshot(user),
-			"target": _scenario_creature_snapshot(target),
-		},
+		"request": request,
 	}
 
 
 func _scenario_creature_snapshot(creature: Object) -> Dictionary:
 	if creature == null:
 		return {}
-	var health := int(creature.call("get_stat", "curHP")) \
-		if creature.has_method("get_stat") else 0
-	var maximum_health := int(creature.call("get_stat", "maxHP")) \
-		if creature.has_method("get_stat") else health
+	var stats: Variant = creature.get("stats")
+	if not (stats is Dictionary):
+		stats = {}
+	var health := int(stats.get("curHP", 0))
+	var maximum_health := int(stats.get("maxHP", health))
 	return {
 		"id": str(creature.get_instance_id()),
 		"name": str(creature.get("name")),
@@ -194,6 +199,47 @@ func _take_party_wealth_with_warning(payload: Dictionary) -> Dictionary:
 	return result
 
 
+func _take_scenario_wealth(payload: Dictionary) -> Dictionary:
+	var requested := [
+		maxi(0, int(payload.get("gold", 0))),
+		maxi(0, int(payload.get("gems", 0))),
+		maxi(0, int(payload.get("jewelry", 0))),
+	]
+	var wealth := _query_party_wealth()
+	if str(wealth.get("status", "")) == "error":
+		return wealth
+	var available := [
+		int(wealth.get("gold", 0)),
+		int(wealth.get("gems", 0)),
+		int(wealth.get("jewelry", 0)),
+	]
+	for index: int in 3:
+		if requested[index] > available[index]:
+			return {
+				"paid": false,
+				"requested": requested,
+				"available": available,
+			}
+	var removed := [0, 0, 0]
+	for index: int in 3:
+		if requested[index] == 0:
+			continue
+		var result: Dictionary = service_owner.call(
+			"_take_party_wealth",
+			{"currency": index, "amount": requested[index]}
+		)
+		if str(result.get("status", "")) == "error" \
+				or not bool(result.get("paid", false)):
+			return _error(
+				"Scenario wealth changed during an atomic payment"
+			)
+		removed[index] = requested[index]
+	return {
+		"paid": true,
+		"removed": removed,
+	}
+
+
 func _clear_party_currency(payload: Dictionary) -> Dictionary:
 	var game_global: Object = _autoload("GameGlobal")
 	if game_global == null:
@@ -275,13 +321,37 @@ func _store_party_equipment(payload: Dictionary) -> Dictionary:
 
 
 func _load_shop(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.inventory.open-shop":
+		if service_owner.classic_bundle == null:
+			return _error("Scenario shop catalog is unavailable")
+		var shop_id := int(routed_payload.get("shopId", -1))
+		var shop: Dictionary = service_owner.classic_bundle.get_shop(shop_id)
+		if shop.is_empty():
+			return _error("Scenario shop %d is unavailable" % shop_id)
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			shop = runtime_state.get_effective_shop(shop)
+		routed_payload["shop"] = shop
+		routed_payload["acceptRanges"] = [0, 0, 0, 0]
+		var item_texts: Array = []
+		var item_text_ids: Array = (
+			service_owner.classic_bundle.item_texts_by_id.keys()
+		)
+		item_text_ids.sort()
+		for item_text_id: Variant in item_text_ids:
+			item_texts.append(
+				service_owner.classic_bundle.item_texts_by_id[item_text_id]
+			)
+		routed_payload["itemTexts"] = item_texts
 	var node_access: Object = _autoload("NodeAccess")
 	var resources: Object = node_access.__Resources() if node_access != null else null
 	if resources == null:
 		return _error("Realmz item resources are unavailable")
 	var built: Dictionary = service_owner.call(
 		"build_shop_inventory_from_catalog",
-		payload,
+		routed_payload,
 		resources
 	)
 	if str(built.get("status", "")) == "error":
@@ -289,7 +359,9 @@ func _load_shop(payload: Dictionary) -> Dictionary:
 	var game_global: Object = _autoload("GameGlobal")
 	if game_global == null:
 		return _error("Realmz game state is unavailable")
-	var shop_name := "classic_shop_%d" % int(payload.get("shopId", 0))
+	var shop_name := "classic_shop_%d" % int(
+		routed_payload.get("shopId", 0)
+	)
 	if not game_global.shops_dict.has(shop_name):
 		game_global.shops_dict[shop_name] = built["shop"]
 	else:
@@ -310,7 +382,7 @@ func _load_shop(payload: Dictionary) -> Dictionary:
 	):
 		ui.ow_hud._sync_shop_control()
 
-	if bool(payload.get("openImmediately", false)):
+	if bool(routed_payload.get("openImmediately", false)):
 		if ui == null or ui.ow_hud == null or ui.ow_hud.inventoryRect == null:
 			return _error("Realmz shop UI is unavailable")
 		if service_owner.call("_selected_character") == null:
@@ -333,22 +405,49 @@ func _load_shop(payload: Dictionary) -> Dictionary:
 
 
 func _alter_shop(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.inventory.change-shop":
+		if service_owner.classic_bundle == null:
+			return _error("Scenario shop catalog is unavailable")
+		var shop_id := int(routed_payload.get("shopId", -1))
+		var authored_shop: Dictionary = service_owner.classic_bundle.get_shop(
+			shop_id
+		)
+		if authored_shop.is_empty():
+			return _error("Scenario shop %d is unavailable" % shop_id)
+		var runtime_state := _classic_runtime_state()
+		if runtime_state == null:
+			return _error("Scenario shop state is unavailable")
+		var effective: Dictionary = runtime_state.alter_shop(
+			authored_shop,
+			int(routed_payload.get("inflationDelta", 0)),
+			int(routed_payload.get("itemId", 0)),
+			int(routed_payload.get("quantityDelta", 0))
+		)
+		if effective.is_empty():
+			return _error("Scenario shop %d could not be changed" % shop_id)
+		routed_payload["shop"] = effective
 	var game_global: Object = _autoload("GameGlobal")
 	if game_global == null:
 		return _error("Realmz game state is unavailable")
-	var shop_name := "classic_shop_%d" % int(payload.get("shopId", 0))
+	var shop_name := "classic_shop_%d" % int(routed_payload.get("shopId", 0))
 	if not game_global.shops_dict.has(shop_name):
 		return {
 			"shopName": shop_name,
 			"loaded": false,
 			"persisted": true,
+			"matchingSlots": _shop_matching_slots(
+				routed_payload.get("shop", {}),
+				int(routed_payload.get("itemId", 0))
+			),
 		}
 	var native_shop: Variant = game_global.shops_dict[shop_name]
 	if not (native_shop is Dictionary):
 		return _error("Loaded Classic shop state is invalid")
 	var result: Dictionary = service_owner.call(
 		"apply_classic_shop_mutation",
-		payload,
+		routed_payload,
 		native_shop
 	)
 	result["shopName"] = shop_name
@@ -357,14 +456,41 @@ func _alter_shop(payload: Dictionary) -> Dictionary:
 	return result
 
 
+static func _shop_matching_slots(shop_value: Variant, item_id: int) -> int:
+	if not (shop_value is Dictionary):
+		return 0
+	var item_ids: Variant = shop_value.get("itemIds", [])
+	if not (item_ids is Array):
+		return 0
+	var matches := 0
+	for value: Variant in item_ids:
+		if int(value) == item_id:
+			matches += 1
+	return matches
+
+
 func _give_treasure(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.inventory.give-treasure":
+		if service_owner.classic_bundle == null:
+			return _error("Scenario treasure catalog is unavailable")
+		var treasure_id := int(routed_payload.get("treasureId", -1))
+		var treasure: Dictionary = (
+			service_owner.classic_bundle.get_treasure(treasure_id)
+		)
+		if treasure.is_empty():
+			return _error(
+				"Scenario treasure %d is unavailable" % treasure_id
+			)
+		routed_payload["treasure"] = treasure
 	var node_access: Object = _autoload("NodeAccess")
 	var resources: Object = node_access.__Resources() if node_access != null else null
 	if resources == null:
 		return _error("Realmz item resources are unavailable")
 	var delivery: Dictionary = service_owner.call(
 		"build_treasure_delivery_from_catalog",
-		payload,
+		routed_payload,
 		resources
 	)
 	if str(delivery.get("status", "")) == "error":

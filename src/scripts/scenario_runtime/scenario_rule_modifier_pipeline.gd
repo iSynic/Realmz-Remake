@@ -76,9 +76,9 @@ func resolve(event_id: String, base_value: float, context := {}) -> Dictionary:
 				"value": current,
 			})
 	if behavior_runner != null \
-			and behavior_runner.has_method("run_behavior_attachments"):
-		var attachment_result: Dictionary = await behavior_runner.call(
-			"run_behavior_attachments",
+			and behavior_runner.has_method("run_behavior_attachments_pure"):
+		var attachment_result: Dictionary = behavior_runner.call(
+			"run_behavior_attachments_pure",
 			"rule-modifier",
 			event_id,
 			"rule",

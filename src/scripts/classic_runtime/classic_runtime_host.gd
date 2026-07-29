@@ -24,6 +24,9 @@ var command_context: Dictionary = {}
 var nested_trigger_active := false
 var restored_continuation_pending := false
 var _bound_behavior_active := false
+var _bound_behavior_depth := 0
+var _campaign_completion_active := false
+var _script_event_queue_draining := false
 
 
 func _init() -> void:
@@ -120,49 +123,46 @@ func run_bound_behavior(
 	arguments: Dictionary,
 	context := {}
 ) -> Dictionary:
-	if _bound_behavior_active:
-		return {
-			"status": "error",
-			"message": "Scenario behavior dispatch cannot recursively invoke a provider",
-		}
 	if runtime == null or runtime.interpreter == null:
 		return {"status": "error", "message": "Scenario interpreter is unavailable"}
+	_bound_behavior_depth += 1
 	_bound_behavior_active = true
-	var step: ScenarioStepResult = runtime.interpreter.execute_scenario_script(
+	var step: ScenarioStepResult = runtime.interpreter.execute_nested_scenario_script(
 		behavior_id,
 		arguments,
 		context
 	)
 	for _iteration: int in range(4096):
 		if step == null or not step.is_valid():
-			_bound_behavior_active = false
-			return {"status": "error", "message": "Scenario behavior returned an invalid step"}
+			return _complete_bound_behavior({
+				"status": "error",
+				"message": "Scenario behavior returned an invalid step",
+			})
 		match step.kind:
 			ScenarioStepResult.CONTINUE, ScenarioStepResult.RETURN:
-				_bound_behavior_active = false
-				return {"status": "ok", "value": step.data.get("value")}
+				return _complete_bound_behavior({
+					"status": "ok",
+					"value": step.data.get("value"),
+				})
 			ScenarioStepResult.HALT:
-				_bound_behavior_active = false
-				return {
+				return _complete_bound_behavior({
 					"status": "ok",
 					"halted": true,
 					"value": step.data.get("value"),
-				}
+				})
 			ScenarioStepResult.ERROR:
-				_bound_behavior_active = false
-				return {
+				return _complete_bound_behavior({
 					"status": "error",
 					"message": step.data.get("message", "Scenario behavior failed"),
-				}
+				})
 			ScenarioStepResult.YIELD:
 				var command_id := str(step.data.get("commandId", ""))
 				var request: Variant = step.data.get("request", {})
 				if command_router == null or not (request is Dictionary):
-					_bound_behavior_active = false
-					return {
+					return _complete_bound_behavior({
 						"status": "error",
 						"message": "Scenario behavior yielded an invalid command",
-					}
+					})
 				command_started.emit(command_id, request)
 				var response: Dictionary = await command_router.route(
 					command_id,
@@ -170,21 +170,150 @@ func run_bound_behavior(
 				)
 				command_finished.emit(command_id, response)
 				if str(response.get("status", "")) == "error":
-					_bound_behavior_active = false
-					return response
+					return _complete_bound_behavior(response)
 				step = runtime.interpreter.resume_scenario_script(response)
 			_:
-				_bound_behavior_active = false
-				return {
+				return _complete_bound_behavior({
 					"status": "error",
 					"message": "Scenario provider behavior cannot return '%s'"
 						% step.kind,
-				}
-	_bound_behavior_active = false
-	return {
+				})
+	return _complete_bound_behavior({
 		"status": "error",
 		"message": "Scenario behavior exceeded its routed command limit",
-	}
+	})
+
+
+func run_bound_behavior_pure(
+	behavior_id: String,
+	arguments: Dictionary,
+	context := {}
+) -> Dictionary:
+	if runtime == null or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return {"status": "error", "message": "Scenario interpreter is unavailable"}
+	if not runtime.interpreter.scenario_script_runtime.behavior_hook_is_pure(
+		behavior_id
+	):
+		return {
+			"status": "error",
+			"message": "Scenario behavior '%s' is not a pure hook" % behavior_id,
+		}
+	_bound_behavior_depth += 1
+	_bound_behavior_active = true
+	var step: ScenarioStepResult = runtime.interpreter.execute_nested_scenario_script(
+		behavior_id,
+		arguments,
+		context
+	)
+	for _iteration: int in range(4096):
+		if step == null or not step.is_valid():
+			return _complete_bound_behavior({
+				"status": "error",
+				"message": "Pure scenario behavior returned an invalid step",
+			})
+		match step.kind:
+			ScenarioStepResult.CONTINUE, ScenarioStepResult.RETURN:
+				return _complete_bound_behavior({
+					"status": "ok",
+					"value": step.data.get("value"),
+				})
+			ScenarioStepResult.HALT:
+				return _complete_bound_behavior({
+					"status": "ok",
+					"halted": true,
+					"value": step.data.get("value"),
+				})
+			ScenarioStepResult.ERROR:
+				return _complete_bound_behavior({
+					"status": "error",
+					"message": step.data.get(
+						"message",
+						"Pure scenario behavior failed"
+					),
+				})
+			ScenarioStepResult.YIELD:
+				return _complete_bound_behavior({
+					"status": "error",
+					"message": (
+						"Pure scenario behavior '%s' attempted to yield"
+						% behavior_id
+					),
+				})
+			_:
+				return _complete_bound_behavior({
+					"status": "error",
+					"message": "Pure scenario behavior cannot return '%s'"
+						% step.kind,
+				})
+	return _complete_bound_behavior({
+		"status": "error",
+		"message": "Pure scenario behavior exceeded its execution limit",
+	})
+
+
+func _complete_bound_behavior(result: Dictionary) -> Dictionary:
+	var restore_result := runtime.interpreter.complete_nested_scenario_script() \
+		if runtime != null and runtime.interpreter != null \
+		else {"status": "ok"}
+	_bound_behavior_depth = maxi(0, _bound_behavior_depth - 1)
+	_bound_behavior_active = _bound_behavior_depth > 0
+	if str(restore_result.get("status", "")) == "error":
+		result = restore_result
+	if runtime != null \
+			and runtime.interpreter != null \
+			and runtime.interpreter.scenario_script_runtime != null \
+			and not _bound_behavior_active \
+			and not runtime.interpreter.scenario_script_runtime.event_queue.is_empty():
+		call_deferred("_drain_script_event_queue")
+	return result
+
+
+func _queue_script_event(kind: String, hook: String, request: Dictionary) -> Dictionary:
+	if runtime == null \
+			or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return {"status": "error", "message": "Scenario event queue is unavailable"}
+	var queue: Array = runtime.interpreter.scenario_script_runtime.event_queue
+	if queue.size() >= 256:
+		return {"status": "error", "message": "Scenario event queue limit exceeded"}
+	queue.append({
+		"kind": kind,
+		"hook": hook,
+		"request": request.duplicate(true),
+	})
+	return {"status": "ok", "queued": true}
+
+
+func _drain_script_event_queue() -> void:
+	if _script_event_queue_draining or _bound_behavior_active \
+			or runtime == null or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return
+	_script_event_queue_draining = true
+	var queue: Array = runtime.interpreter.scenario_script_runtime.event_queue
+	while not queue.is_empty() and not _bound_behavior_active:
+		var event_value: Variant = queue.pop_front()
+		if not (event_value is Dictionary):
+			continue
+		var event: Dictionary = event_value
+		var result := {"status": "ok"}
+		if str(event.get("kind", "")) == "lifecycle":
+			result = await emit_lifecycle_event(
+				str(event.get("hook", "")),
+				event.get("request", {})
+			)
+		elif str(event.get("kind", "")) == "spell-effects":
+			result = await process_spell_effect_event(
+				str(event.get("hook", "")),
+				event.get("request", {})
+			)
+		if str(result.get("status", "")) == "error":
+			push_error(str(result.get(
+				"message",
+				"Queued scenario event failed"
+			)))
+	_script_event_queue_draining = false
 
 
 func run_behavior_attachments(
@@ -224,6 +353,53 @@ func run_behavior_attachments(
 		if str(arguments_result.get("status", "")) != "ok":
 			return arguments_result
 		var result: Dictionary = await run_bound_behavior(
+			str(binding.get("behaviorId", "")),
+			arguments_result.get("arguments", {}),
+			context
+		)
+		if str(result.get("status", "")) == "error":
+			return result
+		results.append(result)
+	return {"status": "ok", "handled": true, "results": results}
+
+
+func run_behavior_attachments_pure(
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_ids: Array,
+	request: Dictionary
+) -> Dictionary:
+	if runtime == null or runtime.interpreter == null:
+		return {"handled": false}
+	var bindings: Array = runtime.interpreter.matching_scenario_behavior_bindings(
+		role,
+		hook,
+		target_kind,
+		target_ids,
+		int(request.get("slot", -1))
+	)
+	if bindings.is_empty():
+		return {"handled": false}
+	var results: Array = []
+	for binding_value: Variant in bindings:
+		var binding: Dictionary = binding_value
+		var context := {
+			"role": role,
+			"hook": hook,
+			"targetKind": target_kind,
+			"targetId": str(binding.get("recordId", "")),
+			"request": request.duplicate(true),
+		}
+		var arguments_result: Dictionary = (
+			runtime.interpreter.resolve_scenario_behavior_arguments(
+				binding.get("arguments", {}),
+				context
+			)
+		)
+		if str(arguments_result.get("status", "")) != "ok":
+			return arguments_result
+		var result: Dictionary = run_bound_behavior_pure(
 			str(binding.get("behaviorId", "")),
 			arguments_result.get("arguments", {}),
 			context
@@ -281,6 +457,323 @@ func run_item_behavior(
 		user,
 		target
 	)
+
+
+func run_item_behavior_pure(
+	instance: Object,
+	hook_kind: String,
+	user: Object = null,
+	target: Object = null,
+	details := {}
+) -> Dictionary:
+	if command_router == null:
+		return {"handled": false}
+	var port: Variant = command_router.port_for_command("query_party_wealth")
+	if port == null or not port.has_method("run_item_behavior_pure"):
+		return {"handled": false}
+	return port.call(
+		"run_item_behavior_pure",
+		instance,
+		hook_kind,
+		user,
+		target,
+		details
+	)
+
+
+func item_behavior_allows(
+	instance: Object,
+	hook_kind: String,
+	user: Object = null,
+	target: Object = null,
+	details := {}
+) -> Dictionary:
+	var result := run_item_behavior_pure(
+		instance,
+		hook_kind,
+		user,
+		target,
+		details
+	)
+	if str(result.get("status", "")) == "error":
+		return result
+	for outcome_value: Variant in result.get("outcomes", []):
+		if outcome_value is Dictionary \
+				and str(outcome_value.get("kind", "")) == "rejected":
+			return {
+				"status": "ok",
+				"handled": true,
+				"allowed": false,
+			}
+	return {
+		"status": "ok",
+		"handled": bool(result.get("handled", false)),
+		"allowed": true,
+	}
+
+
+func resolve_item_behavior_modifier(
+	instance: Object,
+	hook_kind: String,
+	user: Object,
+	target: Object,
+	base_value: float,
+	details := {}
+) -> Dictionary:
+	var request_details: Dictionary = (
+		details.duplicate(true) if details is Dictionary else {}
+	)
+	request_details["baseValue"] = base_value
+	var result := run_item_behavior_pure(
+		instance,
+		hook_kind,
+		user,
+		target,
+		request_details
+	)
+	if str(result.get("status", "")) == "error":
+		return result
+	var current := base_value
+	for outcome_value: Variant in result.get("outcomes", []):
+		if not (outcome_value is Dictionary):
+			return {
+				"status": "error",
+				"message": "Scenario item behavior returned an invalid outcome",
+			}
+		var outcome: Dictionary = outcome_value
+		if str(outcome.get("kind", "")) == "rejected":
+			return {
+				"status": "ok",
+				"handled": true,
+				"allowed": false,
+				"value": current,
+			}
+		current = (
+			(current + float(outcome.get("add", 0.0)))
+			* float(outcome.get("multiply", 1.0))
+		)
+		if outcome.has("minimum"):
+			current = maxf(current, float(outcome["minimum"]))
+		if outcome.has("maximum"):
+			current = minf(current, float(outcome["maximum"]))
+		if not is_finite(current):
+			return {
+				"status": "error",
+				"message": "Scenario item behavior produced a non-finite value",
+			}
+	return {
+		"status": "ok",
+		"handled": bool(result.get("handled", false)),
+		"allowed": true,
+		"value": current,
+	}
+
+
+func has_spell_behavior(spell: Object) -> bool:
+	if command_router == null:
+		return false
+	var port: Variant = command_router.port_for_command("query_party_members")
+	return (
+		port != null
+		and port.has_method("has_spell_behavior")
+		and bool(port.call("has_spell_behavior", spell))
+	)
+
+
+func run_spell_behavior(
+	spell: Object,
+	caster: Object,
+	targets: Array,
+	power: int,
+	cast_context := {}
+) -> Dictionary:
+	if command_router == null:
+		return {"handled": false}
+	var port: Variant = command_router.port_for_command("query_party_members")
+	if port == null or not port.has_method("run_spell_behavior"):
+		return {"handled": false}
+	return await port.call(
+		"run_spell_behavior",
+		spell,
+		caster,
+		targets,
+		power,
+		cast_context
+	)
+
+
+func run_spell_behavior_hook(
+	spell: Object,
+	hook: String,
+	caster: Object,
+	targets: Array,
+	power: int,
+	cast_context := {}
+) -> Dictionary:
+	if command_router == null:
+		return {"handled": false}
+	var port: Variant = command_router.port_for_command("query_party_members")
+	if port == null or not port.has_method("run_spell_behavior_hook"):
+		return {"handled": false}
+	return await port.call(
+		"run_spell_behavior_hook",
+		spell,
+		hook,
+		caster,
+		targets,
+		power,
+		cast_context
+	)
+
+
+func register_spell_behavior_effect(
+	target_ids: Array,
+	request: Dictionary,
+	outcome: Dictionary
+) -> Dictionary:
+	if runtime == null \
+			or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return {
+			"status": "error",
+			"message": "Scenario spell-effect runtime is unavailable",
+		}
+	return runtime.interpreter.scenario_script_runtime.register_spell_effect(
+		target_ids,
+		request,
+		outcome
+	)
+
+
+func complete_campaign(request := {}) -> Dictionary:
+	if runtime == null \
+			or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return {
+			"status": "error",
+			"message": "Scenario campaign-completion runtime is unavailable",
+		}
+	var script_runtime: ScenarioScriptRuntime = (
+		runtime.interpreter.scenario_script_runtime
+	)
+	if not script_runtime.campaign_completion.is_empty():
+		return {
+			"status": "ok",
+			"completed": true,
+			"alreadyCompleted": true,
+		}
+	if _campaign_completion_active:
+		return {
+			"status": "error",
+			"message": "Scenario campaign completion is already being dispatched",
+		}
+	_campaign_completion_active = true
+	var completion_request: Dictionary = (
+		request.duplicate(true) if request is Dictionary else {}
+	)
+	completion_request["event"] = "campaign-complete"
+	var marked := script_runtime.mark_campaign_complete(completion_request)
+	if str(marked.get("status", "")) == "error":
+		_campaign_completion_active = false
+		return marked
+	var lifecycle_result := await emit_lifecycle_event(
+		"campaign-complete",
+		completion_request
+	)
+	_campaign_completion_active = false
+	if str(lifecycle_result.get("status", "")) == "error":
+		return lifecycle_result
+	return {
+		"status": "ok",
+		"completed": true,
+		"alreadyCompleted": false,
+		"lifecycle": lifecycle_result,
+	}
+
+
+func process_spell_effect_event(
+	event_kind: String,
+	event := {}
+) -> Dictionary:
+	var event_request: Dictionary = (
+		event.duplicate(true) if event is Dictionary else {}
+	)
+	if _bound_behavior_active:
+		return _queue_script_event(
+			"spell-effects",
+			event_kind,
+			event_request
+		)
+	if runtime == null \
+			or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return {"status": "ok", "handled": false, "deliveries": 0}
+	var advanced: Dictionary = (
+		runtime.interpreter.scenario_script_runtime.advance_spell_effects(
+			event_kind,
+			event_request
+		)
+	)
+	if str(advanced.get("status", "")) == "error":
+		return advanced
+	return await _dispatch_spell_effect_deliveries(
+		advanced.get("deliveries", [])
+	)
+
+
+func expire_spell_effect_intervals(intervals: Array) -> Dictionary:
+	if runtime == null \
+			or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return {"status": "ok", "handled": false, "deliveries": 0}
+	var expired: Dictionary = (
+		runtime.interpreter.scenario_script_runtime.expire_spell_effects(
+			intervals
+		)
+	)
+	if str(expired.get("status", "")) == "error":
+		return expired
+	return await _dispatch_spell_effect_deliveries(
+		expired.get("deliveries", [])
+	)
+
+
+func _dispatch_spell_effect_deliveries(deliveries: Array) -> Dictionary:
+	if command_router == null:
+		return {
+			"status": "error",
+			"message": "Scenario spell-effect command router is unavailable",
+		}
+	var port: Variant = command_router.port_for_command("query_party_members")
+	if port == null or not port.has_method("run_stored_spell_behavior_hook"):
+		return {
+			"status": "error",
+			"message": "Scenario spell-effect port is unavailable",
+		}
+	var handled := false
+	var delivered := 0
+	for delivery_value: Variant in deliveries:
+		if not (delivery_value is Dictionary):
+			return {
+				"status": "error",
+				"message": "Scenario spell-effect delivery is malformed",
+			}
+		var delivery: Dictionary = delivery_value
+		var result: Dictionary = await port.call(
+			"run_stored_spell_behavior_hook",
+			delivery.get("effect", {}),
+			str(delivery.get("hook", "")),
+			delivery.get("event", {})
+		)
+		if str(result.get("status", "")) == "error":
+			return result
+		handled = handled or bool(result.get("handled", false))
+		delivered += 1
+	return {
+		"status": "ok",
+		"handled": handled,
+		"deliveries": delivered,
+	}
 
 
 func has_monster_ai_behavior(monster: Object) -> bool:
@@ -365,6 +858,24 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 	var event_request: Dictionary = (
 		request.duplicate(true) if request is Dictionary else {}
 	)
+	if _bound_behavior_active:
+		return _queue_script_event("lifecycle", hook, event_request)
+	var spell_effect_result := {"status": "ok", "handled": false}
+	match hook:
+		"time-advanced":
+			spell_effect_result = await process_spell_effect_event(
+				"time",
+				event_request
+			)
+		"party-moved":
+			spell_effect_result = await process_spell_effect_event(
+				"move",
+				event_request
+			)
+		"battle-complete":
+			spell_effect_result = await expire_spell_effect_intervals(["round"])
+	if str(spell_effect_result.get("status", "")) == "error":
+		return spell_effect_result
 	event_request["hook"] = hook
 	event_request["campaignId"] = str(runtime.bundle.manifest.get("id", ""))
 	var attachment_result: Dictionary = await run_behavior_attachments(
@@ -381,7 +892,13 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 		{}
 	).get("bindings", {}).get("lifecycle", {})
 	if not (lifecycle_bindings is Dictionary):
-		return {"status": "ok", "handled": bool(attachment_result.get("handled", false))}
+		return {
+			"status": "ok",
+			"handled": (
+				bool(attachment_result.get("handled", false))
+				or bool(spell_effect_result.get("handled", false))
+			),
+		}
 	var candidate_keys: Array = [hook, str(event_request.get("event", ""))]
 	for binding_key: Variant in candidate_keys:
 		if str(binding_key).is_empty() or not lifecycle_bindings.has(binding_key):
@@ -413,7 +930,13 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 			}
 		if str(provider_result.get("status", "")) == "error":
 			return provider_result
-	return {"status": "ok", "handled": bool(attachment_result.get("handled", false))}
+	return {
+		"status": "ok",
+		"handled": (
+			bool(attachment_result.get("handled", false))
+			or bool(spell_effect_result.get("handled", false))
+		),
+	}
 
 
 func has_trigger(trigger_id: String) -> bool:

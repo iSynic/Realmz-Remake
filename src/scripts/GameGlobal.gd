@@ -838,6 +838,45 @@ func register_classic_runtime_host(host: Object) -> void:
 		)
 
 
+func emit_classic_lifecycle_event(hook: String, request := {}) -> Dictionary:
+	if not is_instance_valid(classic_runtime_host) \
+			or not classic_runtime_host.has_method("emit_lifecycle_event"):
+		return {"status": "ok", "handled": false}
+	var event_request: Dictionary = (
+		request.duplicate(true) if request is Dictionary else {}
+	)
+	var result: Variant = await classic_runtime_host.call(
+		"emit_lifecycle_event",
+		hook,
+		event_request
+	)
+	return result if result is Dictionary else {
+		"status": "error",
+		"message": "Scenario lifecycle event returned an invalid response",
+	}
+
+
+func process_classic_spell_effect_event(
+	event_kind: String,
+	request := {}
+) -> Dictionary:
+	if not is_instance_valid(classic_runtime_host) \
+			or not classic_runtime_host.has_method("process_spell_effect_event"):
+		return {"status": "ok", "handled": false, "deliveries": 0}
+	var event_request: Dictionary = (
+		request.duplicate(true) if request is Dictionary else {}
+	)
+	var result: Variant = await classic_runtime_host.call(
+		"process_spell_effect_event",
+		event_kind,
+		event_request
+	)
+	return result if result is Dictionary else {
+		"status": "error",
+		"message": "Scenario spell-effect event returned an invalid response",
+	}
+
+
 func clear_classic_runtime_host(host: Object = null) -> void:
 	if host == null or classic_runtime_host == host:
 		if is_instance_valid(classic_runtime_host):
@@ -1485,12 +1524,34 @@ func rest() -> bool:
 			or classic_camping_disabled
 		):
 			return false
+		var previous_time := time
+		var start_result := await emit_classic_lifecycle_event("rest-start", {
+			"event": "rest-start",
+			"previousTime": previous_time,
+			"camping": camping,
+		})
+		if str(start_result.get("status", "")) == "error":
+			push_error(str(start_result.get("message", "Scenario rest-start behavior failed")))
+			return false
 		set_party_fatigue(ClassicRestScript.fatigue_before_rest(fatigue))
 		pass_time(classic_timeclick_pass_time_units(
 			ClassicRestScript.REST_TIMECLICKS,
 			_current_classic_base_scale()
 		))
 		await _check_classic_random_encounter()
+		var complete_result := await emit_classic_lifecycle_event("rest-complete", {
+			"event": "rest-complete",
+			"previousTime": previous_time,
+			"currentTime": time,
+			"elapsedSeconds": maxi(0, time - previous_time),
+			"camping": camping,
+		})
+		if str(complete_result.get("status", "")) == "error":
+			push_error(str(complete_result.get(
+				"message",
+				"Scenario rest-complete behavior failed"
+			)))
+			return false
 		return true
 	var mult : float = -2.0 if camping else -1.0
 	pass_time(5, mult)
@@ -1698,6 +1759,26 @@ func _consume_classic_rest_ration() -> bool:
 #if pc_participating is empty, use all PC
 func start_battle(battlename : String, mapname : String, is_pos_relative : bool, is_ambush : bool, allow_loss : bool, allow_escape : bool, npcs_allowed : bool, pc_participating : Array, battle_overrides := {}) :
 	print("GameGlobal start_battle " + battlename)
+	var participant_names: Array = []
+	for participant_value: Variant in pc_participating:
+		participant_names.append(
+			str(participant_value.get("name"))
+				if participant_value is Object else str(participant_value)
+		)
+	var battle_start_result := await emit_classic_lifecycle_event("battle-start", {
+		"event": "battle-start",
+		"battleName": battlename,
+		"battleMap": mapname,
+		"ambush": is_ambush,
+		"allowLoss": allow_loss,
+		"allowEscape": allow_escape,
+		"participantNames": participant_names,
+	})
+	if str(battle_start_result.get("status", "")) == "error":
+		push_error(str(battle_start_result.get(
+			"message",
+			"Scenario battle-start behavior failed"
+		)))
 	StateMachine.combat_state.reset_battle_completion()
 	var battle_data : Dictionary = GameGlobal.cmp_resources.battles_book[battlename].duplicate()
 	for override_key: Variant in battle_overrides:
@@ -1734,6 +1815,9 @@ func end_battle(
 ) :
 	if not StateMachine.combat_state.begin_battle_completion():
 		return
+	var scenario_defeated_characters: Array = (
+		StateMachine.combat_state.battle_dead_party_members.duplicate()
+	)
 	print("GameGlobal end_battle", last_exploration_map_name,wonfledlost)
 	StateMachine.combat_state.battle_creatures_yet_to_act_btns.clear()
 	StateMachine.combat_state.all_battle_creatures_btns.clear()
@@ -1839,6 +1923,11 @@ func end_battle(
 					SfxPlayer.stream = cmp_resources.sounds_book["party loss.wav"]
 					SfxPlayer.play()
 				ScriptHelperFuncs.play_sound('party loss.wav', false)
+				await _emit_classic_battle_lifecycle_outcomes(
+					wonfledlost,
+					scenario_defeated_characters,
+					true
+				)
 				StateMachine.transition_to("Inactive",{})
 				##GameState._state = eGameStates.unchecked
 				##GameState._combat_state = eCombatStates.unchecked
@@ -1854,6 +1943,11 @@ func end_battle(
 	#cur_battle_data.clear() CLEARED THE RESOURCE DICT  LOL
 	allow_next_battle_loot = true
 	StateMachine.combat_state.classic_fumbled_items.clear()
+	await _emit_classic_battle_lifecycle_outcomes(
+		wonfledlost,
+		scenario_defeated_characters,
+		false
+	)
 	print("GAMEGLOBAL emit_signal('battle_end', wonfledlost)")
 	emit_signal("battle_end", wonfledlost)
 	map.focuscharacter = map.owcharacter
@@ -1861,6 +1955,59 @@ func end_battle(
 	# why is  set_tile_position still needed after change_map ?
 	map.focuscharacter.set_tile_position(pos_when_battle_started)
 	return
+
+
+func _emit_classic_battle_lifecycle_outcomes(
+	outcome: String,
+	defeated_characters: Array,
+	party_defeated: bool
+) -> void:
+	for character_value: Variant in defeated_characters:
+		var character_name := ""
+		if character_value is Object:
+			var defeated_creature: Variant = character_value.get("creature") \
+				if character_value.get("creature") != null else character_value
+			character_name = str(defeated_creature.get("name")) \
+				if defeated_creature is Object else str(defeated_creature)
+		else:
+			character_name = str(character_value)
+		var defeated_result := await emit_classic_lifecycle_event(
+			"character-defeated",
+			{
+				"event": "character-defeated",
+				"characterName": character_name,
+				"outcome": outcome,
+			}
+		)
+		if str(defeated_result.get("status", "")) == "error":
+			push_error(str(defeated_result.get(
+				"message",
+				"Scenario character-defeated behavior failed"
+			)))
+	if party_defeated:
+		var party_result := await emit_classic_lifecycle_event(
+			"party-defeated",
+			{"event": "party-defeated", "outcome": outcome}
+		)
+		if str(party_result.get("status", "")) == "error":
+			push_error(str(party_result.get(
+				"message",
+				"Scenario party-defeated behavior failed"
+			)))
+	var complete_result := await emit_classic_lifecycle_event(
+		"battle-complete",
+		{
+			"event": "battle-complete",
+			"outcome": outcome,
+			"defeatedCharacterCount": defeated_characters.size(),
+			"partyDefeated": party_defeated,
+		}
+	)
+	if str(complete_result.get("status", "")) == "error":
+		push_error(str(complete_result.get(
+			"message",
+			"Scenario battle-complete behavior failed"
+		)))
 
 func who_is_at_tile(pos : Vector2) -> CombatCreaButton : #for battle, returns the creature COMBAT BUTTON at that position
 #	var all_creatures : Array = []
@@ -1971,11 +2118,29 @@ func calculate_melee_accuracy(attacker : Creature, defender : Creature, weapon: 
 		0.0,
 		1.0
 	)
-	return ClassicProtectionFromFoeScript.adjust_melee_accuracy(
+	accuracy = ClassicProtectionFromFoeScript.adjust_melee_accuracy(
 		accuracy,
 		attacker,
 		defender
 	)
+	if should_check_script:
+		accuracy = _scenario_item_modifier(
+			weapon_instance,
+			"melee_accuracy",
+			attacker,
+			defender,
+			accuracy,
+			{"phase": "accuracy"}
+		)
+		accuracy = _scenario_equipped_item_modifiers(
+			defender,
+			"defense",
+			attacker,
+			defender,
+			accuracy,
+			{"phase": "accuracy"}
+		)
+	return clampf(accuracy, 0.0, 1.0)
 
 
 func _classic_melee_evasion(defender: Variant) -> float:
@@ -2012,7 +2177,17 @@ func calculate_melee_damage(attacker : Creature, defender : Creature, weapon: Va
 			is_crit,
 			crit_mult
 		)
-		return apply_classic_party_weapon_protection(custom_damage, attacker, defender)
+		return _apply_scenario_item_damage_modifiers(
+			apply_classic_party_weapon_protection(
+				custom_damage,
+				attacker,
+				defender
+			),
+			weapon_instance,
+			attacker,
+			defender,
+			should_check_script
+		)
 	#if weapon["name"] == "NO_MELEE_WEAPON" :
 		#print("GameGlobal calculate_melee_damage NO_MELEE_WEAPON : ", weapon)
 	var wpn_dmg_types: Dictionary = definition.weapon_damage() \
@@ -2084,7 +2259,116 @@ func calculate_melee_damage(attacker : Creature, defender : Creature, weapon: Va
 		is_crit,
 		crit_mult
 	)
-	return apply_classic_party_weapon_protection(damage_detail, attacker, defender)
+	return _apply_scenario_item_damage_modifiers(
+		apply_classic_party_weapon_protection(
+			damage_detail,
+			attacker,
+			defender
+		),
+		weapon_instance,
+		attacker,
+		defender,
+		should_check_script
+	)
+
+
+func _apply_scenario_item_damage_modifiers(
+	damage_detail: Dictionary,
+	weapon_instance: ItemInstance,
+	attacker: Creature,
+	defender: Creature,
+	should_check_script: bool
+) -> Dictionary:
+	if not should_check_script:
+		return damage_detail
+	var base_total := float(damage_detail.get("total", 0.0))
+	var modified_total := _scenario_item_modifier(
+		weapon_instance,
+		"melee_attack",
+		attacker,
+		defender,
+		base_total,
+		{
+			"phase": "damage",
+			"critical": bool(damage_detail.get("is_crit", false)),
+		}
+	)
+	modified_total = _scenario_equipped_item_modifiers(
+		defender,
+		"defense",
+		attacker,
+		defender,
+		modified_total,
+		{
+			"phase": "damage",
+			"critical": bool(damage_detail.get("is_crit", false)),
+		}
+	)
+	var result := damage_detail.duplicate()
+	result["total"] = maxi(0, roundi(modified_total))
+	return result
+
+
+func _scenario_equipped_item_modifiers(
+	owner: Creature,
+	hook_kind: String,
+	user: Creature,
+	target: Creature,
+	base_value: float,
+	details: Dictionary
+) -> float:
+	var current := base_value
+	if owner == null:
+		return current
+	for instance: ItemInstance in owner.item_inventory:
+		if instance.equipped:
+			current = _scenario_item_modifier(
+				instance,
+				hook_kind,
+				user,
+				target,
+				current,
+				details
+			)
+	return current
+
+
+func _scenario_item_modifier(
+	instance: ItemInstance,
+	hook_kind: String,
+	user: Creature,
+	target: Creature,
+	base_value: float,
+	details: Dictionary
+) -> float:
+	if instance == null \
+			or not is_instance_valid(classic_runtime_host) \
+			or not classic_runtime_host.has_method("has_item_behavior") \
+			or not bool(classic_runtime_host.call(
+				"has_item_behavior",
+				instance,
+				hook_kind
+			)) \
+			or not classic_runtime_host.has_method(
+				"resolve_item_behavior_modifier"
+			):
+		return base_value
+	var result: Dictionary = classic_runtime_host.call(
+		"resolve_item_behavior_modifier",
+		instance,
+		hook_kind,
+		user,
+		target,
+		base_value,
+		details
+	)
+	if str(result.get("status", "")) == "error":
+		push_error(str(result.get(
+			"message",
+			"Scenario item modifier failed"
+		)))
+		return base_value
+	return float(result.get("value", base_value))
 
 
 func apply_classic_foe_type_damage_bonus(

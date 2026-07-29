@@ -184,6 +184,7 @@ var level : int = 0 # Except for Players, this is only indicative of a Creature'
 
 var abilities : Array = [] #Melee attack, magic, items etc
 var item_inventory: Array[ItemInstance] = []
+var _scenario_passive_hook_depth := 0
 # Retain the old property name as an alias for campaign scripts, but expose the
 # authoritative instances rather than a parallel dictionary model.
 var inventory: Array[ItemInstance] = item_inventory
@@ -460,7 +461,87 @@ func get_stat(statname : String) :
 	for t in traits :
 		if t.has_method("_on_get_stat") :
 			this_stat = t._on_get_stat(statname, this_stat)
+	this_stat = _apply_scenario_passive_item_modifiers(statname, this_stat)
+	if not fractional_stats.has(statname):
+		this_stat = roundi(this_stat)
 	return this_stat
+
+
+func _apply_scenario_passive_item_modifiers(
+	stat_name: String,
+	base_value: Variant
+) -> Variant:
+	if _scenario_passive_hook_depth > 0 \
+			or not (base_value is int or base_value is float):
+		return base_value
+	var scenario_host: Variant = GameGlobal.classic_runtime_host
+	if not is_instance_valid(scenario_host) \
+			or not scenario_host.has_method("has_item_behavior") \
+			or not scenario_host.has_method("resolve_item_behavior_modifier"):
+		return base_value
+	_scenario_passive_hook_depth += 1
+	var current := float(base_value)
+	for instance: ItemInstance in item_inventory:
+		if not instance.equipped \
+				or not bool(scenario_host.call(
+					"has_item_behavior",
+					instance,
+					"passive"
+				)):
+			continue
+		var result: Dictionary = scenario_host.call(
+			"resolve_item_behavior_modifier",
+			instance,
+			"passive",
+			self,
+			self,
+			current,
+			{
+				"phase": "stat",
+				"stat": stat_name,
+			}
+		)
+		if str(result.get("status", "")) == "error":
+			push_error(str(result.get(
+				"message",
+				"Scenario passive item behavior failed"
+			)))
+			continue
+		current = float(result.get("value", current))
+	_scenario_passive_hook_depth = maxi(0, _scenario_passive_hook_depth - 1)
+	return current
+
+
+func _scenario_item_behavior_allows(
+	instance: ItemInstance,
+	hook_kind: String
+) -> bool:
+	var scenario_host: Variant = GameGlobal.classic_runtime_host
+	if not is_instance_valid(scenario_host) \
+			or not scenario_host.has_method("has_item_behavior") \
+			or not bool(scenario_host.call(
+				"has_item_behavior",
+				instance,
+				hook_kind
+			)):
+		return true
+	if not scenario_host.has_method("item_behavior_allows"):
+		return false
+	var result: Dictionary = scenario_host.call(
+		"item_behavior_allows",
+		instance,
+		hook_kind,
+		self,
+		self,
+		{"equipped": instance.equipped}
+	)
+	if str(result.get("status", "")) == "error":
+		push_error(str(result.get(
+			"message",
+			"Scenario item behavior permission failed"
+		)))
+		return false
+	return bool(result.get("allowed", true))
 
 # checks for weight or other limitations and scripts
 func can_add_inventory_item(item: Variant) ->bool :
@@ -1672,6 +1753,8 @@ func equip_item(item) -> bool :  #returns true iff could equip
 		return false
 	var item_slots := definition.slots()
 	print("CREATURE "+name+" equip_item "+definition.display_name_for(instance))
+	if not _scenario_item_behavior_allows(instance, "equip"):
+		return false
 	# Actually Equip the item
 	if can_equip_item(instance) :
 		if item_slots.has("Melee Weapon") :
@@ -1777,6 +1860,8 @@ func unequip_item(item, check_script = true) -> bool :
 				and sound_resources.sounds_book.has("generation error.ogg"):
 			SfxPlayer.stream = sound_resources.sounds_book["generation error.ogg"]
 			SfxPlayer.play()
+		return false
+	if not _scenario_item_behavior_allows(instance, "unequip"):
 		return false
 	# Actually Unequip the Item :
 	

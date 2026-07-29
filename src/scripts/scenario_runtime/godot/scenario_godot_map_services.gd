@@ -33,58 +33,200 @@ func _query_time(_payload: Dictionary = {}) -> Dictionary:
 
 
 func _set_map_tile(payload: Dictionary) -> Dictionary:
-	return service_owner.classic_map_bridge.set_tile(
-		payload,
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.map.set-tile":
+		routed_payload["tileValue"] = int(routed_payload.get("tile", -1))
+	var result: Dictionary = service_owner.classic_map_bridge.set_tile(
+		routed_payload,
 		_autoload("GameGlobal"),
 		_campaign_resources()
 	)
+	if str(result.get("status", "")) != "error" \
+			and str(routed_payload.get("_scenarioApiOperation", "")) \
+				== "core.map.set-tile":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			runtime_state.set_tile(
+				str(routed_payload.get("levelType", "")),
+				int(routed_payload.get("levelIndex", -1)),
+				int(routed_payload.get("x", -1)),
+				int(routed_payload.get("y", -1)),
+				int(routed_payload.get("tileValue", -1))
+			)
+	return result
 
 
 func _set_trigger_percent(payload: Dictionary) -> Dictionary:
-	return service_owner.classic_map_bridge.set_trigger_percent(
+	var result: Dictionary = service_owner.classic_map_bridge.set_trigger_percent(
 		payload,
 		_autoload("GameGlobal"),
 		_campaign_resources()
 	)
+	if str(result.get("status", "")) != "error" \
+			and str(payload.get("_scenarioApiOperation", "")) \
+				== "core.map.trigger-chance":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			for trigger_id_value: Variant in payload.get("triggerIds", []):
+				runtime_state.set_trigger_percent(
+					str(payload.get("levelType", "")),
+					int(payload.get("levelIndex", -1)),
+					int(trigger_id_value),
+					int(payload.get("percent", 0))
+				)
+	return result
 
 
 func _shift_party_position(payload: Dictionary) -> Dictionary:
-	return service_owner.classic_map_bridge.transition(
-		payload,
+	var routed_payload := payload.duplicate(true)
+	var runtime_state := _classic_runtime_state()
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.map.shift-party":
+		if runtime_state == null:
+			return _error("Scenario location state is unavailable")
+		routed_payload["levelType"] = str(runtime_state.level_type)
+		routed_payload["levelIndex"] = int(runtime_state.level_index)
+		routed_payload["x"] = int(runtime_state.x) + int(
+			routed_payload.get("dx", 0)
+		)
+		routed_payload["y"] = int(runtime_state.y) + int(
+			routed_payload.get("dy", 0)
+		)
+	var result: Dictionary = service_owner.classic_map_bridge.transition(
+		routed_payload,
 		_autoload("GameGlobal"),
 		_campaign_resources()
 	)
+	if str(result.get("status", "")) != "error" \
+			and runtime_state != null \
+			and str(routed_payload.get("_scenarioApiOperation", "")) \
+				== "core.map.shift-party":
+		runtime_state.set_position(
+			int(routed_payload.get("levelIndex", 0)),
+			int(routed_payload.get("x", 0)),
+			int(routed_payload.get("y", 0))
+		)
+		result["location"] = _query_location()
+	return result
 
 
 func _set_view_direction(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.map.view-direction":
+		var runtime_state := _classic_runtime_state()
+		var heading := int(routed_payload.get("heading", 0))
+		if runtime_state == null:
+			return _error("Scenario view state is unavailable")
+		if heading < 1 or heading > 4:
+			return _error("Scenario view direction must be north, east, south, or west")
+		runtime_state.set_heading(heading)
+		routed_payload["multiView"] = bool(runtime_state.multi_view)
+		routed_payload["viewType"] = int(runtime_state.view_type)
+		routed_payload["compassEnabled"] = bool(runtime_state.compass_enabled)
 	return service_owner.classic_map_bridge.redraw_view(
-		payload,
+		routed_payload,
 		_autoload("GameGlobal")
 	)
 
 
 func _set_map_darkness(payload: Dictionary) -> Dictionary:
-	return service_owner.classic_map_bridge.set_darkness(
+	var result: Dictionary = service_owner.classic_map_bridge.set_darkness(
 		payload,
 		_autoload("GameGlobal"),
 		_campaign_resources()
 	)
+	if str(result.get("status", "")) != "error" \
+			and str(payload.get("_scenarioApiOperation", "")) \
+				== "core.map.darkness":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			runtime_state.set_darkland(
+				str(payload.get("levelType", "")),
+				int(payload.get("levelIndex", -1)),
+				int(payload.get("darkness", 0))
+			)
+	return result
 
 
 func _set_random_encounter_rect(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.map.random-rectangle":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state == null or service_owner.classic_bundle == null:
+			return _error("Scenario random-encounter state is unavailable")
+		var level_type := str(routed_payload.get("levelType", "land"))
+		var level_index := int(routed_payload.get("levelIndex", 0))
+		var rect_index := int(routed_payload.get("rectIndex", 0))
+		var rectangle: Dictionary = service_owner.classic_bundle.get_random_rectangle(
+			level_type,
+			level_index,
+			rect_index
+		)
+		if rectangle.is_empty():
+			rectangle = {
+				"rectIndex": rect_index,
+				"percent": 0,
+				"battleRange": [0, 0],
+			}
+		rectangle = rectangle.duplicate(true)
+		rectangle["percent"] = clampi(
+			int(routed_payload.get("percent", rectangle.get("percent", 0))),
+			0,
+			100
+		)
+		var previous_range: Variant = rectangle.get("battleRange", [0, 0])
+		if not (previous_range is Array) or previous_range.size() < 2:
+			previous_range = [0, 0]
+		rectangle["battleRange"] = [
+			int(routed_payload.get(
+				"firstBattleId",
+				previous_range[0]
+			)),
+			int(routed_payload.get(
+				"lastBattleId",
+				previous_range[1]
+			)),
+		]
+		routed_payload["rectangle"] = rectangle
+		runtime_state.set_random_rectangle(
+			level_type,
+			level_index,
+			rect_index,
+			rectangle
+		)
 	return service_owner.classic_map_bridge.set_random_rectangle(
-		payload,
+		routed_payload,
 		_autoload("GameGlobal"),
 		_campaign_resources()
 	)
 
 
 func _set_land_look(payload: Dictionary) -> Dictionary:
-	return service_owner.classic_map_bridge.set_land_look(
-		payload,
+	var routed_payload := payload.duplicate(true)
+	var result: Dictionary = service_owner.classic_map_bridge.set_land_look(
+		routed_payload,
 		_autoload("GameGlobal"),
 		_campaign_resources()
 	)
+	if str(result.get("status", "")) != "error" \
+			and str(routed_payload.get("_scenarioApiOperation", "")) \
+				== "core.map.land-look":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			runtime_state.set_landlook(
+				"land",
+				int(routed_payload.get("levelIndex", 0)),
+				int(routed_payload.get("landlook", 0))
+			)
+			runtime_state.set_darkland(
+				"land",
+				int(routed_payload.get("levelIndex", 0)),
+				int(routed_payload.get("darkness", 0))
+			)
+	return result
 
 
 func _back_up_party(payload: Dictionary) -> Dictionary:
@@ -96,15 +238,34 @@ func _back_up_party(payload: Dictionary) -> Dictionary:
 
 
 func _set_view_mode(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.map.view-mode":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state == null:
+			return _error("Scenario view state is unavailable")
+		if routed_payload.has("compassEnabled"):
+			runtime_state.set_compass_enabled(
+				bool(routed_payload.get("compassEnabled", true))
+			)
+		if routed_payload.has("fullMap"):
+			if bool(routed_payload.get("fullMap", false)):
+				runtime_state.allow_full_map()
+			else:
+				runtime_state.require_3d_view()
+		routed_payload["multiView"] = bool(runtime_state.multi_view)
+		routed_payload["viewType"] = int(runtime_state.view_type)
+		routed_payload["compassEnabled"] = bool(runtime_state.compass_enabled)
+		routed_payload["warningId"] = 0
 	var result: Dictionary = service_owner.classic_map_bridge.redraw_view(
-		payload,
+		routed_payload,
 		_autoload("GameGlobal")
 	)
 	if str(result.get("status", "")) == "error":
 		return result
 	var warning_result: Dictionary = await service_owner.call(
 		"_show_classic_warning",
-		int(payload.get("warningId", 0))
+		int(routed_payload.get("warningId", 0))
 	)
 	result["warningPresentation"] = warning_result
 	return result
@@ -135,11 +296,59 @@ func _teleport_classic_party(payload: Dictionary) -> Dictionary:
 		)
 		if str(message_result.get("status", "")) == "error":
 			return message_result
-	return service_owner.classic_map_bridge.transition(
+	var previous_location: Dictionary = _query_location()
+	var destination: Dictionary = {
+		"levelType": str(payload.get("levelType", "")),
+		"levelIndex": int(payload.get("levelIndex", -1)),
+		"x": int(payload.get("x", -1)),
+		"y": int(payload.get("y", -1)),
+	}
+	var changes_map: bool = (
+		str(previous_location.get("levelType", "")) != destination["levelType"]
+		or int(previous_location.get("levelIndex", -1)) != destination["levelIndex"]
+	)
+	if changes_map:
+		var leave_result := await _emit_lifecycle_event("map-leave", {
+			"event": "map-leave",
+			"location": previous_location.duplicate(true),
+			"destination": destination.duplicate(true),
+		})
+		if str(leave_result.get("status", "")) == "error":
+			return leave_result
+	var result: Dictionary = service_owner.classic_map_bridge.transition(
 		payload,
 		_autoload("GameGlobal"),
 		_campaign_resources()
 	)
+	if str(result.get("status", "")) != "error" \
+			and str(payload.get("_scenarioApiOperation", "")) \
+				== "core.map.teleport":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			runtime_state.set_location(
+				str(payload.get("levelType", "")),
+				int(payload.get("levelIndex", -1)),
+				int(payload.get("x", -1)),
+				int(payload.get("y", -1))
+			)
+	if str(result.get("status", "")) != "error":
+		if changes_map:
+			var enter_result := await _emit_lifecycle_event("map-enter", {
+				"event": "map-enter",
+				"location": destination.duplicate(true),
+				"previousLocation": previous_location.duplicate(true),
+			})
+			if str(enter_result.get("status", "")) == "error":
+				return enter_result
+		var moved_result := await _emit_lifecycle_event("party-moved", {
+			"event": "party-moved",
+			"from": previous_location.duplicate(true),
+			"to": destination.duplicate(true),
+			"teleport": true,
+		})
+		if str(moved_result.get("status", "")) == "error":
+			return moved_result
+	return result
 
 
 static func teleport_message_present(payload: Dictionary) -> bool:
@@ -218,10 +427,30 @@ func _update_exploration_status(payload: Dictionary) -> Dictionary:
 
 
 func _give_player_map(payload: Dictionary) -> Dictionary:
-	var map_id := int(payload.get("mapId", -1))
+	var routed_payload := payload.duplicate(true)
+	var map_id := int(routed_payload.get("mapId", -1))
 	if map_id < 0:
 		return _error("Classic map command is missing its map ID")
-	var map_record: Dictionary = payload.get("mapRecord", {})
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.map.give-player-map":
+		if service_owner.classic_bundle == null:
+			return _error("Scenario player-map catalog is unavailable")
+		var authored_map: Dictionary = (
+			service_owner.classic_bundle.get_player_map(map_id)
+		)
+		if authored_map.is_empty():
+			return _error("Scenario player map %d is unavailable" % map_id)
+		routed_payload["mapRecord"] = authored_map
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			runtime_state.set_map_owned(map_id)
+			routed_payload["currentPosition"] = {
+				"levelType": runtime_state.level_type,
+				"levelIndex": runtime_state.level_index,
+				"x": runtime_state.x,
+				"y": runtime_state.y,
+			}
+	var map_record: Dictionary = routed_payload.get("mapRecord", {})
 	var game_global: Object = _autoload("GameGlobal")
 	var native_map: Array = []
 	if game_global != null and game_global.minimaps is Array \
@@ -232,7 +461,7 @@ func _give_player_map(payload: Dictionary) -> Dictionary:
 			native_map[6] = 1
 
 	service_owner.call("_play_sound", {"soundId": 30005})
-	if bool(payload.get("display", false)):
+	if bool(routed_payload.get("display", false)):
 		var runtime_path := str(service_owner.call(
 			"runtime_media_path",
 			map_record,
@@ -254,7 +483,7 @@ func _give_player_map(payload: Dictionary) -> Dictionary:
 				map_record,
 				runtime_path,
 				native_map_name,
-				payload.get("currentPosition", {})
+				routed_payload.get("currentPosition", {})
 			):
 				return _error("Classic player-map media could not be displayed")
 			var state_machine: Object = _autoload("StateMachine")
@@ -267,7 +496,8 @@ func _give_player_map(payload: Dictionary) -> Dictionary:
 				"runtimeMediaPath": str(map_record.get("runtimeMedia", {}).get("path", "")),
 				"generatedFromLevel": runtime_path.is_empty(),
 			}
-	if bool(payload.get("display", false)) and _can_display_native_map(native_map):
+	if bool(routed_payload.get("display", false)) \
+			and _can_display_native_map(native_map):
 		var ui: Object = _autoload("UI")
 		if ui == null or ui.ow_hud == null or ui.ow_hud.minimapRect == null:
 			return _error("Realmz minimap UI is unavailable")
@@ -285,7 +515,7 @@ func _give_player_map(payload: Dictionary) -> Dictionary:
 	if text_rect == null:
 		return _error("Realmz HUD TextRect is unavailable for the Classic map notice")
 	var message := MAP_GAINED_MESSAGE
-	if bool(payload.get("display", false)):
+	if bool(routed_payload.get("display", false)):
 		var map_note := str(map_record.get("note", "")).strip_edges()
 		if not map_note.is_empty():
 			message = map_note

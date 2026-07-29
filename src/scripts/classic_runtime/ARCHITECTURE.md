@@ -167,6 +167,13 @@ Every operation declares:
 - whether it yields or mutates state;
 - minimum security tier and deprecation state.
 
+Role descriptors distinguish their complete reserved hook vocabulary from
+`runtimeHooks`, the hooks that currently have an authoritative gameplay
+boundary. Providence export and Remake readiness both reject a behavior that
+targets a reserved-but-unconnected hook. Current reserved seams are spell
+tick/expiration, item equip/unequip/attack/defense/passive, and campaign
+completion.
+
 Queries produce immutable values, snapshots, or opaque stable references.
 Mutations become validated commands. Public operations never return live
 Godot objects.
@@ -236,9 +243,10 @@ how a behavior executes.
   before using the native provider.
 - Monster turns ask CombatPort for an attached AI behavior before native AI.
   The returned action is validated against the current combat snapshot.
-- Campaign start/resume, map entry, and time-advance events enter the
-  Lifecycle role. Additional lifecycle boundaries use the same typed event
-  contract as they are wired into their native owner.
+- Campaign start/resume, map enter/leave, party movement, rest
+  start/completion, time advancement, battle start/completion, character
+  defeat, and party defeat enter the Lifecycle role through one serialized
+  event queue.
 
 Bindings may include an action/result slot. Matching filters that slot before
 priority ordering so one encounter result cannot fire another result's

@@ -137,6 +137,85 @@ static func _monster_snapshot(monster: Object) -> Dictionary:
 
 func execute(command_id: String, request: Dictionary) -> Dictionary:
 	var routed_request := request.duplicate(true)
+	var scenario_operation := str(
+		routed_request.get("_scenarioApiOperation", "")
+	)
+	if scenario_operation == "core.encounter.start-battle":
+		var battle_id := int(routed_request.get("battleId", 0))
+		routed_request["battleIdRange"] = [battle_id, battle_id]
+		routed_request["participantMode"] = "party"
+		routed_request["surprise"] = false
+		routed_request["lootMode"] = 0
+		routed_request["soundId"] = 0
+		routed_request["priestTurningEnabled"] = true
+	if scenario_operation == "core.combat.destroy-monsters":
+		routed_request["maxMatches"] = maxi(
+			1,
+			int(routed_request.get("maximum", 100))
+		)
+	if scenario_operation == "core.combat.rout-monsters":
+		routed_request["maxMatches"] = maxi(
+			1,
+			int(routed_request.get("maximum", 100))
+		)
+		routed_request["surrenderPercent"] = clampi(
+			int(routed_request.get("surrenderPercent", 50)),
+			0,
+			100
+		)
+	if scenario_operation == "core.combat.revive":
+		if _port_runtime == null \
+				or not _port_runtime.has_method("_revive_scenario_party"):
+			return {
+				"status": "error",
+				"message": "Scenario combat revival service is unavailable",
+			}
+		return await _port_runtime.call(
+			"_revive_scenario_party",
+			routed_request
+		)
+	if scenario_operation == "core.combat.priest-turning":
+		routed_request["soundId"] = 0
+		routed_request["messageId"] = 0
+		routed_request["message"] = {
+			"id": 0,
+			"text": (
+				"Priest turning is now enabled."
+				if bool(routed_request.get("enabled", true))
+				else "Priest turning is now disabled."
+			),
+		}
+	if scenario_operation == "core.combat.end-battle":
+		routed_request["rewardMode"] = str(
+			routed_request.get("rewardMode", "normal")
+		)
+		routed_request["resumeSlot"] = 8
+	if scenario_operation == "core.combat.fumble":
+		routed_request["message"] = {
+			"id": 0,
+			"text": str(routed_request.get("message", "")),
+		}
+		routed_request["soundId"] = int(routed_request.get("soundId", 0))
+	if scenario_operation == "core.combat.change-monsters":
+		var target_type := str(routed_request.get("targetType", ""))
+		if target_type not in ["ally", "monster"]:
+			return {
+				"status": "error",
+				"message": "Scenario combatant change target must be ally or monster",
+			}
+		if not routed_request.has("faction") \
+				and not routed_request.has("iconId"):
+			return {
+				"status": "error",
+				"message": "Scenario combatant change requires a faction or icon",
+			}
+		routed_request["maxMatches"] = clampi(
+			int(routed_request.get("maximum", 1)),
+			1,
+			20
+		)
+		routed_request["faction"] = int(routed_request.get("faction", -1))
+		routed_request["iconId"] = int(routed_request.get("iconId", -1))
 	if command_id in ["apply_combat_damage", "apply_combat_healing"]:
 		var family := (
 			"damage" if command_id == "apply_combat_damage" else "healing"
@@ -175,8 +254,8 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		"monsterAiProviders",
 		[
 			request.get("monsterDefinitionId", ""),
-			request.get("monsterId", ""),
-			request.get("monsterNameId", ""),
+			routed_request.get("monsterId", ""),
+			routed_request.get("monsterNameId", ""),
 		],
 		routed_request
 	)

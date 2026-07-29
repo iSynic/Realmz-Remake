@@ -6,9 +6,93 @@ const CharacterConditionRulesScript = preload(
 )
 
 
+func scenario_spell_behavior_context(
+	spell: Object,
+	caster: Object,
+	targets: Array,
+	power: int,
+	cast_context: Dictionary
+) -> Dictionary:
+	if spell == null:
+		return _error("Scenario spell behavior requires a spell")
+	var target_ids: Array = []
+	var classic_ids: Variant = spell.get("classic_spell_ids")
+	if classic_ids is Array:
+		for id_value: Variant in classic_ids:
+			var id_text := str(id_value)
+			if not id_text.is_empty() and id_text not in target_ids:
+				target_ids.append(id_text)
+	for key: String in ["spellId", "authoredSpellId"]:
+		var context_id := str(cast_context.get(key, ""))
+		if not context_id.is_empty() and context_id not in target_ids:
+			target_ids.push_front(context_id)
+	var spell_name := str(spell.get("name"))
+	if target_ids.is_empty() and spell_name.is_empty():
+		return _error("Scenario spell behavior cannot resolve spell identity")
+	var target_snapshots: Array = []
+	for target_value: Variant in targets:
+		if target_value is Object:
+			target_snapshots.append(_spell_creature_snapshot(target_value))
+	var request := {
+		"spell": {
+			"ids": target_ids.duplicate(),
+			"name": spell_name,
+			"power": power,
+		},
+		"caster": _spell_creature_snapshot(caster),
+		"targets": target_snapshots,
+		"cast": cast_context.duplicate(true),
+	}
+	return {
+		"status": "ok",
+		"targetIds": target_ids,
+		"request": request,
+	}
+
+
+func _spell_creature_snapshot(creature: Object) -> Dictionary:
+	if creature == null:
+		return {}
+	var health := _character_stat(creature, "curHP")
+	var maximum_health := _character_stat(creature, "maxHP")
+	return {
+		"id": _spell_creature_id(creature),
+		"name": str(creature.get("name")),
+		"health": health,
+		"maximumHealth": maximum_health,
+		"spellPoints": _character_stat(creature, "curSP"),
+		"maximumSpellPoints": _character_stat(creature, "maxSP"),
+		"alive": health > 0 and int(creature.get("life_status")) < 3,
+	}
+
+
+func _spell_creature_id(creature: Object) -> String:
+	if service_owner != null \
+			and service_owner.has_method("_combat_context") \
+			and service_owner.has_method("_combatant_creature"):
+		var combat_context: Variant = service_owner.call("_combat_context")
+		if combat_context is Dictionary and not combat_context.has("error"):
+			var combatants: Variant = combat_context.get("combatants", [])
+			if combatants is Array:
+				for index: int in range(combatants.size()):
+					if service_owner.call(
+						"_combatant_creature",
+						combatants[index]
+					) == creature:
+						return "combat:%d" % index
+	if service_owner != null and service_owner.has_method("_party_characters"):
+		var party: Variant = service_owner.call("_party_characters")
+		if party is Array:
+			for index: int in range(party.size()):
+				if party[index] == creature:
+					return "party:%d" % index
+	return "runtime:%d" % creature.get_instance_id()
+
+
 func _query_party_members(_payload: Dictionary = {}) -> Dictionary:
 	var snapshots: Array = []
 	var party: Array = service_owner.call("_party_characters")
+	var rule_names: Dictionary = service_owner.call("_classic_rule_names")
 	for index: int in range(party.size()):
 		var character_value: Variant = party[index]
 		if not (character_value is Object):
@@ -17,17 +101,93 @@ func _query_party_members(_payload: Dictionary = {}) -> Dictionary:
 		if not (stats is Dictionary):
 			stats = {}
 		var current_health := int(stats.get("curHP", 0))
+		var race_id := int(service_owner.call(
+			"_classic_identity_value",
+			character_value,
+			"race",
+			rule_names
+		))
+		var caste_id := int(service_owner.call(
+			"_classic_identity_value",
+			character_value,
+			"caste",
+			rule_names
+		))
+		var race_names: Variant = rule_names.get("raceNames", [])
+		var caste_names: Variant = rule_names.get("casteNames", [])
+		var condition_values: Array = []
+		for condition_index: int in range(40):
+			condition_values.append(
+				CharacterConditionRulesScript.condition_value(
+					character_value,
+					condition_index
+				)
+			)
+		var item_ids: Array = []
+		for item_value: Variant in service_owner.call(
+			"_character_inventory_items",
+			character_value
+		):
+			for item_id_value: Variant in service_owner.call(
+				"_classic_item_ids",
+				item_value
+			):
+				var item_id := int(item_id_value)
+				if item_id != 0 and item_id not in item_ids:
+					item_ids.append(item_id)
+		item_ids.sort()
 		snapshots.append({
 			"id": "party:%d" % index,
 			"name": str(character_value.get("name")),
 			"level": int(character_value.get("level")),
+			"raceId": race_id,
+			"raceName": (
+				str(race_names[race_id - 1])
+				if race_names is Array
+					and race_id > 0
+					and race_id <= race_names.size()
+				else ""
+			),
+			"casteId": caste_id,
+			"casteName": (
+				str(caste_names[caste_id - 1])
+				if caste_names is Array
+					and caste_id > 0
+					and caste_id <= caste_names.size()
+				else ""
+			),
+			"gender": int(service_owner.call(
+				"_classic_identity_value",
+				character_value,
+				"gender",
+				rule_names
+			)),
 			"health": current_health,
 			"maximumHealth": int(stats.get("maxHP", current_health)),
 			"spellPoints": int(stats.get("curSP", 0)),
 			"maximumSpellPoints": int(stats.get("maxSP", 0)),
+			"strength": _character_stat(character_value, "Strength"),
+			"intellect": _character_stat(character_value, "Intellect"),
+			"wisdom": _character_stat(character_value, "Wisdom"),
+			"dexterity": _character_stat(character_value, "Dexterity"),
+			"vitality": _character_stat(character_value, "Vitality"),
+			"luck": _character_stat(character_value, "Luck"),
+			"movement": (
+				int(character_value.call("get_movement_left"))
+				if character_value.has_method("get_movement_left")
+				else 0
+			),
+			"conditions": condition_values,
+			"itemIds": item_ids,
 			"alive": current_health > 0 and int(character_value.get("life_status")) < 3,
 		})
 	return {"members": snapshots, "value": snapshots}
+
+
+static func _character_stat(character: Object, stat_name: String) -> int:
+	if character != null and character.has_method("get_stat"):
+		return int(character.call("get_stat", stat_name))
+	return 0
 
 
 func _alter_party_fatigue(payload: Dictionary) -> Dictionary:
@@ -50,6 +210,20 @@ func _alter_party_fatigue(payload: Dictionary) -> Dictionary:
 	return {
 		"previousFatigue": previous,
 		"fatigue": current,
+	}
+
+
+func _change_scenario_party_fatigue(payload: Dictionary) -> Dictionary:
+	var game_global: Object = _autoload("GameGlobal")
+	if game_global == null \
+			or not game_global.has_method("set_party_fatigue"):
+		return _error("Realmz party fatigue is unavailable")
+	var previous := float(game_global.get("fatigue"))
+	var current := previous + float(payload.get("amount", 0.0))
+	game_global.call("set_party_fatigue", current)
+	return {
+		"previousFatigue": previous,
+		"fatigue": float(game_global.get("fatigue")),
 	}
 
 
@@ -91,6 +265,22 @@ func _check_party_ally(payload: Dictionary) -> Dictionary:
 
 
 func _add_classic_ally(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.character.add-ally":
+		if service_owner.classic_bundle == null:
+			return _error("Scenario monster catalog is unavailable")
+		var authored_monster: Dictionary = (
+			service_owner.classic_bundle.get_monster(
+				int(routed_payload.get("monsterId", -1))
+			)
+		)
+		if authored_monster.is_empty():
+			return _error(
+				"Scenario ally monster %d is unavailable"
+				% int(routed_payload.get("monsterId", -1))
+			)
+		routed_payload["monster"] = authored_monster
 	var game_global: Object = _autoload("GameGlobal")
 	var player_allies: Variant = game_global.get("player_allies") \
 		if game_global != null else null
@@ -103,10 +293,10 @@ func _add_classic_ally(payload: Dictionary) -> Dictionary:
 	var creature_book: Variant = resources.get("crea_book") if resources != null else null
 	if not (creature_book is Dictionary):
 		return _error("Realmz bestiary resources are unavailable")
-	var monster: Variant = payload.get("monster", {})
+	var monster: Variant = routed_payload.get("monster", {})
 	if not (monster is Dictionary):
 		return _error("Classic ally command is missing its monster record")
-	var monster_id := int(payload.get("monsterId", -1))
+	var monster_id := int(routed_payload.get("monsterId", -1))
 	var bestiary_name := str(service_owner.call(
 		"resolve_classic_monster_bestiary_name",
 		monster_id,
@@ -172,6 +362,28 @@ func _give_experience(payload: Dictionary) -> Dictionary:
 	var game_global: Object = _autoload("GameGlobal")
 	if game_global == null:
 		return _error("Realmz game state is unavailable")
+	if str(payload.get("_scenarioApiOperation", "")) \
+			== "core.character.give-experience" \
+			and bool(payload.get("selectedOnly", false)):
+		var selected: Array = service_owner.call(
+			"_current_selected_characters"
+		)
+		if selected.is_empty():
+			return _error(
+				"Scenario experience award has no selected characters"
+			)
+		if not game_global.has_method("give_exp_to_pcs"):
+			return _error("Realmz experience award API is unavailable")
+		await game_global.call(
+			"give_exp_to_pcs",
+			int(payload.get("experience", 0)),
+			selected
+		)
+		return {
+			"experience": int(payload.get("experience", 0)),
+			"selectedOnly": true,
+			"characterCount": selected.size(),
+		}
 	await game_global.show_loot_menu(
 		[],
 		[0, 0, 0],
@@ -203,6 +415,7 @@ func _give_character_condition(payload: Dictionary) -> Dictionary:
 	if str(result.get("status", "")) == "error":
 		return result
 	var affected_characters: Array = result.get("affectedCharacters", [])
+	result["affectedCount"] = affected_characters.size()
 	for character_value: Variant in affected_characters:
 		service_owner.call(
 			"_play_sound",
@@ -390,6 +603,42 @@ func _change_party_health(payload: Dictionary) -> Dictionary:
 		service_owner.call("_party_characters")
 	)
 	return await service_owner.call("_finish_health_effect", payload, result)
+
+
+func _change_scenario_party_health(payload: Dictionary) -> Dictionary:
+	var target_mode := str(payload.get("targetMode", "party"))
+	if target_mode not in ["party", "selected"]:
+		return _error("Scenario health change has an invalid target mode")
+	var targets: Array = (
+		service_owner.call("_current_selected_characters")
+		if target_mode == "selected"
+		else service_owner.call("_party_characters")
+	)
+	if targets.is_empty():
+		return _error("Scenario health change has no eligible party members")
+	var requested := int(payload.get("amount", 0))
+	var can_kill := bool(payload.get("canKill", true))
+	var hits: Array = []
+	for character_value: Variant in targets:
+		if not (character_value is Object) \
+				or not character_value.has_method("change_cur_hp") \
+				or not character_value.has_method("get_stat"):
+			return _error("Scenario health target cannot receive a health change")
+		var previous := int(character_value.call("get_stat", "curHP"))
+		var applied := requested
+		if not can_kill and applied < 0 and previous > 0:
+			applied = maxi(applied, 1 - previous)
+		character_value.call("change_cur_hp", applied)
+		var current := int(character_value.call("get_stat", "curHP"))
+		service_owner.call("_refresh_character_panel", character_value)
+		hits.append({
+			"id": str(character_value.get_instance_id()),
+			"name": str(character_value.get("name")),
+			"previousHealth": previous,
+			"health": current,
+			"amount": current - previous,
+		})
+	return {"hits": hits}
 
 
 func _cast_classic_spell(payload: Dictionary) -> Dictionary:

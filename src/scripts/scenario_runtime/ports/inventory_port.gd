@@ -137,6 +137,74 @@ func run_item_behavior(
 	)
 
 
+func run_item_behavior_pure(
+	instance: Object,
+	hook_kind: String,
+	user: Object = null,
+	target: Object = null,
+	details := {}
+) -> Dictionary:
+	var hook := _behavior_hook(hook_kind)
+	if hook.is_empty():
+		return {"status": "error", "message": "Unknown scenario item hook '%s'" % hook_kind}
+	if hook in ["use-field", "use-combat"]:
+		return {
+			"status": "error",
+			"message": "Scenario item hook '%s' is not pure" % hook,
+		}
+	if _port_runtime == null \
+			or not _port_runtime.has_method("scenario_item_behavior_context"):
+		return {"handled": false, "outcomes": []}
+	var context: Dictionary = _port_runtime.call(
+		"scenario_item_behavior_context",
+		instance,
+		user,
+		target,
+		details
+	)
+	if str(context.get("status", "")) != "ok":
+		return context
+	var request: Dictionary = context.get("request", {})
+	request["hook"] = hook
+	request["hookKind"] = hook_kind
+	var attachment_result := invoke_behavior_attachments_pure(
+		"item",
+		hook,
+		"item",
+		context.get("targetIds", []),
+		request
+	)
+	if str(attachment_result.get("status", "")) == "error":
+		return attachment_result
+	if bool(attachment_result.get("handled", false)):
+		attachment_result["outcomes"] = _provider_outcomes(attachment_result)
+		return attachment_result
+	var binding_result := invoke_runtime_binding_pure(
+		"items",
+		"itemBehaviors",
+		context.get("targetIds", []),
+		request
+	)
+	if str(binding_result.get("status", "")) == "error":
+		return binding_result
+	binding_result["outcomes"] = _provider_outcomes(binding_result)
+	return binding_result
+
+
+static func _provider_outcomes(result: Dictionary) -> Array:
+	var outcomes: Array = []
+	var value: Variant = result.get("value")
+	if value is Dictionary:
+		outcomes.append(value.duplicate(true))
+	for result_value: Variant in result.get("results", []):
+		if not (result_value is Dictionary):
+			continue
+		var nested_value: Variant = result_value.get("value")
+		if nested_value is Dictionary:
+			outcomes.append(nested_value.duplicate(true))
+	return outcomes
+
+
 static func _behavior_hook(hook_kind: String) -> String:
 	return str({
 		"field_use": "use-field",
@@ -151,17 +219,57 @@ static func _behavior_hook(hook_kind: String) -> String:
 
 
 func execute(command_id: String, request: Dictionary) -> Dictionary:
+	var routed_request := request.duplicate(true)
+	var scenario_operation := str(
+		routed_request.get("_scenarioApiOperation", "")
+	)
+	if scenario_operation == "core.inventory.temple":
+		routed_request["soundId"] = 0
+	if scenario_operation == "core.inventory.banking":
+		routed_request["soundId"] = 0
+		routed_request["warningId"] = 0
+	if scenario_operation == "core.inventory.alter-item":
+		var action := str(routed_request.get("action", "")).to_lower()
+		var operation := int({
+			"remove": 1,
+			"charges": 2,
+			"replace": 3,
+		}.get(action, 0))
+		if operation == 0:
+			return {
+				"status": "error",
+				"message": (
+					"Scenario item action must be remove, charges, or replace"
+				),
+			}
+		routed_request["operation"] = operation
+		routed_request["maxMatches"] = maxi(
+			1,
+			int(routed_request.get("maximum", 100))
+		)
+	if scenario_operation \
+			== "core.inventory.take-wealth":
+		if _port_runtime == null \
+				or not _port_runtime.has_method("_take_scenario_wealth"):
+			return {
+				"status": "error",
+				"message": "Scenario wealth service is unavailable",
+			}
+		return await _port_runtime.call(
+			"_take_scenario_wealth",
+			routed_request
+		)
 	var extension_result := await invoke_runtime_binding(
 		"items",
 		"itemBehaviors",
 		[
-			request.get("definitionId", ""),
-			request.get("scenarioItemId", ""),
-			request.get("itemId", ""),
-			request.get("itemName", ""),
+			routed_request.get("definitionId", ""),
+			routed_request.get("scenarioItemId", ""),
+			routed_request.get("itemId", ""),
+			routed_request.get("itemName", ""),
 		],
-		request
+		routed_request
 	)
 	if bool(extension_result.get("handled", false)):
 		return extension_result
-	return await super.execute(command_id, request)
+	return await super.execute(command_id, routed_request)

@@ -1734,6 +1734,7 @@ func resolve_classic_monster_bestiary_name(
 func build_complex_action_choices(encounter: Dictionary, can_back_out: bool) -> Dictionary:
 	var choices: Array = []
 	var tokens: Array = []
+	var slots: Array = []
 	var texts: Variant = encounter.get("texts", [])
 	var outcome := int(encounter.get("actionResult", 0))
 	if texts is Array and outcome > 0:
@@ -1743,9 +1744,11 @@ func build_complex_action_choices(encounter: Dictionary, can_back_out: bool) -> 
 				continue
 			choices.append(choice_text)
 			tokens.append("action:%d" % outcome)
+			slots.append(index)
 	return {
 		"choices": choices,
 		"tokens": tokens,
+		"slots": slots,
 		"canBackOut": can_back_out,
 	}
 
@@ -2922,10 +2925,12 @@ func build_simple_encounter_choices(encounter: Dictionary) -> Dictionary:
 	var outcomes: Variant = encounter.get("choiceResults", [])
 	var choices: Array = []
 	var choice_tokens: Array = []
+	var slots: Array = []
 	if not (texts is Array) or not (outcomes is Array):
 		return {
 			"choices": choices,
 			"outcomes": choice_tokens,
+			"slots": slots,
 			"canBackOut": bool(encounter.get("canBackOut", false)),
 		}
 	for index: int in range(min(texts.size(), outcomes.size())):
@@ -2935,9 +2940,11 @@ func build_simple_encounter_choices(encounter: Dictionary) -> Dictionary:
 			continue
 		choices.append(choice_text)
 		choice_tokens.append(str(outcome))
+		slots.append(index)
 	return {
 		"choices": choices,
 		"outcomes": choice_tokens,
+		"slots": slots,
 		"canBackOut": bool(encounter.get("canBackOut", false)),
 	}
 

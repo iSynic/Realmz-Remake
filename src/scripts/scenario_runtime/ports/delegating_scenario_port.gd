@@ -186,6 +186,75 @@ func invoke_runtime_binding(
 	return {"handled": false}
 
 
+func invoke_runtime_binding_pure(
+	binding_group: String,
+	capability: String,
+	lookup_keys: Array,
+	request: Dictionary
+) -> Dictionary:
+	var group: Variant = runtime_bindings.get(binding_group, {})
+	if not (group is Dictionary):
+		return {"handled": false}
+	for lookup_key_value: Variant in lookup_keys:
+		var lookup_key := str(lookup_key_value)
+		if lookup_key.is_empty() or not group.has(lookup_key):
+			continue
+		var binding_value: Variant = group[lookup_key]
+		if not (binding_value is Dictionary):
+			return {
+				"status": "error",
+				"handled": true,
+				"message": "Scenario runtime binding '%s' is invalid" % lookup_key,
+			}
+		var binding: Dictionary = binding_value
+		var result: Dictionary
+		var binding_id := ""
+		if str(binding.get("kind", "")) == "script":
+			binding_id = str(binding.get("behaviorId", ""))
+			if behavior_runner == null \
+					or not behavior_runner.has_method("run_bound_behavior_pure"):
+				return {
+					"status": "error",
+					"handled": true,
+					"message": "Pure scenario behavior runner is unavailable",
+				}
+			result = behavior_runner.call(
+				"run_bound_behavior_pure",
+				binding_id,
+				request,
+				{
+					"portId": port_id(),
+					"bindingGroup": binding_group,
+					"bindingKey": lookup_key,
+				}
+			)
+		elif str(binding.get("kind", "")) == "extension":
+			if extension_registry == null:
+				return {
+					"status": "error",
+					"handled": true,
+					"message": "Scenario extension registry is unavailable",
+				}
+			binding_id = str(binding.get("providerId", ""))
+			result = extension_registry.invoke_binding(
+				capability,
+				binding_id,
+				request,
+				self
+			)
+		else:
+			return {
+				"status": "error",
+				"handled": true,
+				"message": "Scenario runtime binding '%s' has an unknown kind"
+					% lookup_key,
+			}
+		result["handled"] = true
+		result["runtimeBinding"] = binding_id
+		return result
+	return {"handled": false}
+
+
 func invoke_behavior_attachments(
 	role: String,
 	hook: String,
@@ -198,6 +267,26 @@ func invoke_behavior_attachments(
 		return {"handled": false}
 	return await behavior_runner.call(
 		"run_behavior_attachments",
+		role,
+		hook,
+		target_kind,
+		target_ids,
+		request
+	)
+
+
+func invoke_behavior_attachments_pure(
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_ids: Array,
+	request: Dictionary
+) -> Dictionary:
+	if behavior_runner == null \
+			or not behavior_runner.has_method("run_behavior_attachments_pure"):
+		return {"handled": false}
+	return behavior_runner.call(
+		"run_behavior_attachments_pure",
 		role,
 		hook,
 		target_kind,

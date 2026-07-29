@@ -40,12 +40,13 @@ func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
 				"Scenario behavior arguments are invalid"
 			)))
 		arguments = resolved.get("arguments", {})
-	return context.call(
+	var result: ScenarioStepResult = context.call(
 		"execute_scenario_script",
 		str(parameters.get("behaviorId", parameters.get("scriptId", ""))),
 		arguments,
 		invocation_context
 	)
+	return _apply_action_outcome(result)
 
 
 func resume(
@@ -55,4 +56,47 @@ func resume(
 ) -> ScenarioStepResult:
 	if context == null or not context.has_method("resume_scenario_script"):
 		return ScenarioStepResult.failed("Scenario script runtime is unavailable")
-	return context.call("resume_scenario_script", response)
+	var result: ScenarioStepResult = context.call(
+		"resume_scenario_script",
+		response
+	)
+	return _apply_action_outcome(result)
+
+
+func _apply_action_outcome(result: ScenarioStepResult) -> ScenarioStepResult:
+	if result == null or result.kind != ScenarioStepResult.CONTINUE:
+		return result
+	var value: Variant = result.data.get("value")
+	if not (value is Dictionary):
+		return result
+	var outcome: Dictionary = value
+	match str(outcome.get("kind", "continue")):
+		"continue":
+			return ScenarioStepResult.continued()
+		"halt":
+			return ScenarioStepResult.halted(outcome)
+		"call":
+			var call_target := str(outcome.get("triggerId", ""))
+			if call_target.is_empty():
+				return ScenarioStepResult.failed(
+					"Action behavior call outcome requires a trigger ID"
+				)
+			return ScenarioStepResult.called(
+				call_target,
+				int(outcome.get("actionIndex", 0))
+			)
+		"replace":
+			var replace_target := str(outcome.get("triggerId", ""))
+			if replace_target.is_empty():
+				return ScenarioStepResult.failed(
+					"Action behavior replace outcome requires a trigger ID"
+				)
+			return ScenarioStepResult.replaced(
+				replace_target,
+				int(outcome.get("actionIndex", 0))
+			)
+		"return":
+			return ScenarioStepResult.returned()
+	return ScenarioStepResult.failed(
+		"Action behavior returned an unsupported outcome"
+	)

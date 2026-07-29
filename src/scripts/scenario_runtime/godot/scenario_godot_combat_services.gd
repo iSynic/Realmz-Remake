@@ -149,10 +149,36 @@ func _deanimate_lower_undead(payload: Dictionary) -> Dictionary:
 
 
 func _rout_combat_monsters(payload: Dictionary) -> Dictionary:
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.combat.rout-monsters":
+		if service_owner.classic_bundle == null:
+			return _error("Scenario monster catalog is unavailable")
+		var monster_ids: Array = []
+		var target_name_id := absi(
+			int(routed_payload.get("monsterNameId", -1))
+		)
+		for monster_id_value: Variant in (
+			service_owner.classic_bundle.monsters_by_id.keys()
+		):
+			var monster: Dictionary = (
+				service_owner.classic_bundle.monsters_by_id[monster_id_value]
+			)
+			if absi(int(monster.get("monsterNameId", -1))) \
+					== target_name_id:
+				monster_ids.append(int(monster_id_value))
+		monster_ids.sort()
+		if monster_ids.size() > int(
+			routed_payload.get("maxMatches", monster_ids.size())
+		):
+			monster_ids.resize(
+				int(routed_payload.get("maxMatches", monster_ids.size()))
+			)
+		routed_payload["monsterIds"] = monster_ids
 	var context: Dictionary = service_owner.call("_combat_context")
 	if context.has("error"):
 		return _error(str(context["error"]))
-	var actor_faction: Variant = payload.get("actorFaction")
+	var actor_faction: Variant = routed_payload.get("actorFaction")
 	if actor_faction == null:
 		actor_faction = service_owner.call(
 			"_active_combat_faction",
@@ -160,7 +186,7 @@ func _rout_combat_monsters(payload: Dictionary) -> Dictionary:
 		)
 	if actor_faction == null:
 		return _error("Realmz active combat actor is unavailable")
-	var monster_ids: Variant = payload.get("monsterIds", [])
+	var monster_ids: Variant = routed_payload.get("monsterIds", [])
 	if not (monster_ids is Array):
 		return _error("Classic combat-rout command has an invalid monster list")
 	var selected: Array = service_owner.call(
@@ -169,6 +195,12 @@ func _rout_combat_monsters(payload: Dictionary) -> Dictionary:
 		int(actor_faction),
 		context["combatants"]
 	)
+	var maximum := maxi(1, int(routed_payload.get(
+		"maxMatches",
+		selected.size()
+	)))
+	if selected.size() > maximum:
+		selected.resize(maximum)
 	var fleeing_trait: Variant = load(
 		service_owner.PERMANENT_FLEEING_TRAIT_PATH
 	)
@@ -186,6 +218,37 @@ func _rout_combat_monsters(payload: Dictionary) -> Dictionary:
 
 func _spawn_combat_monsters(payload: Dictionary) -> Dictionary:
 	last_classic_spawn_presentation.clear()
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.combat.spawn-monsters":
+		if service_owner.classic_bundle == null:
+			return _error("Scenario monster catalog is unavailable")
+		var monster_id := int(routed_payload.get("monsterId", -1))
+		var monster: Dictionary = (
+			service_owner.classic_bundle.get_monster(monster_id)
+		)
+		if monster.is_empty():
+			return _error(
+				"Scenario combat monster %d is unavailable" % monster_id
+			)
+		routed_payload["monster"] = monster
+		routed_payload["spawnCount"] = clampi(
+			int(routed_payload.get("count", 1)),
+			1,
+			20
+		)
+		routed_payload["minDistance"] = 0
+		routed_payload["maxDistance"] = maxi(
+			0,
+			int(routed_payload.get("radius", 4))
+		)
+		routed_payload["factionOverride"] = int(
+			routed_payload.get("faction", 0)
+		)
+		routed_payload["inheritActorFaction"] = not routed_payload.has(
+			"faction"
+		)
+		routed_payload["soundId"] = 0
 	var context: Dictionary = service_owner.call("_combat_context")
 	if context.has("error"):
 		return _error(str(context["error"]))
@@ -205,22 +268,28 @@ func _spawn_combat_monsters(payload: Dictionary) -> Dictionary:
 		return _error("Realmz bestiary resources are unavailable")
 	var origin: Variant = service_owner.call(
 		"_classic_spawn_origin",
-		payload,
+		routed_payload,
 		context["stateMachine"]
 	)
 	if not (origin is Vector2):
 		return _error("Realmz combat spawn actor position is unavailable")
-	var actor_faction: Variant = payload.get("actorFaction")
-	if bool(payload.get("inheritActorFaction", false)) and actor_faction == null:
+	var actor_faction: Variant = routed_payload.get("actorFaction")
+	if bool(routed_payload.get(
+		"inheritActorFaction",
+		false
+	)) and actor_faction == null:
 		actor_faction = service_owner.call(
 			"_active_combat_faction",
 			context["stateMachine"]
 		)
-	if bool(payload.get("inheritActorFaction", false)) and actor_faction == null:
+	if bool(routed_payload.get(
+		"inheritActorFaction",
+		false
+	)) and actor_faction == null:
 		return _error("Realmz combat spawn actor faction is unavailable")
 	var result: Dictionary = service_owner.call(
 		"spawn_classic_combatants",
-		payload,
+		routed_payload,
 		context["state"],
 		map,
 		creature_book,
@@ -234,7 +303,7 @@ func _spawn_combat_monsters(payload: Dictionary) -> Dictionary:
 	var spawned_combatants: Variant = result.get("combatants", [])
 	if not (spawned_combatants is Array):
 		return _error("Classic combat spawn returned an invalid combatant list")
-	if bool(payload.get("skipPresentation", false)):
+	if bool(routed_payload.get("skipPresentation", false)):
 		result["presentation"] = {
 			"style": "none",
 			"animated": 0,
@@ -248,7 +317,7 @@ func _spawn_combat_monsters(payload: Dictionary) -> Dictionary:
 			combatant_value.prepare_classic_spawn_animation()
 	var presentation_events: Array = []
 	var animated_count := 0
-	var sound_id := int(payload.get("soundId", 0))
+	var sound_id := int(routed_payload.get("soundId", 0))
 	for spawn_index: int in spawned_combatants.size():
 		if sound_id != 0:
 			service_owner.call("_play_sound", {"soundId": sound_id})
@@ -330,6 +399,26 @@ func _revive_classic_combatants(payload: Dictionary) -> Dictionary:
 		return spawn_result
 	spawn_result["npcRevived"] = int(spawn_result.get("spawned", 0))
 	return spawn_result
+
+
+func _revive_scenario_party(_payload: Dictionary) -> Dictionary:
+	var context: Dictionary = service_owner.call("_combat_context")
+	if context.has("error"):
+		return _error(str(context["error"]))
+	var party: Array = service_owner.call("_party_characters")
+	if party.is_empty():
+		return _error("Scenario combat revival has no party members")
+	var revived: Dictionary = service_owner.call(
+		"revive_classic_party",
+		party,
+		context["state"],
+		context["combatants"],
+		Vector2.ZERO
+	)
+	if str(revived.get("status", "")) != "error":
+		revived["revived"] = int(revived.get("partyRevived", 0))
+		service_owner.call("_refresh_party_panels", party)
+	return revived
 
 
 func _alter_classic_combatants(payload: Dictionary) -> Dictionary:
@@ -502,6 +591,13 @@ func _start_classic_battle(payload: Dictionary) -> Dictionary:
 
 
 func _present_priest_turning(payload: Dictionary) -> Dictionary:
+	if str(payload.get("_scenarioApiOperation", "")) \
+			== "core.combat.priest-turning":
+		var runtime_state := _classic_runtime_state()
+		if runtime_state != null:
+			runtime_state.set_priest_turning_enabled(
+				bool(payload.get("enabled", true))
+			)
 	service_owner.call("_play_sound", payload)
 	return await service_owner.call("_show_text", payload)
 

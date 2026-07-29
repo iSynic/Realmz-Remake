@@ -497,6 +497,29 @@ func execute_scenario_script(
 	return scenario_script_runtime.invoke(script_id, arguments, invocation_context)
 
 
+func execute_nested_scenario_script(
+	script_id: String,
+	arguments: Variant,
+	invocation_context := {}
+) -> ScenarioStepResult:
+	if scenario_script_runtime == null:
+		return ScenarioStepResult.failed("Scenario script runtime is unavailable")
+	return scenario_script_runtime.invoke_nested(
+		script_id,
+		arguments,
+		invocation_context
+	)
+
+
+func complete_nested_scenario_script() -> Dictionary:
+	if scenario_script_runtime == null:
+		return {
+			"status": "error",
+			"message": "Scenario script runtime is unavailable",
+		}
+	return scenario_script_runtime.complete_nested_invocation()
+
+
 func resolve_scenario_behavior_arguments(
 	bindings: Variant,
 	invocation_context := {}

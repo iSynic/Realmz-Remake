@@ -39,6 +39,12 @@ const CapabilityCatalogScript = preload(
 const ScenarioScriptRuntimeScript = preload(
 	"res://scripts/scenario_runtime/scenario_script_runtime.gd"
 )
+const ScenarioScriptHandlerScript = preload(
+	"res://scripts/scenario_runtime/handlers/scenario_script_handler.gd"
+)
+const ScenarioStepResultScript = preload(
+	"res://scripts/scenario_runtime/scenario_step_result.gd"
+)
 const ScenarioGodotServicesScript = preload(
 	"res://scripts/scenario_runtime/godot/scenario_godot_services.gd"
 )
@@ -71,9 +77,13 @@ func _ready() -> void:
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
 	_test_safe_script_quest_slice()
+	_test_nested_safe_behavior_execution()
+	_test_spell_effect_lifecycle()
+	_test_campaign_completion_state()
 	_test_behavior_role_capability_validation()
 	_test_typed_role_outcomes()
 	await _test_rule_modifier_pipeline()
+	await _test_native_spell_behavior_hooks()
 	_test_old_save_rejection()
 	if failures == 0:
 		print("Scenario runtime tests passed")
@@ -279,6 +289,7 @@ func _test_command_ports() -> void:
 		"pick_characters",
 		"show_text",
 		"snapshot_runtime",
+		"complete_campaign",
 	]:
 		_expect(
 			router.port_for_command(command_id) != null,
@@ -304,8 +315,27 @@ func _test_command_ports() -> void:
 		incomplete_result.get("status") == "error"
 			and str(incomplete_result.get("message", "")).contains(
 				"requires missing Godot service method"
-			),
+		),
 		"production service contract rejects a missing command operation"
+	)
+	var encounter_services := ScenarioGodotServicesScript.new()
+	var simple_choices: Dictionary = encounter_services.build_simple_encounter_choices({
+		"texts": ["First", "", "Third"],
+		"choiceResults": [2, 0, 4],
+	})
+	_expect(
+		simple_choices.get("slots", []) == [0, 2]
+			and simple_choices.get("outcomes", []) == ["2", "4"],
+		"simple encounter choices retain authored option slots"
+	)
+	var complex_choices: Dictionary = encounter_services.build_complex_action_choices({
+		"texts": ["Look", "*", "Leave"],
+		"actionResult": 3,
+	}, false)
+	_expect(
+		complex_choices.get("slots", []) == [0, 2]
+			and complex_choices.get("tokens", []) == ["action:3", "action:3"],
+		"complex encounter choices retain authored option slots"
 	)
 
 
@@ -672,6 +702,15 @@ func _test_safe_script_quest_slice() -> void:
 				"sourceNode": "quest-battle",
 			},
 			{
+				"kind": "operation",
+				"capability": "core.lifecycle.complete-campaign",
+				"arguments": {
+					"ending": {"kind": "literal", "value": "victory"},
+				},
+				"result": "campaign_completed",
+				"sourceNode": "quest-complete",
+			},
+			{
 				"kind": "return",
 				"value": {
 					"kind": "literal",
@@ -699,6 +738,7 @@ func _test_safe_script_quest_slice() -> void:
 		"returnType": "action-outcome",
 		"requestedCapabilities": [
 			"core.encounter.start-battle",
+			"core.lifecycle.complete-campaign",
 			"core.map.teleport",
 			"core.presentation.choice",
 			"core.presentation.text",
@@ -810,6 +850,13 @@ func _test_safe_script_quest_slice() -> void:
 	)
 	result = interpreter.resume_command({})
 	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "complete_campaign"
+			and result.get("payload", {}).get("ending") == "victory",
+		"safe script reaches explicit campaign completion through PersistencePort"
+	)
+	result = interpreter.resume_command({"completed": true})
+	_expect(
 		result.get("status") == "completed",
 		"safe script returns to the Classic action point"
 	)
@@ -873,7 +920,7 @@ func _test_safe_script_quest_slice() -> void:
 		"description": "Moves fixture state to schema two.",
 		"kind": "helper",
 		"role": "helper",
-		"hook": "call",
+		"hook": "",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -913,6 +960,337 @@ func _test_safe_script_quest_slice() -> void:
 				state_key
 			) == 2,
 		"exact Safe migration chain updates persistent scenario state"
+	)
+
+
+func _test_nested_safe_behavior_execution() -> void:
+	var bundle := BundleScript.new()
+	_expect(bundle.load_from_directory(V3_FIXTURE), "nested behavior fixture bundle loads")
+	if not bundle.last_error.is_empty():
+		return
+	var catalog := CapabilityCatalogScript.new()
+	_expect(catalog.load_builtin(), "nested behavior capability catalog loads")
+	var outer_program := {
+		"kind": "function",
+		"name": "start_scripted_battle",
+		"parameters": [],
+		"returnType": "action-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.encounter.start-battle",
+				"arguments": {
+					"battleId": {"kind": "literal", "value": 1},
+				},
+				"sourceNode": "outer-battle",
+			},
+			{
+				"kind": "return",
+				"value": {
+					"kind": "literal",
+					"value": {"kind": "continue"},
+				},
+				"sourceNode": "outer-return",
+			},
+		],
+	}
+	var nested_program := {
+		"kind": "function",
+		"name": "spell_inside_scripted_battle",
+		"parameters": [],
+		"returnType": "effect-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {
+					"text": {
+						"kind": "literal",
+						"value": "Nested spell behavior",
+					},
+				},
+				"sourceNode": "nested-text",
+			},
+			{
+				"kind": "return",
+				"value": {
+					"kind": "literal",
+					"value": {"kind": "applied"},
+				},
+				"sourceNode": "nested-return",
+			},
+		],
+	}
+	var scripts := [
+		_safe_behavior_fixture(
+			"scenario.test.outer-battle",
+			"action",
+			"run",
+			"action-outcome",
+			["core.encounter.start-battle"],
+			outer_program
+		),
+		_safe_behavior_fixture(
+			"scenario.test.nested-spell",
+			"spell",
+			"effect",
+			"effect-outcome",
+			["core.presentation.text"],
+			nested_program
+		),
+	]
+	var document := {
+		"schemaVersion": 2,
+		"apiVersion": 2,
+		"capabilityCatalogHash": catalog.catalog_hash(),
+		"behaviors": scripts,
+		"bindings": [],
+		"stateDefinitions": [],
+		"migrations": [],
+	}
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var script_runtime := ScenarioScriptRuntimeScript.new()
+	_expect(
+		script_runtime.configure(document, state, bundle),
+		"nested behavior runtime configures"
+	)
+	var outer_step: ScenarioStepResult = script_runtime.invoke(
+		"scenario.test.outer-battle"
+	)
+	_expect(
+		outer_step.kind == ScenarioStepResult.YIELD
+			and outer_step.data.get("commandId") == "start_battle",
+		"outer Safe behavior suspends on its battle command"
+	)
+	var nested_step: ScenarioStepResult = script_runtime.invoke_nested(
+		"scenario.test.nested-spell",
+		{},
+		{"role": "spell", "hook": "effect"}
+	)
+	_expect(
+		nested_step.kind == ScenarioStepResult.YIELD
+			and nested_step.data.get("commandId") == "show_text",
+		"spell behavior executes while its owning action waits for battle"
+	)
+	var nested_snapshot: Dictionary = script_runtime.snapshot()
+	_expect(
+		ScenarioScriptRuntimeScript.validate_snapshot(nested_snapshot).get(
+			"valid",
+			false
+		)
+			and nested_snapshot.get("suspendedInvocations", []).size() == 1,
+		"nested Safe behavior and suspended action are saveable together"
+	)
+	var restored_runtime := ScenarioScriptRuntimeScript.new()
+	_expect(
+		restored_runtime.configure(document, state, bundle)
+			and restored_runtime.restore(nested_snapshot).get("status") == "ok",
+		"nested Safe behavior snapshot restores"
+	)
+	nested_step = restored_runtime.resume({})
+	_expect(
+		nested_step.kind == ScenarioStepResult.CONTINUE
+			and nested_step.data.get("value", {}).get("kind") == "applied",
+		"restored nested spell behavior returns its typed outcome"
+	)
+	var restored_outer: Dictionary = restored_runtime.complete_nested_invocation()
+	_expect(
+		restored_outer.get("status") == "ok"
+			and bool(restored_outer.get("restored", false)),
+		"completing nested spell behavior restores the outer action frame"
+	)
+	outer_step = restored_runtime.resume({})
+	_expect(
+		outer_step.kind == ScenarioStepResult.CONTINUE
+			and outer_step.data.get("value", {}).get("kind") == "continue",
+		"outer action resumes after nested battle behavior"
+	)
+
+
+func _safe_behavior_fixture(
+	id: String,
+	role: String,
+	hook: String,
+	return_type: String,
+	capabilities: Array,
+	program: Dictionary
+) -> Dictionary:
+	return {
+		"id": id,
+		"name": id,
+		"description": "Nested Safe behavior fixture",
+		"kind": "entry",
+		"role": role,
+		"hook": hook,
+		"tier": "safe",
+		"apiVersion": 2,
+		"behaviorVersion": 1,
+		"stateSchemaVersion": 1,
+		"parameters": [],
+		"returnType": return_type,
+		"requestedCapabilities": capabilities,
+		"stateSchema": {},
+		"stateSchemaHash": ScenarioScriptRuntimeScript._sha256_json({}),
+		"sourceMap": {},
+		"contentHash": ScenarioScriptRuntimeScript._sha256_json(program),
+		"program": program,
+	}
+
+
+func _test_spell_effect_lifecycle() -> void:
+	var bundle := BundleScript.new()
+	_expect(bundle.load_from_directory(V3_FIXTURE), "spell-effect fixture bundle loads")
+	if not bundle.last_error.is_empty():
+		return
+	var catalog := CapabilityCatalogScript.new()
+	_expect(catalog.load_builtin(), "spell-effect capability catalog loads")
+	var document := ScenarioScriptRuntimeScript.empty_document()
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var script_runtime := ScenarioScriptRuntimeScript.new()
+	_expect(
+		script_runtime.configure(document, state, bundle),
+		"spell-effect runtime configures"
+	)
+	var registered := script_runtime.register_spell_effect(
+		["4501"],
+		{
+			"spell": {"ids": ["4501"], "name": "Test Ward"},
+			"targets": [{"id": "combat:1"}],
+			"cast": {"mode": "combat"},
+		},
+		{
+			"kind": "applied",
+			"duration": 2,
+			"interval": "round",
+			"effectKey": "test-ward",
+			"stacking": "refresh",
+		}
+	)
+	_expect(
+		registered.get("status") == "ok"
+			and bool(registered.get("registered", false)),
+		"applied spell outcome registers serializable effect state"
+	)
+	var saved := script_runtime.snapshot()
+	_expect(
+		ScenarioScriptRuntimeScript.validate_snapshot(saved).get("valid", false)
+			and saved.get("activeSpellEffects", []).size() == 1,
+		"active spell effects are included in the Safe runtime snapshot"
+	)
+	var restored := ScenarioScriptRuntimeScript.new()
+	_expect(
+		restored.configure(document, state, bundle)
+			and restored.restore(saved).get("status") == "ok",
+		"active spell effects restore with campaign script state"
+	)
+	var first_round := restored.advance_spell_effects("round", {"round": 2})
+	_expect(
+		first_round.get("status") == "ok"
+			and first_round.get("deliveries", []).size() == 1
+			and first_round.get("deliveries", [])[0].get("hook") == "tick"
+			and first_round.get("activeCount") == 1,
+		"round spell effect dispatches a tick and remains active"
+	)
+	var second_round := restored.advance_spell_effects("round", {"round": 3})
+	_expect(
+		second_round.get("status") == "ok"
+			and second_round.get("deliveries", []).size() == 2
+			and second_round.get("deliveries", [])[0].get("hook") == "tick"
+			and second_round.get("deliveries", [])[1].get("hook") == "expire"
+			and second_round.get("activeCount") == 0,
+		"final spell-effect tick dispatches expiration and removes state"
+	)
+	restored.register_spell_effect(
+		["4501"],
+		{
+			"spell": {"ids": ["4501"], "name": "Timed Ward"},
+			"targets": [{"id": "party:0"}],
+			"cast": {"mode": "field"},
+		},
+		{
+			"kind": "applied",
+			"duration": 1,
+			"interval": "minute",
+			"effectKey": "timed-ward",
+		}
+	)
+	var partial_time := restored.advance_spell_effects(
+		"time",
+		{"elapsedSeconds": 30}
+	)
+	var completed_time := restored.advance_spell_effects(
+		"time",
+		{"elapsedSeconds": 30}
+	)
+	_expect(
+		partial_time.get("deliveries", []).is_empty()
+			and completed_time.get("deliveries", []).size() == 2,
+		"scenario-time spell effects retain elapsed time across events"
+	)
+	var identity_runtime := ScenarioScriptRuntimeScript.new()
+	_expect(
+		identity_runtime.configure(document, state, bundle),
+		"spell-effect identity fixture runtime configures"
+	)
+	var original_identity := identity_runtime.register_spell_effect(
+		["4501"],
+		{
+			"spell": {"ids": ["4501"], "name": "Stable Ward"},
+			"targets": [{"id": "party:0", "health": 10}],
+			"cast": {"mode": "field"},
+		},
+		{"kind": "applied", "duration": 1, "interval": "minute"}
+	)
+	var refreshed_identity := identity_runtime.register_spell_effect(
+		["4501"],
+		{
+			"spell": {"ids": ["4501"], "name": "Stable Ward"},
+			"targets": [{"id": "party:0", "health": 7}],
+			"cast": {"mode": "field"},
+		},
+		{"kind": "applied", "duration": 3, "interval": "minute"}
+	)
+	_expect(
+		original_identity.get("effectId") == refreshed_identity.get("effectId")
+			and bool(refreshed_identity.get("refreshed", false))
+			and identity_runtime.active_spell_effects.size() == 1,
+		"spell-effect identity ignores mutable target snapshots"
+	)
+
+
+func _test_campaign_completion_state() -> void:
+	var bundle := BundleScript.new()
+	_expect(bundle.load_from_directory(V3_FIXTURE), "completion fixture bundle loads")
+	if not bundle.last_error.is_empty():
+		return
+	var document := ScenarioScriptRuntimeScript.empty_document()
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var runtime := ScenarioScriptRuntimeScript.new()
+	_expect(runtime.configure(document, state, bundle), "completion runtime configures")
+	var completed := runtime.mark_campaign_complete({
+		"ending": "victory",
+		"source": "Data DD:0:99",
+	})
+	var repeated := runtime.mark_campaign_complete({"ending": "other"})
+	_expect(
+		completed.get("status") == "ok"
+			and bool(completed.get("completed", false))
+			and not bool(completed.get("alreadyCompleted", true))
+			and bool(repeated.get("alreadyCompleted", false))
+			and repeated.get("completion", {}).get("ending") == "victory",
+		"campaign completion is explicit, one-time, and idempotent"
+	)
+	var saved := runtime.snapshot()
+	var restored := ScenarioScriptRuntimeScript.new()
+	_expect(
+		ScenarioScriptRuntimeScript.validate_snapshot(saved).get("valid", false)
+			and restored.configure(document, state, bundle)
+			and restored.restore(saved).get("status") == "ok"
+			and restored.campaign_completion.get("ending") == "victory",
+		"campaign completion persists in Safe runtime snapshots"
 	)
 
 
@@ -985,6 +1363,48 @@ func _test_behavior_role_capability_validation() -> void:
 			and str(validation.get("message", "")).contains("cannot use yielding capability"),
 		"non-yielding behavior roles reject yielding capabilities at readiness"
 	)
+	var item_program := {
+		"kind": "function",
+		"name": "equip",
+		"parameters": [],
+		"returnType": "item-outcome",
+		"body": [{
+			"kind": "return",
+			"value": {"kind": "literal", "value": {"kind": "used"}},
+		}],
+	}
+	var item_behavior: Dictionary = behavior.duplicate(true)
+	item_behavior.merge({
+		"id": "scenario.test.pure-item-hook",
+		"name": "Pure item hook",
+		"description": "Equipment hooks are connected but cannot mutate state.",
+		"role": "item",
+		"hook": "equip",
+		"returnType": "item-outcome",
+		"requestedCapabilities": [],
+		"contentHash": ScenarioScriptRuntimeScript._sha256_json(item_program),
+		"program": item_program,
+	}, true)
+	var item_document: Dictionary = document.duplicate(true)
+	item_document["capabilities"] = []
+	item_document["behaviors"] = [item_behavior]
+	var item_validation := ScenarioScriptRuntimeScript.validate_document(
+		item_document
+	)
+	_expect(
+		bool(item_validation.get("valid", false)),
+		"pure equipment behavior hooks pass readiness"
+	)
+	item_behavior["requestedCapabilities"] = ["core.state.write"]
+	item_document["capabilities"] = ["core.state.write"]
+	item_validation = ScenarioScriptRuntimeScript.validate_document(item_document)
+	_expect(
+		not bool(item_validation.get("valid", true))
+			and str(item_validation.get("message", "")).contains(
+				"cannot yield or mutate state"
+			),
+		"pure equipment behavior hooks reject mutating capabilities"
+	)
 
 
 func _test_typed_role_outcomes() -> void:
@@ -1043,6 +1463,117 @@ func _test_typed_role_outcomes() -> void:
 		),
 		"monster AI rejects item use without a stable item-instance ID"
 	)
+	_expect(
+		ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "modified", "add": 2.0, "multiply": 1.5},
+			"item-outcome"
+		),
+		"item hooks accept bounded numeric modifier outcomes"
+	)
+	_expect(
+		ScenarioScriptRuntimeScript._value_matches_script_type(
+			{
+				"kind": "applied",
+				"duration": 3,
+				"interval": "round",
+				"stacking": "refresh",
+			},
+			"effect-outcome"
+		),
+		"spell effects accept bounded lifecycle schedules"
+	)
+	_expect(
+		not ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "modified", "unexpected": 2.0},
+			"item-outcome"
+		),
+		"item hooks reject undeclared modifier fields"
+	)
+	var handler := ScenarioScriptHandlerScript.new()
+	var halt_result: ScenarioStepResult = handler._apply_action_outcome(
+		ScenarioStepResultScript.continued({
+			"value": {"kind": "halt", "reason": "fixture"},
+		})
+	)
+	_expect(
+		halt_result.kind == ScenarioStepResultScript.HALT
+			and halt_result.data.get("reason") == "fixture",
+		"action behavior halt outcomes become central VM halt results"
+	)
+	var call_result: ScenarioStepResult = handler._apply_action_outcome(
+		ScenarioStepResultScript.continued({
+			"value": {
+				"kind": "call",
+				"triggerId": "Data DD:0:9",
+				"actionIndex": 3,
+			},
+		})
+	)
+	_expect(
+		call_result.kind == ScenarioStepResultScript.CALL
+			and call_result.data.get("triggerId") == "Data DD:0:9"
+			and call_result.data.get("actionIndex") == 3,
+		"action behavior call outcomes become central VM GOSUB results"
+	)
+	var catalog := CapabilityCatalogScript.new()
+	_expect(catalog.load_builtin(), "typed response fixture loads the API catalog")
+	var response_runtime := ScenarioScriptRuntimeScript.new()
+	response_runtime.capability_catalog = catalog
+	var paid_result := response_runtime._operation_response_value(
+		"core.inventory.take-wealth",
+		{"paid": true, "removed": [500, 0, 0]}
+	)
+	_expect(
+		paid_result.get("status") == "ok"
+			and paid_result.get("value") == true,
+		"Safe operation responses extract their catalog-declared scalar field"
+	)
+	var invalid_paid_result := response_runtime._operation_response_value(
+		"core.inventory.take-wealth",
+		{"paid": "yes"}
+	)
+	_expect(
+		invalid_paid_result.get("status") == "error",
+		"Safe operation responses reject values that violate the catalog type"
+	)
+	var valid_arguments := response_runtime._validate_operation_arguments(
+		"core.map.teleport",
+		{"levelType": "land", "levelIndex": 0, "x": 2, "y": 2}
+	)
+	_expect(
+		valid_arguments.get("status") == "ok",
+		"Scenario API arguments accept their complete typed contract"
+	)
+	var missing_argument := response_runtime._validate_operation_arguments(
+		"core.map.teleport",
+		{"levelType": "land", "levelIndex": 0, "x": 2}
+	)
+	_expect(
+		missing_argument.get("status") == "error",
+		"Scenario API arguments reject missing required fields"
+	)
+	var unknown_argument := response_runtime._validate_operation_arguments(
+		"core.map.teleport",
+		{
+			"levelType": "land",
+			"levelIndex": 0,
+			"x": 2,
+			"y": 2,
+			"sceneTree": "forbidden",
+		}
+	)
+	_expect(
+		unknown_argument.get("status") == "error",
+		"Scenario API arguments reject undeclared fields"
+	)
+	var invalid_argument_type := response_runtime._validate_operation_arguments(
+		"core.inventory.take-wealth",
+		{"gold": "five hundred"}
+	)
+	_expect(
+		invalid_argument_type.get("status") == "error",
+		"Scenario API arguments reject values with the wrong type"
+	)
 
 
 func _test_old_save_rejection() -> void:
@@ -1051,6 +1582,51 @@ func _test_old_save_rejection() -> void:
 	_expect(
 		str(result.get("message", "")).contains("start a new playthrough"),
 		"old-save rejection is actionable"
+	)
+
+
+func _test_native_spell_behavior_hooks() -> void:
+	var runner := SpellBehaviorRunner.new()
+	var port := CharacterPort.new()
+	port.configure({
+		"scenarioPortRuntime": SpellBehaviorServices.new(),
+		"behaviorRunner": runner,
+		"runtimeBindings": {},
+	})
+	var spell := SpellBehaviorFixture.new()
+	_expect(
+		port.has_spell_behavior(spell),
+		"native spell resources discover attached scenario behavior"
+	)
+	var validation: Dictionary = await port.run_spell_behavior_hook(
+		spell,
+		"validate",
+		null,
+		[],
+		3,
+		{"mode": "field"}
+	)
+	_expect(
+		validation.get("status") == "ok"
+			and bool(validation.get("valid", false)),
+		"native spell validation executes through the Character port"
+	)
+	var effect: Dictionary = await port.run_spell_behavior_hook(
+		spell,
+		"effect",
+		null,
+		[],
+		3,
+		{"mode": "combat"}
+	)
+	_expect(
+		effect.get("status") == "ok"
+			and bool(effect.get("handled", false)),
+		"native spell effects can replace the stock effect through a typed hook"
+	)
+	_expect(
+		runner.hooks == ["validate", "effect"],
+		"native spell behavior preserves deterministic hook order"
 	)
 
 
@@ -1071,7 +1647,7 @@ class IncompleteScenarioGodotServices:
 class RuleBehaviorRunner:
 	extends RefCounted
 
-	func run_behavior_attachments(
+	func run_behavior_attachments_pure(
 		_role: String,
 		_hook: String,
 		_target_kind: String,
@@ -1085,4 +1661,70 @@ class RuleBehaviorRunner:
 				{"status": "ok", "value": {"add": 5}},
 				{"status": "ok", "value": {"multiply": 2, "maximum": 30}},
 			],
+		}
+
+
+class SpellBehaviorFixture:
+	extends RefCounted
+
+	var classic_spell_ids := [4501]
+	var name := "Scenario Fixture Spell"
+
+
+class SpellBehaviorServices:
+	extends RefCounted
+
+	func scenario_spell_behavior_context(
+		_spell: Object,
+		_caster: Object,
+		_targets: Array,
+		power: int,
+		cast_context: Dictionary
+	) -> Dictionary:
+		return {
+			"status": "ok",
+			"targetIds": ["4501"],
+			"request": {
+				"spell": {
+					"ids": ["4501"],
+					"name": "Scenario Fixture Spell",
+					"power": power,
+				},
+				"cast": cast_context.duplicate(true),
+			},
+		}
+
+
+class SpellBehaviorRunner:
+	extends RefCounted
+
+	var hooks: Array[String] = []
+
+	func has_behavior_attachments(
+		role: String,
+		hook: String,
+		target_kind: String,
+		target_ids: Array,
+		_slot := -1
+	) -> bool:
+		return role == "spell" \
+			and hook in ["validate", "effect"] \
+			and target_kind == "spell" \
+			and "4501" in target_ids
+
+	func run_behavior_attachments(
+		_role: String,
+		hook: String,
+		_target_kind: String,
+		_target_ids: Array,
+		_request: Dictionary
+	) -> Dictionary:
+		hooks.append(hook)
+		return {
+			"status": "ok",
+			"handled": true,
+			"results": [{
+				"status": "ok",
+				"value": {"kind": "applied"},
+			}],
 		}

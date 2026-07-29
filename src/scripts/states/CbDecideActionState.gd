@@ -385,6 +385,20 @@ func start_new_round() :
 			)
 	if StateMachine.state != self:
 		return
+	var spell_effect_result := await GameGlobal.process_classic_spell_effect_event(
+		"round",
+		{
+			"round": combat_state.cur_battle_round,
+			"battleId": int(combat_state.cur_battle_data.get("ID", 0)),
+		}
+	)
+	if str(spell_effect_result.get("status", "")) == "error":
+		push_error(str(spell_effect_result.get(
+			"message",
+			"Scenario round spell effect failed"
+		)))
+	if StateMachine.state != self:
+		return
 	var battle_end_str: String = combat_state.check_battle_end()
 	if not battle_end_str.is_empty():
 		GameGlobal.end_battle(battle_end_str)

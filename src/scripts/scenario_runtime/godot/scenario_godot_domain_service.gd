@@ -49,6 +49,21 @@ func _classic_runtime_state() -> Object:
 	return runtime.get("runtime_state")
 
 
+func _emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
+	var game_global: Object = _autoload("GameGlobal")
+	if game_global == null \
+			or not game_global.has_method("emit_classic_lifecycle_event"):
+		return {"status": "ok", "handled": false}
+	var result: Variant = await game_global.call(
+		"emit_classic_lifecycle_event",
+		hook,
+		request
+	)
+	return result if result is Dictionary else _error(
+		"Scenario lifecycle event returned an invalid response"
+	)
+
+
 func _text_rect() -> Object:
 	if service_owner == null:
 		return null

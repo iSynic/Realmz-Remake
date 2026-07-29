@@ -13,7 +13,7 @@ const SandboxClientScript = preload(
 
 const SCHEMA_VERSION := 2
 const API_VERSION := 2
-const SNAPSHOT_SCHEMA_VERSION := 2
+const SNAPSHOT_SCHEMA_VERSION := 3
 const MAX_ARRAY_LENGTH := 256
 const DEFAULT_MAX_STEPS := 65536
 const MAX_CALL_DEPTH := 32
@@ -30,7 +30,11 @@ var pending_operation: Dictionary = {}
 var behavior_bindings: Array = []
 var migrations: Array = []
 var active_invocation: Dictionary = {}
+var suspended_invocations: Array = []
 var event_queue: Array = []
+var active_spell_effects: Array = []
+var next_spell_effect_sequence := 1
+var campaign_completion: Dictionary = {}
 var completed_value: Variant = null
 var debug_enabled := false
 var debug_breakpoints: Dictionary = {}
@@ -134,6 +138,85 @@ func invoke(
 	return _run()
 
 
+func invoke_nested(
+	script_id: String,
+	arguments := {},
+	invocation_context := {}
+) -> ScenarioStepResult:
+	if _execution_context_active():
+		if suspended_invocations.size() >= MAX_CALL_DEPTH:
+			return StepResultScript.failed(
+				"Scenario behavior nesting exceeded %d suspended invocations"
+				% MAX_CALL_DEPTH
+			)
+		suspended_invocations.append(_capture_execution_context())
+		_clear_execution_context()
+	return invoke(script_id, arguments, invocation_context)
+
+
+func behavior_hook_is_pure(script_id: String) -> bool:
+	var value: Variant = scripts_by_id.get(script_id, {})
+	return value is Dictionary and _behavior_hook_is_pure(value)
+
+
+func complete_nested_invocation() -> Dictionary:
+	_clear_execution_context()
+	if suspended_invocations.is_empty():
+		return {"status": "ok", "restored": false}
+	var saved: Variant = suspended_invocations.pop_back()
+	if not (saved is Dictionary):
+		return {
+			"status": "error",
+			"message": "Suspended scenario behavior state is invalid",
+		}
+	_restore_execution_context(saved)
+	return {"status": "ok", "restored": true}
+
+
+func _execution_context_active() -> bool:
+	return (
+		not frames.is_empty()
+		or not pending_operation.is_empty()
+		or not active_full_script_id.is_empty()
+		or not active_invocation.is_empty()
+	)
+
+
+func _capture_execution_context() -> Dictionary:
+	return {
+		"activeFullScriptId": active_full_script_id,
+		"activeInvocation": active_invocation.duplicate(true),
+		"completedValue": completed_value,
+		"frames": frames.duplicate(true),
+		"pendingOperation": pending_operation.duplicate(true),
+		"debugPause": debug_pause.duplicate(true),
+		"debugStepMode": debug_step_mode,
+		"debugDepthTarget": debug_depth_target,
+	}
+
+
+func _clear_execution_context() -> void:
+	active_full_script_id = ""
+	active_invocation.clear()
+	completed_value = null
+	frames.clear()
+	pending_operation.clear()
+	debug_pause.clear()
+	debug_step_mode = "run"
+	debug_depth_target = -1
+
+
+func _restore_execution_context(saved: Dictionary) -> void:
+	active_full_script_id = str(saved.get("activeFullScriptId", ""))
+	active_invocation = saved.get("activeInvocation", {}).duplicate(true)
+	completed_value = saved.get("completedValue")
+	frames = saved.get("frames", []).duplicate(true)
+	pending_operation = saved.get("pendingOperation", {}).duplicate(true)
+	debug_pause = saved.get("debugPause", {}).duplicate(true)
+	debug_step_mode = str(saved.get("debugStepMode", "run"))
+	debug_depth_target = int(saved.get("debugDepthTarget", -1))
+
+
 func resolve_argument_bindings(
 	bindings: Variant,
 	invocation_context := {}
@@ -225,6 +308,221 @@ func matching_bindings(
 	return matches
 
 
+func register_spell_effect(
+	target_ids: Array,
+	request: Dictionary,
+	outcome: Dictionary
+) -> Dictionary:
+	var duration := int(outcome.get("duration", 0))
+	if duration <= 0:
+		return {"status": "ok", "registered": false}
+	if duration > 1000000:
+		return {
+			"status": "error",
+			"message": "Scenario spell-effect duration exceeds the runtime limit",
+		}
+	var interval := str(outcome.get("interval", ""))
+	if interval.is_empty():
+		interval = (
+			"round"
+			if str(request.get("cast", {}).get("mode", "")) == "combat"
+			else "minute"
+		)
+	if interval not in ["round", "move", "minute", "hour", "day"]:
+		return {
+			"status": "error",
+			"message": "Scenario spell effect has an invalid interval",
+		}
+	var normalized_ids: Array = []
+	for target_id_value: Variant in target_ids:
+		var target_id := str(target_id_value)
+		if not target_id.is_empty() and target_id not in normalized_ids:
+			normalized_ids.append(target_id)
+	normalized_ids.sort()
+	if normalized_ids.is_empty():
+		return {
+			"status": "error",
+			"message": "Scenario spell effect has no stable spell identity",
+		}
+	var effect_key := str(outcome.get("effectKey", "")).strip_edges()
+	if effect_key.is_empty():
+		var spell_identity: Dictionary = {}
+		var spell_value: Variant = request.get("spell", {})
+		if spell_value is Dictionary:
+			for field: String in ["id", "stableId", "recordId", "name"]:
+				if spell_value.has(field):
+					spell_identity[field] = spell_value[field]
+		effect_key = _sha256_json({
+			"spell": spell_identity,
+			"spellTargetIds": normalized_ids,
+		}).substr(0, 24)
+	var identity_key := _sha256_json({
+		"effectKey": effect_key,
+		"spellTargetIds": normalized_ids,
+	})
+	var stacking := str(outcome.get("stacking", "refresh"))
+	if stacking not in ["refresh", "replace", "stack"]:
+		return {
+			"status": "error",
+			"message": "Scenario spell effect has an invalid stacking policy",
+		}
+	if stacking in ["refresh", "replace"]:
+		for index: int in range(active_spell_effects.size() - 1, -1, -1):
+			var existing: Variant = active_spell_effects[index]
+			if not (existing is Dictionary) \
+					or str(existing.get("identityKey", "")) != identity_key:
+				continue
+			if stacking == "refresh":
+				existing["remainingTicks"] = duration
+				existing["elapsedSeconds"] = 0
+				existing["request"] = request.duplicate(true)
+				existing["interval"] = interval
+				return {
+					"status": "ok",
+					"registered": true,
+					"refreshed": true,
+					"effectId": existing.get("id", ""),
+				}
+			active_spell_effects.remove_at(index)
+	var effect_id := "scenario-effect:%d" % next_spell_effect_sequence
+	next_spell_effect_sequence += 1
+	active_spell_effects.append({
+		"id": effect_id,
+		"effectKey": effect_key,
+		"identityKey": identity_key,
+		"spellTargetIds": normalized_ids,
+		"request": request.duplicate(true),
+		"interval": interval,
+		"remainingTicks": duration,
+		"elapsedSeconds": 0,
+	})
+	return {
+		"status": "ok",
+		"registered": true,
+		"effectId": effect_id,
+	}
+
+
+func advance_spell_effects(event_kind: String, event := {}) -> Dictionary:
+	if event_kind not in ["round", "move", "time"]:
+		return {
+			"status": "error",
+			"message": "Scenario spell-effect event kind is invalid",
+		}
+	var event_data: Dictionary = event.duplicate(true) if event is Dictionary else {}
+	var deliveries: Array = []
+	var survivors: Array = []
+	for effect_value: Variant in active_spell_effects:
+		if not (effect_value is Dictionary):
+			continue
+		var effect: Dictionary = effect_value.duplicate(true)
+		var remaining := maxi(0, int(effect.get("remainingTicks", 0)))
+		var tick_count := 0
+		var interval := str(effect.get("interval", ""))
+		if remaining > 0 and interval == event_kind:
+			tick_count = 1
+		elif remaining > 0 and event_kind == "time" \
+				and interval in ["minute", "hour", "day"]:
+			var interval_seconds := int({
+				"minute": 60,
+				"hour": 3600,
+				"day": 86400,
+			}[interval])
+			var elapsed := (
+				int(effect.get("elapsedSeconds", 0))
+				+ maxi(0, int(event_data.get("elapsedSeconds", 0)))
+			)
+			tick_count = mini(
+				remaining,
+				mini(
+					floori(float(elapsed) / float(interval_seconds)),
+					256 - deliveries.size()
+				)
+			)
+			effect["elapsedSeconds"] = (
+				elapsed - tick_count * interval_seconds
+			)
+		tick_count = mini(
+			tick_count,
+			mini(remaining, 256 - deliveries.size())
+		)
+		for _tick: int in range(tick_count):
+			deliveries.append({
+				"hook": "tick",
+				"effect": effect.duplicate(true),
+				"event": event_data.duplicate(true),
+			})
+			remaining -= 1
+		effect["remainingTicks"] = remaining
+		if remaining <= 0:
+			deliveries.append({
+				"hook": "expire",
+				"effect": effect.duplicate(true),
+				"event": event_data.duplicate(true),
+			})
+		else:
+			survivors.append(effect)
+	active_spell_effects = survivors
+	return {
+		"status": "ok",
+		"deliveries": deliveries,
+		"activeCount": active_spell_effects.size(),
+	}
+
+
+func expire_spell_effects(intervals: Array) -> Dictionary:
+	var normalized: Array = []
+	for interval_value: Variant in intervals:
+		var interval := str(interval_value)
+		if interval in ["round", "move", "minute", "hour", "day"] \
+				and interval not in normalized:
+			normalized.append(interval)
+	var deliveries: Array = []
+	var survivors: Array = []
+	for effect_value: Variant in active_spell_effects:
+		if not (effect_value is Dictionary):
+			continue
+		var effect: Dictionary = effect_value
+		if str(effect.get("interval", "")) in normalized:
+			deliveries.append({
+				"hook": "expire",
+				"effect": effect.duplicate(true),
+				"event": {"reason": "scope-ended"},
+			})
+		else:
+			survivors.append(effect.duplicate(true))
+	active_spell_effects = survivors
+	return {
+		"status": "ok",
+		"deliveries": deliveries,
+		"activeCount": active_spell_effects.size(),
+	}
+
+
+func mark_campaign_complete(details := {}) -> Dictionary:
+	if not campaign_completion.is_empty():
+		return {
+			"status": "ok",
+			"completed": true,
+			"alreadyCompleted": true,
+			"completion": campaign_completion.duplicate(true),
+		}
+	var completion_details: Dictionary = (
+		details.duplicate(true) if details is Dictionary else {}
+	)
+	campaign_completion = {
+		"completed": true,
+		"ending": str(completion_details.get("ending", "complete")),
+		"details": completion_details,
+	}
+	return {
+		"status": "ok",
+		"completed": true,
+		"alreadyCompleted": false,
+		"completion": campaign_completion.duplicate(true),
+	}
+
+
 func resume(response: Dictionary) -> ScenarioStepResult:
 	if pending_operation.is_empty():
 		return StepResultScript.failed("No scenario script operation is waiting")
@@ -240,30 +538,48 @@ func resume(response: Dictionary) -> ScenarioStepResult:
 		if active_full_script_id.is_empty():
 			return StepResultScript.failed("Scenario script continuation has no frame")
 		var capability := str(pending_operation.get("capability", ""))
+		if str(response.get("status", "")) == "error":
+			pending_operation.clear()
+			return StepResultScript.failed(str(response.get(
+				"message",
+				"Scenario capability '%s' failed" % capability
+			)))
+		var full_response := _operation_response_value(capability, response)
+		if str(full_response.get("status", "")) != "ok":
+			pending_operation.clear()
+			return StepResultScript.failed(str(full_response.get(
+				"message",
+				"Scenario capability returned an invalid result"
+			)))
 		pending_operation.clear()
 		return _drive_full_script({
 			"kind": "command-result",
 			"capability": capability,
 			"response": response.duplicate(true),
+			"value": full_response.get("value"),
 		})
+	if str(response.get("status", "")) == "error":
+		var capability_id := str(pending_operation.get("capability", ""))
+		pending_operation.clear()
+		return StepResultScript.failed(
+			str(response.get(
+				"message",
+				"Scenario capability '%s' failed" % capability_id
+			))
+		)
+	var response_result := _operation_response_value(
+		str(pending_operation.get("capability", "")),
+		response
+	)
+	if str(response_result.get("status", "")) != "ok":
+		pending_operation.clear()
+		return StepResultScript.failed(str(response_result.get(
+			"message",
+			"Scenario capability returned an invalid result"
+		)))
 	var result_name := str(pending_operation.get("result", ""))
 	if not result_name.is_empty():
-		var value: Variant = response
-		if response.has("value"):
-			value = response["value"]
-		elif response.has("accepted"):
-			value = bool(response["accepted"])
-		elif response.has("choice"):
-			value = response["choice"]
-		elif response.has("active"):
-			value = bool(response["active"])
-		elif response.has("possessed"):
-			value = bool(response["possessed"])
-		elif response.has("paid"):
-			value = bool(response["paid"])
-		elif response.has("amount"):
-			value = int(response["amount"])
-		_set_local(result_name, value)
+		_set_local(result_name, response_result.get("value"))
 	pending_operation.clear()
 	return _run()
 
@@ -325,18 +641,16 @@ func debugger_resume(action: String) -> Dictionary:
 
 func debugger_snapshot() -> Dictionary:
 	var stack: Array = []
+	for suspended_value: Variant in suspended_invocations:
+		if not (suspended_value is Dictionary):
+			continue
+		for frame_value: Variant in suspended_value.get("frames", []):
+			if frame_value is Dictionary:
+				stack.append(_debug_frame_snapshot(frame_value, true))
 	for frame_value: Variant in frames:
 		if not (frame_value is Dictionary):
 			continue
-		var frame: Dictionary = frame_value
-		stack.append({
-			"behaviorId": str(frame.get("scriptId", "")),
-			"locals": frame.get("locals", {}).duplicate(true),
-			"blockDepth": (
-				frame.get("blocks", []).size()
-				if frame.get("blocks", []) is Array else 0
-			),
-		})
+		stack.append(_debug_frame_snapshot(frame_value, false))
 	return {
 		"enabled": debug_enabled,
 		"paused": not debug_pause.is_empty(),
@@ -345,7 +659,21 @@ func debugger_snapshot() -> Dictionary:
 		"persistentValues": persistent_values.duplicate(true),
 		"pendingOperation": pending_operation.duplicate(true),
 		"eventQueue": event_queue.duplicate(true),
+		"activeSpellEffects": active_spell_effects.duplicate(true),
+		"campaignCompletion": campaign_completion.duplicate(true),
 		"stepMode": debug_step_mode,
+	}
+
+
+static func _debug_frame_snapshot(frame: Dictionary, suspended: bool) -> Dictionary:
+	return {
+		"behaviorId": str(frame.get("scriptId", "")),
+		"locals": frame.get("locals", {}).duplicate(true),
+		"blockDepth": (
+			frame.get("blocks", []).size()
+			if frame.get("blocks", []) is Array else 0
+		),
+		"suspended": suspended,
 	}
 
 
@@ -370,7 +698,11 @@ func snapshot() -> Dictionary:
 		"fullScriptStates": full_script_states.duplicate(true),
 		"activeFullScriptId": active_full_script_id,
 		"activeInvocation": active_invocation.duplicate(true),
+		"suspendedInvocations": suspended_invocations.duplicate(true),
 		"eventQueue": event_queue.duplicate(true),
+		"activeSpellEffects": active_spell_effects.duplicate(true),
+		"nextSpellEffectSequence": next_spell_effect_sequence,
+		"campaignCompletion": campaign_completion.duplicate(true),
 		"trace": trace.duplicate(true),
 		"frames": frames.duplicate(true),
 		"pendingOperation": pending_operation.duplicate(true),
@@ -396,7 +728,11 @@ func restore(value: Variant) -> Dictionary:
 	full_script_states = saved["fullScriptStates"].duplicate(true)
 	active_full_script_id = str(saved["activeFullScriptId"])
 	active_invocation = saved["activeInvocation"].duplicate(true)
+	suspended_invocations = saved["suspendedInvocations"].duplicate(true)
 	event_queue = saved["eventQueue"].duplicate(true)
+	active_spell_effects = saved["activeSpellEffects"].duplicate(true)
+	next_spell_effect_sequence = int(saved["nextSpellEffectSequence"])
+	campaign_completion = saved["campaignCompletion"].duplicate(true)
 	trace = saved["trace"].duplicate(true)
 	frames = saved["frames"].duplicate(true)
 	pending_operation = saved["pendingOperation"].duplicate(true)
@@ -450,11 +786,13 @@ func migrate_snapshot(
 			}
 	var saved: Dictionary = value
 	if not saved.get("frames", []).is_empty() \
-			or not saved.get("pendingOperation", {}).is_empty():
+			or not saved.get("pendingOperation", {}).is_empty() \
+			or not saved.get("suspendedInvocations", []).is_empty() \
+			or not saved.get("activeSpellEffects", []).is_empty():
 		return {
 			"status": "error",
 			"message": (
-				"Scenario updates cannot migrate a save while a behavior is suspended"
+				"Scenario updates cannot migrate a save while behavior or spell-effect state is active"
 			),
 		}
 	var defaults := persistent_values.duplicate(true)
@@ -499,6 +837,7 @@ func migrate_snapshot(
 	migrated["pendingOperation"] = {}
 	migrated["activeInvocation"] = {}
 	migrated["activeFullScriptId"] = ""
+	migrated["suspendedInvocations"] = []
 	return {"status": "ok", "snapshot": migrated}
 
 
@@ -513,6 +852,7 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 		"fullScriptStates",
 		"pendingOperation",
 		"activeInvocation",
+		"campaignCompletion",
 	]:
 		if not (saved.get(field_name) is Dictionary):
 			return _invalid("Scenario script snapshot.%s must be an object" % field_name)
@@ -522,10 +862,59 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 		return _invalid("Scenario script snapshot.trace must be an array")
 	if not (saved.get("eventQueue") is Array):
 		return _invalid("Scenario script snapshot.eventQueue must be an array")
+	if not (saved.get("activeSpellEffects") is Array):
+		return _invalid(
+			"Scenario script snapshot.activeSpellEffects must be an array"
+		)
+	if not _is_integer(saved.get("nextSpellEffectSequence")) \
+			or int(saved.get("nextSpellEffectSequence", 0)) < 1:
+		return _invalid(
+			"Scenario script snapshot spell-effect sequence is invalid"
+		)
+	for effect_value: Variant in saved["activeSpellEffects"]:
+		if not (effect_value is Dictionary):
+			return _invalid("Saved scenario spell effect must be an object")
+		var effect: Dictionary = effect_value
+		if str(effect.get("id", "")).is_empty() \
+				or str(effect.get("identityKey", "")).is_empty() \
+				or str(effect.get("interval", "")) not in [
+					"round", "move", "minute", "hour", "day",
+				] \
+				or not _is_integer(effect.get("remainingTicks")) \
+				or int(effect.get("remainingTicks", 0)) < 1 \
+				or not _is_integer(effect.get("elapsedSeconds")) \
+				or int(effect.get("elapsedSeconds", -1)) < 0 \
+				or not (effect.get("spellTargetIds") is Array) \
+				or not (effect.get("request") is Dictionary):
+			return _invalid("Saved scenario spell effect is malformed")
+	if not (saved.get("suspendedInvocations") is Array):
+		return _invalid(
+			"Scenario script snapshot.suspendedInvocations must be an array"
+		)
 	if not (saved.get("activeFullScriptId") is String):
 		return _invalid("Scenario script snapshot active script ID is invalid")
 	if saved["frames"].size() > MAX_CALL_DEPTH:
 		return _invalid("Scenario script snapshot exceeds the call-depth limit")
+	if saved["suspendedInvocations"].size() > MAX_CALL_DEPTH:
+		return _invalid(
+			"Scenario script snapshot exceeds the nested-invocation limit"
+		)
+	for context_value: Variant in saved["suspendedInvocations"]:
+		if not (context_value is Dictionary):
+			return _invalid("Suspended scenario invocation must be an object")
+		var context: Dictionary = context_value
+		if not (context.get("frames") is Array) \
+				or not (context.get("pendingOperation") is Dictionary) \
+				or not (context.get("activeInvocation") is Dictionary) \
+				or not (context.get("debugPause") is Dictionary) \
+				or not (context.get("activeFullScriptId") is String) \
+				or not (context.get("debugStepMode") is String) \
+				or not _is_integer(context.get("debugDepthTarget")):
+			return _invalid("Suspended scenario invocation is malformed")
+		if context["frames"].size() > MAX_CALL_DEPTH:
+			return _invalid(
+				"Suspended scenario invocation exceeds the call-depth limit"
+			)
 	if not _is_integer(saved.get("rngState")):
 		return _invalid("Scenario script snapshot RNG state is invalid")
 	if not _is_json_value(saved):
@@ -596,6 +985,19 @@ static func validate_document(
 		var role_descriptor := catalog.role(role_id)
 		var pure_hooks: Variant = role_descriptor.get("pureHooks", [])
 		var hook_id := str(script.get("hook", ""))
+		var runtime_hooks: Variant = role_descriptor.get(
+			"runtimeHooks",
+			role_descriptor.get("hooks", [])
+		)
+		if behavior_kind == "entry" and (
+			not (runtime_hooks is Array) or hook_id not in runtime_hooks
+		):
+			return _invalid(
+				"%s hook '%s' is not connected to a runtime boundary for role '%s'"
+				% [context, hook_id, role_id]
+			)
+		if behavior_kind == "helper" and not hook_id.is_empty():
+			return _invalid("%s helper behavior cannot declare a hook" % context)
 		var pure_hook: bool = pure_hooks is Array and (
 			"*" in pure_hooks or hook_id in pure_hooks
 		)
@@ -873,7 +1275,7 @@ func _validate_full_reducer_response(
 				"message": "Scenario behavior role '%s' cannot yield"
 					% role_id,
 			}
-		if _behavior_hook_is_pure(script) and (
+		if _active_invocation_hook_is_pure() and (
 			bool(capability_catalog.operation(capability).get("yields", false))
 			or bool(capability_catalog.operation(capability).get("mutates", false))
 		):
@@ -884,6 +1286,12 @@ func _validate_full_reducer_response(
 			}
 		if not (result.get("arguments", {}) is Dictionary):
 			return {"status": "error", "message": "Scenario reducer arguments must be an object"}
+		var argument_validation := _validate_operation_arguments(
+			capability,
+			result.get("arguments", {})
+		)
+		if str(argument_validation.get("status", "")) == "error":
+			return argument_validation
 	return {"status": "ok", "state": state, "result": result}
 
 
@@ -1111,7 +1519,7 @@ func _execute_operation(statement: Dictionary) -> ScenarioStepResult:
 		return StepResultScript.failed(
 			"Scenario behavior role '%s' cannot yield" % role_id
 		)
-	if _behavior_hook_is_pure(behavior) and (
+	if _active_invocation_hook_is_pure() and (
 		bool(capability_catalog.operation(capability).get("yields", false))
 		or bool(capability_catalog.operation(capability).get("mutates", false))
 	):
@@ -1123,6 +1531,9 @@ func _execute_operation(statement: Dictionary) -> ScenarioStepResult:
 	if str(arguments_result.get("status", "")) == "error":
 		return StepResultScript.failed(str(arguments_result.get("message", "")))
 	var arguments: Dictionary = arguments_result.get("value", {})
+	var validation := _validate_operation_arguments(capability, arguments)
+	if str(validation.get("status", "")) == "error":
+		return StepResultScript.failed(str(validation.get("message", "")))
 	var result_name := str(statement.get("result", ""))
 	match capability:
 		"core.state.read":
@@ -1154,11 +1565,163 @@ func _execute_operation(statement: Dictionary) -> ScenarioStepResult:
 		"scriptId": str(frames[-1].get("scriptId", "")) if not frames.is_empty() else "",
 		"sourceNode": str(statement.get("sourceNode", "")),
 	}
+	var request := arguments.duplicate(true)
+	request["_scenarioApiOperation"] = capability
 	return StepResultScript.yielded(
 		command_id,
-		arguments,
+		request,
 		{"scriptRuntime": true}
 	)
+
+
+func _operation_response_value(
+	capability: String,
+	response: Dictionary
+) -> Dictionary:
+	if capability_catalog == null or not capability_catalog.has_operation(capability):
+		return {
+			"status": "error",
+			"message": "Scenario capability '%s' is unavailable" % capability,
+		}
+	var operation := capability_catalog.operation(capability)
+	var declared_result := str(operation.get("result", "void"))
+	if declared_result == "void":
+		return {"status": "ok", "value": null}
+	var value: Variant = response
+	var result_field := str(operation.get("resultField", ""))
+	if not result_field.is_empty():
+		var resolved := _read_context_path(response, result_field)
+		if str(resolved.get("status", "")) != "ok":
+			return {
+				"status": "error",
+				"message": (
+					"Scenario capability '%s' response is missing '%s'"
+					% [capability, result_field]
+				),
+			}
+		value = resolved.get("value")
+	elif response.has("value"):
+		value = response.get("value")
+	if not _value_matches_catalog_type(value, declared_result):
+		return {
+			"status": "error",
+			"message": (
+				"Scenario capability '%s' returned a value that does not match %s"
+				% [capability, declared_result]
+			),
+		}
+	return {"status": "ok", "value": value}
+
+
+func _validate_operation_arguments(
+	capability: String,
+	arguments: Dictionary
+) -> Dictionary:
+	if capability_catalog == null or not capability_catalog.has_operation(capability):
+		return {
+			"status": "error",
+			"message": "Scenario capability '%s' is unavailable" % capability,
+		}
+	var operation := capability_catalog.operation(capability)
+	var parameter_value: Variant = operation.get("parameters", {})
+	if not (parameter_value is Dictionary):
+		return {
+			"status": "error",
+			"message": "Scenario capability '%s' has an invalid parameter contract"
+				% capability,
+		}
+	var parameters: Dictionary = parameter_value
+	for argument_name: Variant in arguments:
+		if not parameters.has(str(argument_name)):
+			return {
+				"status": "error",
+				"message": (
+					"Scenario capability '%s' received unknown argument '%s'"
+					% [capability, argument_name]
+				),
+			}
+	for parameter_name: Variant in parameters:
+		var declared_type := str(parameters[parameter_name])
+		var optional := declared_type.ends_with("?")
+		var argument_name := str(parameter_name)
+		if not arguments.has(argument_name):
+			if optional:
+				continue
+			return {
+				"status": "error",
+				"message": (
+					"Scenario capability '%s' requires argument '%s'"
+					% [capability, argument_name]
+				),
+			}
+		var value: Variant = arguments[argument_name]
+		if optional and value == null:
+			continue
+		if not _value_matches_catalog_type(value, declared_type.trim_suffix("?")):
+			return {
+				"status": "error",
+				"message": (
+					"Scenario capability '%s' argument '%s' does not match %s"
+					% [capability, argument_name, declared_type]
+				),
+			}
+	return {"status": "ok"}
+
+
+func _value_matches_catalog_type(value: Variant, type_id: String) -> bool:
+	var optional := type_id.ends_with("?")
+	var required_type := type_id.trim_suffix("?")
+	if optional and value == null:
+		return true
+	if "|" in required_type:
+		return value is String and str(value) in required_type.split("|", false)
+	if required_type.ends_with("-array"):
+		if not (value is Array) or value.size() > MAX_ARRAY_LENGTH:
+			return false
+		var entry_type := required_type.trim_suffix("-array")
+		for entry: Variant in value:
+			if not _value_matches_catalog_type(entry, entry_type):
+				return false
+		return true
+	match required_type:
+		"variant":
+			return _is_json_value(value)
+		"bool":
+			return value is bool
+		"int":
+			return _is_integer(value)
+		"float":
+			return value is int or value is float
+		"string":
+			return value is String
+	if capability_catalog != null and capability_catalog.types.has(required_type):
+		if not (value is Dictionary):
+			return false
+		var definition: Dictionary = capability_catalog.types[required_type]
+		var field_value: Variant = definition.get("fields", {})
+		if not (field_value is Dictionary):
+			return false
+		for field_name: Variant in field_value:
+			var field_type := str(field_value[field_name])
+			var field_optional := field_type.ends_with("?")
+			if not value.has(str(field_name)):
+				if field_optional:
+					continue
+				return false
+			if not _value_matches_catalog_type(value[field_name], field_type):
+				return false
+		return true
+	return _value_matches_script_type(value, _catalog_result_type(required_type))
+
+
+static func _catalog_result_type(type_id: String) -> String:
+	var suffix := ""
+	var base := type_id
+	if base.ends_with("-array"):
+		suffix = "-array"
+		base = base.trim_suffix("-array")
+	var normalized := base.to_snake_case().replace("_", "-")
+	return normalized + suffix
 
 
 func _read_state(arguments: Dictionary) -> Dictionary:
@@ -1515,6 +2078,12 @@ func _behavior_hook_is_pure(behavior: Dictionary) -> bool:
 	)
 
 
+func _active_invocation_hook_is_pure() -> bool:
+	var behavior_id := str(active_invocation.get("behaviorId", ""))
+	var value: Variant = scripts_by_id.get(behavior_id, {})
+	return value is Dictionary and _behavior_hook_is_pure(value)
+
+
 func _behavior_allows_yield(behavior: Dictionary) -> bool:
 	var role := capability_catalog.role(str(behavior.get("role", "helper")))
 	return bool(role.get("allowsYield", false))
@@ -1574,13 +2143,48 @@ static func _value_matches_script_type(value: Variant, type_id: String) -> bool:
 				"continue", "resolve", "repeat", "close", "branch",
 			]
 		"effect-outcome":
-			return value is Dictionary and str(value.get("kind", "")) in [
+			if not (value is Dictionary) or str(value.get("kind", "")) not in [
 				"applied", "no-effect", "invalid",
-			]
+			]:
+				return false
+			for key: Variant in value:
+				match str(key):
+					"kind":
+						pass
+					"duration":
+						if not _is_integer(value[key]) \
+								or int(value[key]) < 0 \
+								or int(value[key]) > 1000000:
+							return false
+					"interval":
+						if str(value[key]) not in [
+							"round", "move", "minute", "hour", "day",
+						]:
+							return false
+					"effectKey":
+						if not (value[key] is String):
+							return false
+					"stacking":
+						if str(value[key]) not in [
+							"refresh", "replace", "stack",
+						]:
+							return false
+					_:
+						return false
+			return true
 		"item-outcome":
-			return value is Dictionary and str(value.get("kind", "")) in [
-				"used", "rejected", "no-effect",
-			]
+			if not (value is Dictionary) or str(value.get("kind", "")) not in [
+				"used", "rejected", "no-effect", "modified",
+			]:
+				return false
+			for key: Variant in value:
+				if str(key) == "kind":
+					continue
+				if str(key) not in ["add", "multiply", "minimum", "maximum"] \
+						or not (value[key] is int or value[key] is float) \
+						or not is_finite(float(value[key])):
+					return false
+			return true
 		"monster-decision":
 			return _valid_monster_decision(value)
 		"rule-modifier":
@@ -1631,7 +2235,11 @@ func clear() -> void:
 	full_script_states.clear()
 	active_full_script_id = ""
 	active_invocation.clear()
+	suspended_invocations.clear()
 	event_queue.clear()
+	active_spell_effects.clear()
+	next_spell_effect_sequence = 1
+	campaign_completion.clear()
 	completed_value = null
 	debug_enabled = false
 	debug_breakpoints.clear()

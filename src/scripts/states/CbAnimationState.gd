@@ -236,6 +236,90 @@ func enter(_msg : Dictionary = {}) -> void:
 				var a_from_terrain : bool = cur_action["from_terrain"]
 				var a_castercrea : Creature = cur_action["castercrea"] if a_from_terrain else a_caster.creature
 				var _who_there : CombatCreaButton = GameGlobal.who_is_at_tile(a_main_targeted_tile)
+				var scenario_targets: Array = []
+				for target_button_value: Variant in a_effected_creas:
+					if target_button_value is CombatCreaButton \
+							and is_instance_valid(target_button_value):
+						scenario_targets.append(target_button_value.creature)
+				for out_of_battle_value: Variant in cur_action.get("oob_creas", []):
+					if out_of_battle_value is Creature \
+							and out_of_battle_value not in scenario_targets:
+						scenario_targets.append(out_of_battle_value)
+				var scenario_host: Variant = GameGlobal.classic_runtime_host
+				if is_instance_valid(scenario_host) \
+						and scenario_host.has_method("has_spell_behavior") \
+						and bool(scenario_host.call(
+							"has_spell_behavior",
+							a_spell
+						)):
+					var scenario_context := {
+						"mode": "combat",
+						"fromItem": used_item != null,
+						"fromTerrain": a_from_terrain,
+						"mainTarget": {
+							"x": int(a_main_targeted_tile.x),
+							"y": int(a_main_targeted_tile.y),
+						},
+					}
+					var validation_result: Dictionary = await scenario_host.call(
+						"run_spell_behavior_hook",
+						a_spell,
+						"validate",
+						a_castercrea,
+						scenario_targets,
+						a_power,
+						scenario_context
+					)
+					if str(validation_result.get("status", "")) == "error":
+						push_error(str(validation_result.get(
+							"message",
+							"Scenario combat-spell validation failed"
+						)))
+						continue
+					if not bool(validation_result.get("valid", true)):
+						continue
+					var cast_result: Dictionary = await scenario_host.call(
+						"run_spell_behavior_hook",
+						a_spell,
+						"cast",
+						a_castercrea,
+						scenario_targets,
+						a_power,
+						scenario_context
+					)
+					if str(cast_result.get("status", "")) == "error":
+						push_error(str(cast_result.get(
+							"message",
+							"Scenario combat-spell cast behavior failed"
+						)))
+						continue
+					var effect_result: Dictionary = await scenario_host.call(
+						"run_spell_behavior_hook",
+						a_spell,
+						"effect",
+						a_castercrea,
+						scenario_targets,
+						a_power,
+						scenario_context
+					)
+					if str(effect_result.get("status", "")) == "error":
+						push_error(str(effect_result.get(
+							"message",
+							"Scenario combat-spell effect behavior failed"
+						)))
+						continue
+					if bool(effect_result.get("handled", false)):
+						UI.ow_hud.creatureRect.logrect.log_spell_cast(
+							a_castercrea,
+							a_spell,
+							a_power,
+							""
+						)
+						if not a_from_terrain:
+							a_castercrea.used_apr += 1
+						_consume_spell_item_charges(a_castercrea, used_item)
+						UI.ow_hud.updateCharPanelDisplay()
+						continue
 				
 				UI.ow_hud.creatureRect.logrect.log_spell_cast(a_castercrea, a_spell ,a_power , '')
 				
@@ -282,25 +366,7 @@ func enter(_msg : Dictionary = {}) -> void:
 				if current_entry != entry_serial:
 					return
 				print("CbAnim l 196 just played anim for spell "+a_spell.name)
-				if used_item is ItemInstance:
-					var used_definition := (
-						GameGlobal.cmp_resources.get_item_definition(used_item)
-					)
-					if used_definition != null \
-							and used_definition.ammo_type != "cantuse":
-						a_castercrea.consume_item_charges(
-							a_castercrea.current_ammo_weapon_instance,
-						)
-					elif used_definition != null \
-							and used_definition.maximum_charges > 0:
-						a_castercrea.consume_item_charges(used_item)
-				elif used_item is Dictionary and not used_item.is_empty():
-					if used_item.has("ammo_type"):
-						a_castercrea.consume_item_charges(
-							a_castercrea.current_ammo_weapon_instance,
-						)
-					elif int(used_item.get("charges_max", 0)) > 0:
-						a_castercrea.consume_item_charges(used_item)
+				_consume_spell_item_charges(a_castercrea, used_item)
 				#call_deferred("play_spell_resolution", a_spell.proj_hit, a_caster, a_effected_tiles, a_effected_creas)
 				CLASSIC_SPELL_REFLECTION_SCRIPT.begin_resolution(
 					a_spell,
@@ -899,3 +965,21 @@ func perform_melee_attack(msg : Dictionary) -> Array:
 			attackercb.creature.please_remove_from_combat = true
 	
 	return [continue_action, returned_action_queue]
+
+
+func _consume_spell_item_charges(caster: Creature, used_item: Variant) -> void:
+	if used_item is ItemInstance:
+		var used_definition := GameGlobal.cmp_resources.get_item_definition(
+			used_item
+		)
+		if used_definition != null \
+				and used_definition.ammo_type != "cantuse":
+			caster.consume_item_charges(caster.current_ammo_weapon_instance)
+		elif used_definition != null \
+				and used_definition.maximum_charges > 0:
+			caster.consume_item_charges(used_item)
+	elif used_item is Dictionary and not used_item.is_empty():
+		if used_item.has("ammo_type"):
+			caster.consume_item_charges(caster.current_ammo_weapon_instance)
+		elif int(used_item.get("charges_max", 0)) > 0:
+			caster.consume_item_charges(used_item)

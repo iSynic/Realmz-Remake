@@ -73,6 +73,37 @@ func _show_yes_no_choice(payload: Dictionary) -> Dictionary:
 	return {"accepted": str(answer) == "YES"}
 
 
+func _scenario_choice(payload: Dictionary) -> Dictionary:
+	var text_rect: Object = service_owner.call("_text_rect")
+	if text_rect == null:
+		return _error("Realmz HUD TextRect is unavailable")
+	var options_value: Variant = payload.get("options", [])
+	if not (options_value is Array) \
+			or options_value.is_empty() \
+			or options_value.size() > 256:
+		return _error("Scenario choice requires between 1 and 256 options")
+	var choices: Array = []
+	var tokens: Array = []
+	for index: int in range(options_value.size()):
+		var label: Variant = options_value[index]
+		if not (label is String) or str(label).strip_edges().is_empty():
+			return _error("Scenario choice labels must be non-empty strings")
+		choices.append(str(label))
+		tokens.append(index)
+	var prompt := str(payload.get("prompt", ""))
+	if not prompt.is_empty():
+		text_rect.set_text(prompt, false)
+	var selected: Variant = await service_owner.call(
+		"_show_choices",
+		text_rect,
+		choices,
+		tokens
+	)
+	if not (selected is int):
+		return _error("Scenario choice returned an invalid option")
+	return {"choice": int(selected)}
+
+
 func _wait_for_click(payload: Dictionary) -> Dictionary:
 	var text_rect: Object = service_owner.call("_text_rect")
 	if text_rect == null:
@@ -183,6 +214,22 @@ func _show_scrolling_text(payload: Dictionary) -> Dictionary:
 	return {"resourceId": resource_id}
 
 
+func _hydrate_scenario_scrolling_text(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario scrolling-text catalog is unavailable")
+	var resource_id := int(payload.get("resourceId", -1))
+	var scrolling_text: Dictionary = (
+		service_owner.classic_bundle.get_scrolling_text(resource_id)
+	)
+	if scrolling_text.is_empty():
+		return _error(
+			"Scenario scrolling-text resource %d is unavailable" % resource_id
+		)
+	var result := payload.duplicate(true)
+	result["scrollingText"] = scrolling_text
+	return {"status": "ok", "payload": result}
+
+
 func _present_random_branch(payload: Dictionary) -> Dictionary:
 	_play_sound(payload)
 	if int(payload.get("messageId", 0)) == 0:
@@ -191,17 +238,24 @@ func _present_random_branch(payload: Dictionary) -> Dictionary:
 
 
 func _show_encounter(payload: Dictionary) -> Dictionary:
-	if str(payload.get("encounterKind", "")) == "complex":
-		return await _show_complex_encounter(payload)
-	if str(payload.get("encounterKind", "")) != "simple":
+	var routed_payload := payload.duplicate(true)
+	if str(routed_payload.get("_scenarioApiOperation", "")) \
+			== "core.encounter.start":
+		var hydration := _hydrate_scenario_encounter(routed_payload)
+		if str(hydration.get("status", "")) == "error":
+			return hydration
+		routed_payload = hydration.get("payload", {})
+	if str(routed_payload.get("encounterKind", "")) == "complex":
+		return await _show_complex_encounter(routed_payload)
+	if str(routed_payload.get("encounterKind", "")) != "simple":
 		return _error("Classic encounter kind is not supported")
 	var text_rect: Object = service_owner.call("_text_rect")
 	if text_rect == null:
 		return _error("Realmz HUD TextRect is unavailable")
-	var encounter: Variant = payload.get("encounter", {})
+	var encounter: Variant = routed_payload.get("encounter", {})
 	if not (encounter is Dictionary):
 		return _error("Classic encounter payload is missing its record")
-	var prompt_message: Variant = payload.get("promptMessage", {})
+	var prompt_message: Variant = routed_payload.get("promptMessage", {})
 	if prompt_message is Dictionary:
 		text_rect.set_text(str(prompt_message.get("text", "")), false)
 	var choice_model: Dictionary = service_owner.call(
@@ -209,7 +263,14 @@ func _show_encounter(payload: Dictionary) -> Dictionary:
 		encounter
 	)
 	var choices: Array = choice_model["choices"]
-	var choice_tokens: Array = choice_model["outcomes"]
+	var outcomes: Array = choice_model["outcomes"]
+	var slots: Array = choice_model.get("slots", [])
+	var choice_tokens: Array = []
+	for index: int in range(outcomes.size()):
+		choice_tokens.append("option:%d:%s" % [
+			int(slots[index]) if index < slots.size() else index,
+			str(outcomes[index]),
+		])
 	if bool(choice_model.get("canBackOut", false)):
 		service_owner.call("_append_stop_choice", choices, choice_tokens)
 	if choices.is_empty():
@@ -223,7 +284,79 @@ func _show_encounter(payload: Dictionary) -> Dictionary:
 	)
 	if str(selected_outcome) == STOP_CHOICE_TOKEN:
 		return {"outcome": 0}
-	return {"outcome": int(selected_outcome)}
+	var simple_parts := str(selected_outcome).split(":", false)
+	if simple_parts.size() != 3 or simple_parts[0] != "option":
+		return _error("Classic simple encounter returned an invalid option")
+	return {
+		"outcome": int(simple_parts[2]),
+		"optionSlot": int(simple_parts[1]),
+	}
+
+
+func _hydrate_scenario_encounter(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario encounter catalog is unavailable")
+	var encounter_kind := str(payload.get("encounterKind", "")).to_lower()
+	if encounter_kind not in ["simple", "complex"]:
+		return _error("Scenario encounter kind must be simple or complex")
+	var encounter_id := int(payload.get("encounterId", -1))
+	var encounter: Dictionary = service_owner.classic_bundle.get_encounter(
+		encounter_kind,
+		encounter_id
+	)
+	if encounter.is_empty():
+		return _error(
+			"Scenario %s encounter %d is unavailable"
+			% [encounter_kind, encounter_id]
+		)
+	var runtime_state := _classic_runtime_state()
+	if runtime_state != null:
+		if encounter_kind == "simple":
+			encounter = runtime_state.get_effective_simple_encounter(encounter)
+		else:
+			encounter = runtime_state.get_effective_complex_encounter(encounter)
+	var result := payload.duplicate(true)
+	result["encounter"] = encounter
+	result["promptMessage"] = service_owner.classic_bundle.get_message(
+		int(encounter.get("prompt", 0))
+	)
+	if encounter_kind == "complex":
+		var item_texts: Array = []
+		for item_id_value: Variant in encounter.get("itemIds", []):
+			var item_id := absi(int(item_id_value))
+			if item_id == 0:
+				continue
+			var item_text: Dictionary = (
+				service_owner.classic_bundle.get_item_text(item_id)
+			)
+			if not item_text.is_empty():
+				item_texts.append(item_text)
+		result["itemTexts"] = item_texts
+		var scenario_items: Array = []
+		var item_ids: Array = (
+			service_owner.classic_bundle.scenario_items_by_id.keys()
+		)
+		item_ids.sort()
+		for item_id_value: Variant in item_ids:
+			scenario_items.append(
+				service_owner.classic_bundle.scenario_items_by_id[item_id_value]
+			)
+		result["scenarioItems"] = scenario_items
+		if bool(encounter.get("thief", false)):
+			var thief_id := int(encounter.get("thiefSuccess", 0))
+			var thief_encounter: Dictionary = (
+				service_owner.classic_bundle.get_thief_encounter(thief_id)
+			)
+			if thief_encounter.is_empty():
+				return _error(
+					"Scenario rogue encounter %d is unavailable" % thief_id
+				)
+			if runtime_state != null:
+				thief_encounter = (
+					runtime_state.get_effective_thief_encounter(thief_encounter)
+				)
+			result["thiefEncounter"] = thief_encounter
+	return {"status": "ok", "payload": result}
 
 
 func _show_complex_encounter(payload: Dictionary) -> Dictionary:
@@ -242,7 +375,15 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 				false
 			)
 			var choices: Array = choice_model["choices"]
-			var choice_tokens: Array = choice_model["tokens"]
+			var classic_tokens: Array = choice_model["tokens"]
+			var action_slots: Array = choice_model.get("slots", [])
+			var choice_tokens: Array = []
+			for action_index: int in range(classic_tokens.size()):
+				choice_tokens.append("action:%d:%s" % [
+					int(action_slots[action_index])
+						if action_index < action_slots.size() else action_index,
+					str(classic_tokens[action_index]).trim_prefix("action:"),
+				])
 			service_owner.call(
 				"_append_complex_word_choice",
 				encounter,
@@ -323,12 +464,15 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 				if str(item_result.get("status", "")) == "cancelled":
 					continue
 				return item_result
-			var token_parts := selected.split(":", false, 1)
-			if token_parts.size() != 2 or token_parts[0] != "action":
+			var token_parts := selected.split(":", false)
+			if token_parts.size() != 3 or token_parts[0] != "action":
 				return _error(
 					"Classic complex encounter returned an invalid action"
 				)
-			return {"outcome": int(token_parts[1])}
+			return {
+				"outcome": int(token_parts[2]),
+				"optionSlot": int(token_parts[1]),
+			}
 
 	var thief_encounter: Variant = payload.get("thiefEncounter", {})
 	if not (thief_encounter is Dictionary) or thief_encounter.is_empty():
@@ -365,7 +509,14 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 			false
 		)
 		choices.append_array(action_choices["choices"])
-		choice_tokens.append_array(action_choices["tokens"])
+		var action_tokens: Array = action_choices["tokens"]
+		var action_slots: Array = action_choices.get("slots", [])
+		for action_index: int in range(action_tokens.size()):
+			choice_tokens.append("action:%d:%s" % [
+				int(action_slots[action_index])
+					if action_index < action_slots.size() else action_index,
+				str(action_tokens[action_index]).trim_prefix("action:"),
+			])
 		service_owner.call(
 			"_append_complex_word_choice",
 			encounter,
@@ -482,10 +633,11 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 			if str(item_result.get("status", "")) == "error":
 				return item_result
 			return item_result
-		var token_parts := selected.split(":", false, 1)
-		if token_parts.size() == 2 and token_parts[0] == "action":
+		var token_parts := selected.split(":", false)
+		if token_parts.size() == 3 and token_parts[0] == "action":
 			return {
-				"outcome": int(token_parts[1]),
+				"outcome": int(token_parts[2]),
+				"optionSlot": int(token_parts[1]),
 				"thiefEncounter": resolver.rogue_encounter.duplicate(true),
 			}
 		if token_parts.size() != 2 or token_parts[0] != "rogue":
@@ -630,3 +782,27 @@ func _play_sound_command(payload: Dictionary) -> Dictionary:
 		await sfx_player.finished
 	result["waitedForCompletion"] = true
 	return result
+
+
+func _play_scenario_music(payload: Dictionary) -> Dictionary:
+	var music_player: Object = _autoload("MusicStreamPlayer")
+	if music_player == null:
+		return _error("Realmz music player is unavailable")
+	var track_name := str(payload.get("trackName", "")).strip_edges()
+	if not track_name.is_empty():
+		if not music_player.has_method("play_music_specific"):
+			return _error("Realmz specific-music API is unavailable")
+		music_player.call("play_music_specific", track_name)
+		return {"trackName": track_name}
+	var music_type := str(payload.get("musicType", "")).strip_edges()
+	if music_type.is_empty():
+		return _error("Scenario music requires a music type or track name")
+	if not music_player.has_method("play_music_type"):
+		return _error("Realmz music-category API is unavailable")
+	var result: Variant = music_player.call("play_music_type", music_type)
+	return {
+		"musicType": music_type,
+		"selection": (
+			result.duplicate(true) if result is Dictionary else {}
+		),
+	}

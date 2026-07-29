@@ -51,6 +51,7 @@ func enter(_msg : Dictionary = {}) -> void:
 		#input = Vector2i.ZERO
 	
 		var mapfocuschar = GameGlobal.map.focuscharacter
+		var map_name_before_step := GameGlobal.currentmap_name
 		var playerposx : int = mapfocuschar.tile_position_x
 		var playerposy : int = mapfocuschar.tile_position_y
 		var attemptedpos : Vector2 = Vector2(playerposx+input.x, playerposy+input.y)
@@ -73,6 +74,33 @@ func enter(_msg : Dictionary = {}) -> void:
 					"Classic land edge transition failed"
 				)))
 			if bool(edge_movement.get("handled", false)):
+				if bool(edge_movement.get("transitioned", false)):
+					var destination_position: Vector2i = edge_movement.get(
+						"position",
+						Vector2i.ZERO
+					)
+					await GameGlobal.emit_classic_lifecycle_event("map-leave", {
+						"event": "map-leave",
+						"mapName": GameGlobal.last_exploration_map_name,
+						"x": playerposx,
+						"y": playerposy,
+					})
+					await GameGlobal.emit_classic_lifecycle_event("map-enter", {
+						"event": "map-enter",
+						"mapName": GameGlobal.currentmap_name,
+						"levelIndex": int(edge_movement.get("levelIndex", -1)),
+						"x": destination_position.x,
+						"y": destination_position.y,
+					})
+					await GameGlobal.emit_classic_lifecycle_event("party-moved", {
+						"event": "party-moved",
+						"fromMap": GameGlobal.last_exploration_map_name,
+						"toMap": GameGlobal.currentmap_name,
+						"fromX": playerposx,
+						"fromY": playerposy,
+						"toX": destination_position.x,
+						"toY": destination_position.y,
+					})
 				continue
 			# Native campaigns do not define cross-map adjacency here.
 			continue
@@ -110,6 +138,26 @@ func enter(_msg : Dictionary = {}) -> void:
 				
 			
 			var new_pos = Vector2i(mapfocuschar.tile_position_x, mapfocuschar.tile_position_y )
+			if (
+				new_pos != Vector2i(playerposx, playerposy)
+				and GameGlobal.currentmap_name == map_name_before_step
+			):
+				var movement_result := await GameGlobal.emit_classic_lifecycle_event(
+					"party-moved",
+					{
+						"event": "party-moved",
+						"mapName": GameGlobal.currentmap_name,
+						"fromX": playerposx,
+						"fromY": playerposy,
+						"toX": new_pos.x,
+						"toY": new_pos.y,
+					}
+				)
+				if str(movement_result.get("status", "")) == "error":
+					push_error(str(movement_result.get(
+						"message",
+						"Scenario party-moved behavior failed"
+					)))
 			if GameGlobal.map.mapboats.has(new_pos) :
 				GameGlobal.map.on_step_on_boat(new_pos)
 	
