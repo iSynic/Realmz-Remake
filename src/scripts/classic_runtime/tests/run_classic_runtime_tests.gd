@@ -6451,6 +6451,26 @@ func _test_classic_item_materializer() -> void:
 		"item materializer test clears stale output from an interrupted run"
 	)
 	DirAccess.make_dir_recursive_absolute(test_root)
+	var item_icon_directory := test_root.path_join("media/images")
+	DirAccess.make_dir_recursive_absolute(item_icon_directory)
+	var item_icon_color := Color(0.0, 1.0, 0.0, 1.0)
+	var item_icon := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	item_icon.fill(item_icon_color)
+	var item_icon_relative_path := "media/images/item-30000.png"
+	_expect_equal(
+		item_icon.save_png(test_root.path_join(item_icon_relative_path)),
+		OK,
+		"item materializer fixture writes its campaign icon"
+	)
+	bundle.documents["content"]["scenarioItems"][0]["iconId"] = 30000
+	bundle.documents["assets"]["catalog"]["icons"].append({
+		"resourceId": 30000,
+		"resourceType": "cicn",
+		"runtimeMedia": {
+			"mediaType": "image/png",
+			"path": item_icon_relative_path,
+		},
+	})
 	var materializer = ItemMaterializerScript.new()
 	var empty_record: Dictionary = bundle.documents[
 		"content"
@@ -6518,6 +6538,35 @@ func _test_classic_item_materializer() -> void:
 		item.get("classicMaterialization", {}).get("status"),
 		"complete",
 		"fully mapped fixture item is launchable"
+	)
+	_expect_equal(
+		item.get("img_ptr"),
+		"ITEM_classic_campaign_cicn_30000",
+		"scenario items prefer their exact campaign-owned icon"
+	)
+	var item_image_book: Dictionary = JSON.parse_string(
+		FileAccess.get_file_as_string(image_book_path)
+	)
+	_expect_equal(
+		item_image_book.get("ITEM_classic_campaign_cicn_30000"),
+		{"0_ref_x": 0.0, "0_ref_y": 0.0, "size": "32x32"},
+		"campaign item icon is indexed in the native item atlas"
+	)
+	var item_atlas := Image.new()
+	_expect_equal(
+		item_atlas.load(atlas_path),
+		OK,
+		"campaign item icon atlas remains readable"
+	)
+	_expect_equal(
+		item_atlas.get_size(),
+		Vector2i(34, 34),
+		"campaign item atlas preserves the native one-pixel cell inset"
+	)
+	_expect_equal(
+		item_atlas.get_pixel(1, 1).to_rgba32(),
+		item_icon_color.to_rgba32(),
+		"campaign item atlas preserves the source icon pixels"
 	)
 	var supply_record: Dictionary = bundle.documents[
 		"content"
@@ -7197,6 +7246,74 @@ func _test_classic_item_materializer() -> void:
 		OK,
 		"item materializer test cleans its workspace"
 	)
+	var city_root := ProjectSettings.globalize_path(
+		"res://Campaigns/City of Bywater (Classic)"
+	)
+	var city_bundle = BundleScript.new()
+	_expect(
+		city_bundle.load_from_directory(city_root),
+		"City of Bywater loads for its Orc Babe item-icon regression"
+	)
+	var city_item_book: Dictionary = JSON.parse_string(
+		FileAccess.get_file_as_string(city_root.path_join("Items/stuff_book.json"))
+	)
+	var orc_babe: Dictionary = {}
+	for city_item_value: Variant in city_item_book.values():
+		if city_item_value is Dictionary \
+				and int(city_item_value.get("classicItemId", 0)) == 808:
+			orc_babe = city_item_value
+			break
+	_expect_equal(
+		orc_babe.get("img_ptr"),
+		"ITEM_classic_campaign_cicn_30000",
+		"City of Bywater Orc Babe uses its scenario-owned icon instead of Rope"
+	)
+	var city_item_atlas := Image.new()
+	_expect_equal(
+		city_item_atlas.load(city_root.path_join("Items/textureAtlas.png")),
+		OK,
+		"City of Bywater item atlas remains readable"
+	)
+	var orc_babe_media_path := ""
+	for city_icon_value: Variant in city_bundle.documents.get(
+		"assets", {}
+	).get("catalog", {}).get("icons", []):
+		if city_icon_value is Dictionary \
+				and int(city_icon_value.get("resourceId", 0)) == 30000:
+			orc_babe_media_path = str(
+				city_icon_value.get("runtimeMedia", {}).get("path", "")
+			)
+			break
+	var orc_babe_source := Image.new()
+	_expect_equal(
+		orc_babe_source.load(city_root.path_join(orc_babe_media_path)),
+		OK,
+		"City of Bywater Orc Babe source icon remains readable"
+	)
+	_expect_equal(
+		city_item_atlas.get_region(Rect2i(1, 1, 32, 32)).get_data(),
+		orc_babe_source.get_data(),
+		"City of Bywater item atlas preserves every Orc Babe source pixel"
+	)
+	var city_item_resources = NativeResourcesScript.new()
+	_expect(
+		city_item_resources.load_item_resources("res://shared_assets/items/"),
+		"shared item resources load before the City of Bywater item pack"
+	)
+	_expect(
+		city_item_resources.load_item_resources(
+			city_root.path_join("Items") + "/",
+			"city-of-bywater-classic"
+		),
+		"City of Bywater item resources load through the normal native catalog"
+	)
+	_expect(
+		city_item_resources.images_book.has(
+			"ITEM_classic_campaign_cicn_30000"
+		),
+		"normal item loading exposes the Orc Babe campaign texture"
+	)
+	city_item_resources.free()
 
 
 func _test_classic_monster_generation() -> void:

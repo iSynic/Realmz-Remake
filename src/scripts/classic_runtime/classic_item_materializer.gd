@@ -12,6 +12,10 @@ const ITEM_BOOK_PATH := "Items/stuff_book.json"
 const ITEM_IMAGE_BOOK_PATH := "Items/img_pack.json"
 const ITEM_ATLAS_PATH := "Items/textureAtlas.png"
 const SHARED_ITEM_BOOK_PATH := "res://shared_assets/items/stuff_book.json"
+const MATERIALIZATION_VERSION := 2
+const ITEM_ATLAS_CELL_SIZE := 34
+const ITEM_IMAGE_SIZE := 32
+const ITEM_IMAGE_INSET := 1
 # These fields affect item behavior but do not yet have verified native equivalents.
 # Keeping the record is lossless; treating it as launchable would not be.
 const UNSUPPORTED_EFFECT_FIELDS := [
@@ -213,6 +217,17 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 	var item_book := _read_item_book(item_book_path)
 	if not last_error.is_empty():
 		return {"status": "error", "message": last_error}
+	var asset_catalog: Variant = bundle.documents.get("assets", {}).get("catalog", {})
+	var icon_catalog: Variant = asset_catalog.get("icons", []) \
+		if asset_catalog is Dictionary else []
+	var image_book_path := root.path_join(ITEM_IMAGE_BOOK_PATH)
+	var image_book := _read_image_book(image_book_path)
+	if not last_error.is_empty():
+		return {"status": "error", "message": last_error}
+	var atlas_path := root.path_join(ITEM_ATLAS_PATH)
+	var atlas_state := _read_atlas_state(atlas_path, image_book)
+	if not last_error.is_empty():
+		return {"status": "error", "message": last_error}
 	var item_texts: Array = content.get("itemTexts", []) if content.get("itemTexts", []) is Array else []
 	var records: Array[Dictionary] = []
 	for item_value: Variant in scenario_items:
@@ -225,6 +240,7 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 	)
 
 	var generated := 0
+	var updated := 0
 	var skipped := 0
 	var empty := 0
 	for record: Dictionary in records:
@@ -234,10 +250,26 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 		if bundle.is_empty_scenario_item(item_id):
 			empty += 1
 			continue
-		if _book_has_item_id(item_book, item_id):
-			skipped += 1
+		var runtime_image_key := _materialize_campaign_icon(
+			root,
+			int(record.get("iconId", 0)),
+			icon_catalog,
+			image_book,
+			atlas_state
+		)
+		if not last_error.is_empty():
+			return {"status": "error", "message": last_error}
+		var native_item := _native_item(record, item_texts, runtime_image_key)
+		var existing_key: Variant = _book_item_key_by_id(item_book, item_id)
+		if existing_key != null:
+			var existing_item: Variant = item_book[existing_key]
+			if _generated_item_needs_refresh(existing_item, native_item):
+				item_book[existing_key] = native_item
+				updated += 1
+			else:
+				skipped += 1
 			continue
-		item_book[_item_key(item_book, item_id)] = _native_item(record, item_texts)
+		item_book[_item_key(item_book, item_id)] = native_item
 		generated += 1
 
 	var items_directory := item_book_path.get_base_dir()
@@ -245,33 +277,33 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 	if make_error != OK:
 		return _fail("Could not create native item directory: %s" % error_string(make_error))
 	var write_error := OK
-	if generated > 0 or not FileAccess.file_exists(item_book_path):
+	if generated > 0 or updated > 0 or not FileAccess.file_exists(item_book_path):
 		write_error = _write_json(item_book_path, item_book)
 		if write_error != OK:
 			return _fail("Could not write native item book: %s" % error_string(write_error))
-	# CampaignResources requires a complete local item pack even though generated
-	# definitions currently reuse textures from the shared item pack.
-	var image_book_path := root.path_join(ITEM_IMAGE_BOOK_PATH)
-	if not FileAccess.file_exists(image_book_path):
-		write_error = _write_json(image_book_path, {})
+	if bool(atlas_state.get("dirty", false)) or not FileAccess.file_exists(image_book_path):
+		write_error = _write_json(image_book_path, image_book)
 		if write_error != OK:
 			return _fail("Could not write native item image book: %s" % error_string(write_error))
-	var atlas_path := root.path_join(ITEM_ATLAS_PATH)
-	if not FileAccess.file_exists(atlas_path):
-		var atlas := Image.create(1, 1, false, Image.FORMAT_RGBA8)
-		atlas.fill(Color(0, 0, 0, 0))
+	if bool(atlas_state.get("dirty", false)) or not FileAccess.file_exists(atlas_path):
+		var atlas: Image = atlas_state["image"]
 		write_error = atlas.save_png(atlas_path)
 		if write_error != OK:
 			return _fail("Could not write native item atlas: %s" % error_string(write_error))
 	return {
 		"status": "ok",
 		"generated": generated,
+		"updated": updated,
 		"skipped": skipped,
 		"empty": empty,
 	}
 
 
-func _native_item(record: Dictionary, item_texts: Array) -> Dictionary:
+func _native_item(
+	record: Dictionary,
+	item_texts: Array,
+	runtime_image_key := ""
+) -> Dictionary:
 	var item_id: int = abs(int(record.get("itemId", 0)))
 	var item_text := _item_text(item_texts, item_id)
 	var identified_name := str(item_text.get("identifiedName", "")).strip_edges()
@@ -310,6 +342,7 @@ func _native_item(record: Dictionary, item_texts: Array) -> Dictionary:
 		"classicSoundId": int(record.get("sound", 0)),
 		"classicRecord": record.duplicate(true),
 		"classicMaterialization": {
+			"version": MATERIALIZATION_VERSION,
 			"status": materialization_status,
 			"unsupportedFields": unsupported_fields,
 			"fidelityFallbacks": fidelity_fallbacks,
@@ -318,7 +351,8 @@ func _native_item(record: Dictionary, item_texts: Array) -> Dictionary:
 		"img_ptr": _native_item_icon(
 			identified_name,
 			str(item_text.get("description", "")),
-			asset_category
+			asset_category,
+			runtime_image_key
 		),
 		"sound": str(SOUND_BY_CATEGORY[asset_category]),
 		"is_magical": int(record.get("magical", 0)),
@@ -347,8 +381,11 @@ func _native_item(record: Dictionary, item_texts: Array) -> Dictionary:
 func _native_item_icon(
 	identified_name: String,
 	description: String,
-	asset_category: String
+	asset_category: String,
+	runtime_image_key := ""
 ) -> String:
+	if not runtime_image_key.is_empty():
+		return runtime_image_key
 	var shared_item := _shared_item(identified_name)
 	if not shared_item.is_empty() \
 			and str(shared_item.get("description", "")) == description:
@@ -715,18 +752,176 @@ func _read_item_book(path: String) -> Dictionary:
 	return value
 
 
-func _book_has_item_id(item_book: Dictionary, item_id: int) -> bool:
-	for item_value: Variant in item_book.values():
+func _read_image_book(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var value: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not (value is Dictionary):
+		last_error = "Existing native item image book is not a JSON object"
+		return {}
+	return value
+
+
+func _read_atlas_state(atlas_path: String, image_book: Dictionary) -> Dictionary:
+	var atlas := Image.create(1, 1, false, Image.FORMAT_RGBA8)
+	atlas.fill(Color(0, 0, 0, 0))
+	if FileAccess.file_exists(atlas_path):
+		var loaded := Image.new()
+		var load_error := loaded.load(atlas_path)
+		if load_error != OK or loaded.is_empty():
+			last_error = "Campaign item atlas is not a readable image: %s" % atlas_path
+			return {}
+		loaded.convert(Image.FORMAT_RGBA8)
+		atlas = loaded
+	var next_row := 0
+	for entry_value: Variant in image_book.values():
+		if not (entry_value is Dictionary):
+			continue
+		next_row = maxi(next_row, int(entry_value.get("0_ref_y", -1)) + 1)
+	return {
+		"image": atlas,
+		"nextRow": next_row,
+		"dirty": false,
+	}
+
+
+func _materialize_campaign_icon(
+	root: String,
+	icon_id: int,
+	icon_catalog: Variant,
+	image_book: Dictionary,
+	atlas_state: Dictionary
+) -> String:
+	if not (icon_catalog is Array):
+		return ""
+	var icon_record: Dictionary = {}
+	for icon_value: Variant in icon_catalog:
+		if icon_value is Dictionary and int(icon_value.get("resourceId", 0)) == icon_id:
+			icon_record = icon_value
+			break
+	if icon_record.is_empty():
+		return ""
+	var runtime_media: Variant = icon_record.get("runtimeMedia", {})
+	if not (runtime_media is Dictionary):
+		last_error = "Classic item icon %d is missing runtime media" % icon_id
+		return ""
+	if str(runtime_media.get("mediaType", "")).to_lower() != "image/png":
+		last_error = "Classic item icon %d runtime media is not a PNG" % icon_id
+		return ""
+	var relative_path := str(runtime_media.get("path", "")).strip_edges().replace("\\", "/")
+	if not _is_safe_relative_path(relative_path):
+		last_error = "Classic item icon %d has an unsafe runtime media path" % icon_id
+		return ""
+	var source_image := Image.new()
+	var load_error := source_image.load(root.path_join(relative_path))
+	if load_error != OK or source_image.is_empty():
+		last_error = "Classic item icon runtime media is not readable: %s" % relative_path
+		return ""
+	source_image.convert(Image.FORMAT_RGBA8)
+	if source_image.get_size() != Vector2i(ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE):
+		last_error = (
+			"Classic item icon runtime media %s is %d x %d; "
+			+ "native item icons require 32 x 32 pixels"
+		) % [relative_path, source_image.get_width(), source_image.get_height()]
+		return ""
+	var image_key := "ITEM_classic_campaign_cicn_%s" % _icon_key_suffix(icon_id)
+	var row := _existing_image_row(image_book.get(image_key, {}), atlas_state)
+	if row < 0:
+		row = int(atlas_state.get("nextRow", 0))
+		atlas_state["nextRow"] = row + 1
+		image_book[image_key] = {
+			"0_ref_x": 0,
+			"0_ref_y": row,
+			"size": "32x32",
+		}
+	_grow_atlas(
+		atlas_state,
+		ITEM_ATLAS_CELL_SIZE,
+		(row + 1) * ITEM_ATLAS_CELL_SIZE
+	)
+	var atlas: Image = atlas_state["image"]
+	atlas.blit_rect(
+		source_image,
+		Rect2i(Vector2i.ZERO, Vector2i(ITEM_IMAGE_SIZE, ITEM_IMAGE_SIZE)),
+		Vector2i(
+			ITEM_IMAGE_INSET,
+			row * ITEM_ATLAS_CELL_SIZE + ITEM_IMAGE_INSET
+		)
+	)
+	atlas_state["dirty"] = true
+	return image_key
+
+
+func _existing_image_row(entry: Variant, atlas_state: Dictionary) -> int:
+	if not (entry is Dictionary) or str(entry.get("size", "")) != "32x32":
+		return -1
+	if int(entry.get("0_ref_x", -1)) != 0:
+		return -1
+	var row := int(entry.get("0_ref_y", -1))
+	var atlas: Image = atlas_state["image"]
+	if (
+		row < 0
+		or ITEM_IMAGE_INSET + ITEM_IMAGE_SIZE > atlas.get_width()
+		or row * ITEM_ATLAS_CELL_SIZE + ITEM_IMAGE_INSET + ITEM_IMAGE_SIZE \
+			> atlas.get_height()
+	):
+		return -1
+	return row
+
+
+func _grow_atlas(atlas_state: Dictionary, minimum_width: int, minimum_height: int) -> void:
+	var current: Image = atlas_state["image"]
+	var width := maxi(current.get_width(), minimum_width)
+	var height := maxi(current.get_height(), minimum_height)
+	if width == current.get_width() and height == current.get_height():
+		return
+	var expanded := Image.create(width, height, false, Image.FORMAT_RGBA8)
+	expanded.fill(Color(0, 0, 0, 0))
+	expanded.blit_rect(
+		current,
+		Rect2i(Vector2i.ZERO, current.get_size()),
+		Vector2i.ZERO
+	)
+	atlas_state["image"] = expanded
+
+
+func _icon_key_suffix(icon_id: int) -> String:
+	return "neg_%d" % abs(icon_id) if icon_id < 0 else str(icon_id)
+
+
+func _is_safe_relative_path(path: String) -> bool:
+	if path.is_empty() or path.is_absolute_path() or path.begins_with("res://"):
+		return false
+	for component: String in path.split("/", false):
+		if component in [".", ".."]:
+			return false
+	return true
+
+
+func _book_item_key_by_id(item_book: Dictionary, item_id: int) -> Variant:
+	for item_key: Variant in item_book:
+		var item_value: Variant = item_book[item_key]
 		if not (item_value is Dictionary):
 			continue
 		if abs(int(item_value.get("classicItemId", 0))) == item_id:
-			return true
+			return item_key
 		var ids: Variant = item_value.get("classicItemIds", [])
 		if ids is Array:
 			for id_value: Variant in ids:
 				if abs(int(id_value)) == item_id:
-					return true
-	return false
+					return item_key
+	return null
+
+
+func _generated_item_needs_refresh(existing_item: Variant, desired_item: Dictionary) -> bool:
+	if not (existing_item is Dictionary):
+		return false
+	var materialization: Variant = existing_item.get("classicMaterialization", {})
+	if not (materialization is Dictionary):
+		return true
+	if int(materialization.get("version", 0)) < MATERIALIZATION_VERSION:
+		return true
+	return str(existing_item.get("img_ptr", "")) != str(desired_item.get("img_ptr", ""))
 
 
 func _item_key(item_book: Dictionary, item_id: int) -> String:
