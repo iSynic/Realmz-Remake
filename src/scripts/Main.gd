@@ -2,10 +2,17 @@ extends Control
 
 @export var debug = false
 
+const ScenarioPreviewHostScript = preload(
+	"res://scripts/scenario_runtime/preview/scenario_preview_host.gd"
+)
+
 #@onready var _combatSystem # child from main #
 #onready var _gameState # child from main # Now Autoloaded
 
 func _ready():
+	var preview_host := ScenarioPreviewHostScript.new()
+	if preview_host.start_from_command_line():
+		add_child(preview_host)
 #	get_viewport().set_sdf_scale(2)
 	#print("MAIN METHODS : \n",get_script().get_script_method_list())
 	var _err1 = get_tree().root.connect("size_changed",Callable(NodeAccess.__Map(),"_on_viewport_size_changed"))
