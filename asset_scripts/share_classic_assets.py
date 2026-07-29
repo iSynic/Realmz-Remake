@@ -14,7 +14,8 @@ from typing import Any
 FORMAT = "realmz-remake-classic-shared-assets"
 FORMAT_VERSION = 1
 HASH_ALGORITHM = "sha256"
-CAMPAIGN_FORMAT = "realmz-remake-classic-campaign"
+CAMPAIGN_FORMAT = "realmz-remake-scenario"
+CAMPAIGN_FORMAT_VERSION = 3
 SHARED_KIND = "stock-tileset"
 
 
@@ -67,6 +68,31 @@ def write_compact_json(path: Path, value: dict[str, Any]) -> None:
         encoding="utf-8",
         newline="\n",
     )
+
+
+def refresh_campaign_integrity(
+    manifest: dict[str, Any], shared_records: list[dict[str, Any]]
+) -> None:
+    if manifest.get("formatVersion") != CAMPAIGN_FORMAT_VERSION:
+        raise ValueError(
+            "Shared asset packaging requires a Realmz Remake scenario v3 manifest"
+        )
+    integrity = manifest.get("integrity")
+    if not isinstance(integrity, dict) or integrity.get("algorithm") != HASH_ALGORITHM:
+        raise ValueError("Campaign manifest has no supported integrity section")
+    files = integrity.get("files")
+    if not isinstance(files, dict):
+        raise ValueError("Campaign manifest integrity.files must be an object")
+    for record in shared_records:
+        files.pop(record["logicalPath"], None)
+    integrity.pop("packageHash", None)
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    integrity["packageHash"] = hashlib.sha256(canonical).hexdigest()
 
 
 def store_payload_path(store_root: Path, digest: str, extension: str) -> Path:
@@ -363,6 +389,7 @@ def apply_plan(plan: dict[str, Any]) -> None:
             }
         else:
             campaign["manifest"].pop("sharedAssets", None)
+        refresh_campaign_integrity(campaign["manifest"], records)
         write_compact_json(campaign["manifestPath"], campaign["manifest"])
 
     for reference in plan["selectedLocal"]:

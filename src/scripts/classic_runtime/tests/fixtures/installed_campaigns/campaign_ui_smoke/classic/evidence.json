@@ -1,12 +1,1 @@
-{
-  "schemaVersion": 1,
-  "fixture": "Normal campaign UI launch smoke",
-  "fixtureNote": "Purpose-built compiled records exercise discovery, selection, and launch through the standard campaign panel.",
-  "validation": {
-    "ok": true,
-    "errors": []
-  },
-  "semanticDecoding": {
-    "dispatcherNoops": []
-  }
-}
+{"schemaVersion":2,"fixture":"Normal campaign UI launch smoke","fixtureNote":"Purpose-built compiled records exercise discovery, selection, and launch through the standard campaign panel.","validation":{"ok":true,"errors":[]},"semanticDecoding":{"dispatcherNoops":[]},"source":{"origin":"test-fixture","files":[]},"recordCatalog":{"counts":{},"alignments":[],"records":[{"key":"field:#/shell","kind":"field","id":"#/shell","document":"classic/scenario.json","path":"#/shell","metadata":{"sourceFile":"Integration fixture"}},{"key":"randomLevels:land:0:randlevel","kind":"randomLevels","id":"land:0:randlevel","document":"classic/scripts.json","path":"#/randomLevels/0","metadata":{"source":"Data RD"}}]},"diagnostics":[]}

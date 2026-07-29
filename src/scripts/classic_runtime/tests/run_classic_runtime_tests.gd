@@ -10,6 +10,9 @@ const StateScript = preload("res://scripts/classic_runtime/classic_runtime_state
 const InterpreterScript = preload(
 	"res://scripts/scenario_runtime/scenario_interpreter.gd"
 )
+const ScenarioCapabilityCatalogScript = preload(
+	"res://scripts/scenario_runtime/scenario_capability_catalog.gd"
+)
 const CombatMacroQueueScript = preload(
 	"res://scripts/classic_runtime/classic_combat_macro_queue.gd"
 )
@@ -2851,7 +2854,9 @@ func _test_bundle_contract_validation() -> void:
 	var version_bundle = BundleScript.new()
 	version_bundle.manifest = _minimal_contract_manifest()
 	version_bundle.documents = _minimal_contract_documents()
-	version_bundle.documents["rules"]["schemaVersion"] = 2
+	version_bundle.documents["rules"]["schemaVersion"] = (
+		BundleScript.DOCUMENT_SCHEMA_VERSION + 1
+	)
 	_expect(
 		not version_bundle._validate_document_contract(),
 		"bundle contract rejects an unsupported document schema"
@@ -3449,12 +3454,12 @@ func _test_providence_authoritative_export() -> void:
 		"producer fixture encounter count"
 	)
 	_expect(
-		_has_progression_media_action(
+		not _has_progression_media_action(
 			bundle.documents["scripts"].get("triggers", []),
 			9,
 			321
 		),
-		"producer fixture retains its trigger progression-media marker"
+		"producer fixture omits legacy trigger progression-media policy"
 	)
 	var encounter_records: Array = []
 	encounter_records.append_array(
@@ -3464,8 +3469,8 @@ func _test_providence_authoritative_export() -> void:
 		bundle.documents["encounters"].get("complexEncounters", [])
 	)
 	_expect(
-		_has_progression_media_action(encounter_records, 9, 321),
-		"producer fixture retains its encounter progression-media marker"
+		not _has_progression_media_action(encounter_records, 9, 321),
+		"producer fixture omits legacy encounter progression-media policy"
 	)
 
 	var provenance_value: Variant = JSON.parse_string(
@@ -3477,7 +3482,7 @@ func _test_providence_authoritative_export() -> void:
 	var provenance: Dictionary = provenance_value
 	_expect_equal(
 		provenance.get("producer", {}).get("commit"),
-		"c26443b85ee3a0e883bf0a8b1d46d27ccf9818ca",
+		"b2129b7f267b655191594371532e8322c814e144",
 		"producer fixture records its Providence commit"
 	)
 	var expected_readiness: Dictionary = provenance.get("readiness", {})
@@ -3489,11 +3494,11 @@ func _test_providence_authoritative_export() -> void:
 	)
 	_expect_equal(
 		expected_readiness.get("fidelityFallbacks"),
-		0,
-		"producer fixture provenance records no fidelity fallbacks"
+		1,
+		"producer fixture provenance records its inactive custom spell"
 	)
 	var expected_files: Array = provenance.get("files", [])
-	_expect_equal(expected_files.size(), 17, "producer fixture provenance covers every file")
+	_expect_equal(expected_files.size(), 18, "producer fixture provenance covers every file")
 	for expected_value: Variant in expected_files:
 		if not (expected_value is Dictionary):
 			_expect(false, "producer fixture provenance file entry is an object")
@@ -3626,12 +3631,16 @@ func _test_providence_authoritative_export() -> void:
 	)
 	_expect_equal(
 		readiness.get("totals", {}).get("fidelityFallbacks"),
-		0,
-		"producer fixture has no fidelity fallbacks"
+		1,
+		"producer fixture reports its inactive custom spell"
 	)
 	_expect(
-		not _readiness_has_reference_diagnostic(readiness, "unresolved-spell-identity", 5202),
-		"producer fixture resolves its packed custom-spell identity"
+		_readiness_has_reference_diagnostic(
+			readiness,
+			"inactive-custom-spell-definition",
+			5202
+		),
+		"producer fixture identifies its preserved inactive custom spell"
 	)
 
 	var fixture_coverage: Dictionary = MaterializationFixtureAuditScript.inspect(
@@ -3700,21 +3709,23 @@ func _minimal_contract_manifest() -> Dictionary:
 
 
 func _minimal_contract_documents() -> Dictionary:
+	var capability_catalog = ScenarioCapabilityCatalogScript.new()
+	capability_catalog.load_builtin()
 	return {
 		"scenario": {
 			"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION,
 			"identity": {"id": "scenario-contract-test", "name": "Contract Test"},
 		},
-		"maps": {"schemaVersion": 1, "maps": []},
+		"maps": {"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION, "maps": []},
 		"scripts": {
-			"schemaVersion": 1,
+			"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION,
 			"triggers": [],
 			"extraCodes": [],
 			"messages": [],
 			"randomLevels": [],
 		},
 		"encounters": {
-			"schemaVersion": 1,
+			"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION,
 			"battles": [],
 			"treasures": [],
 			"shops": [],
@@ -3724,18 +3735,21 @@ func _minimal_contract_documents() -> Dictionary:
 			"timedEncounters": [],
 		},
 		"content": {
-			"schemaVersion": 1,
+			"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION,
 			"monsters": [],
 			"scenarioItems": [],
 			"itemTexts": [],
 		},
-		"rules": {"schemaVersion": 1},
+		"rules": {"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION},
 		"assets": {
-			"schemaVersion": 1,
+			"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION,
 			"catalog": {"pictures": [], "sounds": []},
 			"scrollingTexts": [],
 		},
-		"evidence": {"schemaVersion": 1, "semanticDecoding": {}},
+		"evidence": {
+			"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION,
+			"semanticDecoding": {},
+		},
 		"runtime": {
 			"schemaVersion": BundleScript.RUNTIME_DOCUMENT_SCHEMA_VERSION,
 			"recommendedGameplayProfile": "core.classic",
@@ -3752,6 +3766,14 @@ func _minimal_contract_documents() -> Dictionary:
 				"nativeRealmz": true,
 				"remakeOnlyReasons": [],
 			},
+		},
+		"remakeScripts": {
+			"schemaVersion": 2,
+			"apiVersion": 1,
+			"capabilityCatalogHash": capability_catalog.catalog_hash(),
+			"scripts": [],
+			"attachments": [],
+			"persistentVariables": [],
 		},
 	}
 
@@ -3799,10 +3821,18 @@ func _test_custom_monster_battle_fixture() -> void:
 		169,
 		"custom monster fixture preserves the complete 13x13 battle grid"
 	)
+	var fixture_evidence_value: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(
+			CUSTOM_MONSTER_BATTLE_FIXTURE.path_join("classic/evidence.json")
+		)
+	)
+	var fixture_evidence: Dictionary = (
+		fixture_evidence_value if fixture_evidence_value is Dictionary else {}
+	)
 	_expect_equal(
-		bundle.documents.get("evidence", {}).get(
-			"conformance", {}
-		).get("hostileMonsterIds", []).map(
+		fixture_evidence.get("conformance", {}).get(
+			"hostileMonsterIds", []
+		).map(
 			func(monster_id: Variant) -> int: return int(monster_id)
 		),
 		[201, 202, 203, 205],
@@ -4111,7 +4141,7 @@ func _test_installed_classic_campaign_layout() -> void:
 	)
 	_expect_equal(
 		producer_rules.get("versionLabel"),
-		"Classic format v2 (realmz-7.1)",
+		"Classic format v3 (realmz-7.1)",
 		"installed campaign selection identifies its compatibility contract"
 	)
 	_expect_equal(
@@ -4344,7 +4374,7 @@ func _test_installed_classic_campaign_layout() -> void:
 			"providence-ownership-proof"
 		).get("status"),
 		"error",
-		"version-one campaign save is rejected by scenario runtime v2"
+		"version-one campaign save is rejected by the scenario runtime"
 	)
 
 	var restored_session = CampaignSessionScript.new()
@@ -4464,7 +4494,7 @@ func _test_installed_classic_campaign_layout() -> void:
 	_expect_equal(
 		CampaignSessionScript.validate_save_payload({}).get("status"),
 		"error",
-		"save without a scenario runtime v2 envelope is rejected"
+		"save without a scenario runtime envelope is rejected"
 	)
 	var legacy_result: Dictionary = restored_session.restore_legacy_native_location({
 		"mapName": "map_4",
@@ -4474,7 +4504,7 @@ func _test_installed_classic_campaign_layout() -> void:
 	_expect_equal(legacy_result.get("status"), "error", "legacy native-location save is rejected")
 	_expect(
 		str(legacy_result.get("message", "")).contains("start a new playthrough"),
-		"legacy save rejection provides the v2 upgrade action"
+		"legacy save rejection provides an actionable restart instruction"
 	)
 	var equipment_adapter = GodotAdapterScript.new()
 	equipment_adapter.stored_party_equipment = {
@@ -5131,6 +5161,14 @@ func _test_classic_campaign_admission() -> void:
 		"character-level",
 		"Data RI character-level gate rejects only the excessive character"
 	)
+	var legacy_rule_bundle = BundleScript.new()
+	legacy_rule_bundle.documents = install.bundle.documents.duplicate(true)
+	legacy_rule_bundle.documents["rules"].erase("tableSelection")
+	var legacy_rules := CampaignAdmissionScript.rules_from_bundle(
+		legacy_rule_bundle
+	)
+	legacy_rules["valid"] = true
+	legacy_rules["diagnostic"] = ""
 	var unresolved_fixture_override := CampaignAdmissionScript.character_admission(
 		CampaignAdmissionCharacter.new(
 			"Scenario Kin",
@@ -5138,7 +5176,7 @@ func _test_classic_campaign_admission() -> void:
 			"Providence Kin",
 			"Fighter"
 		),
-		rules
+		legacy_rules
 	)
 	_expect_equal(
 		unresolved_fixture_override.get("code"),
@@ -5867,7 +5905,7 @@ func _test_classic_map_materializer() -> void:
 	_expect(
 		not FileAccess.file_exists(map_directory.path_join("map_scripts.gd"))
 			and not FileAccess.file_exists(dungeon_directory.path_join("map_scripts.gd")),
-		"scenario v2 map materialization does not generate executable scripts"
+		"scenario map materialization does not generate executable scripts"
 	)
 	var first_artifacts := {}
 	var deterministic_files := [
@@ -7133,6 +7171,9 @@ func _test_classic_item_materializer() -> void:
 	var unsupported_bundle = BundleScript.new()
 	unsupported_bundle.load_from_directory(PROVIDENCE_AUTHORITATIVE_FIXTURE)
 	unsupported_bundle.documents["content"]["scenarioItems"][0]["damage"] = 1
+	unsupported_bundle.documents["encounters"]["complexEncounters"][0][
+		"callable"
+	] = true
 	_expect_equal(
 		materializer.materialize(unsupported_bundle, unsupported_root).get("status"),
 		"ok",
@@ -9855,6 +9896,13 @@ func _test_classic_campaign_package_installer() -> void:
 	if producer_maps_file != null:
 		producer_maps_file.store_string(JSON.stringify(producer_maps, "  ") + "\n")
 		producer_maps_file.close()
+	_expect(
+		_refresh_v3_fixture_integrity(
+			materializable_export,
+			["classic/maps.json"]
+		),
+		"installer test refreshes its disposable map package integrity"
+	)
 	var materialized_install: Dictionary = installer.install_export(
 		materializable_export,
 		campaigns_directory
@@ -9944,6 +9992,33 @@ func _test_classic_campaign_package_installer() -> void:
 	if unsupported_content_file != null:
 		unsupported_content_file.store_string(JSON.stringify(unsupported_content, "  ") + "\n")
 		unsupported_content_file.close()
+	var unsupported_encounters_path := unsupported_item_export.path_join(
+		"classic/encounters.json"
+	)
+	var unsupported_encounters: Dictionary = JSON.parse_string(
+		FileAccess.get_file_as_string(unsupported_encounters_path)
+	)
+	unsupported_encounters["complexEncounters"][0]["callable"] = true
+	var unsupported_encounters_file := FileAccess.open(
+		unsupported_encounters_path,
+		FileAccess.WRITE
+	)
+	_expect(
+		unsupported_encounters_file != null,
+		"installer test activates its disposable complex encounter"
+	)
+	if unsupported_encounters_file != null:
+		unsupported_encounters_file.store_string(
+			JSON.stringify(unsupported_encounters, "  ") + "\n"
+		)
+		unsupported_encounters_file.close()
+	_expect(
+		_refresh_v3_fixture_integrity(
+			unsupported_item_export,
+			["classic/content.json", "classic/encounters.json"]
+		),
+		"installer test refreshes its disposable item package integrity"
+	)
 	var unsupported_item_install: Dictionary = installer.install_export(
 		unsupported_item_export,
 		campaigns_directory
@@ -9985,6 +10060,13 @@ func _test_classic_campaign_package_installer() -> void:
 			JSON.stringify(unsupported_monster_content, "  ") + "\n"
 		)
 		unsupported_monster_content_file.close()
+	_expect(
+		_refresh_v3_fixture_integrity(
+			unsupported_monster_export,
+			["classic/content.json"]
+		),
+		"installer test refreshes its disposable monster package integrity"
+	)
 	var unsupported_monster_install: Dictionary = installer.install_export(
 		unsupported_monster_export,
 		campaigns_directory
@@ -10175,6 +10257,51 @@ func _test_classic_campaign_package_installer() -> void:
 		OK,
 		"package installer test cleans its workspace"
 	)
+
+
+func _refresh_v3_fixture_integrity(
+	package_root: String,
+	modified_paths: Array[String]
+) -> bool:
+	var manifest_path := package_root.path_join("campaign.json")
+	var manifest_value: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(manifest_path)
+	)
+	if not (manifest_value is Dictionary):
+		return false
+	var manifest: Dictionary = manifest_value
+	var integrity: Variant = manifest.get("integrity")
+	if not (integrity is Dictionary) or not (integrity.get("files") is Dictionary):
+		return false
+	for relative_path: String in modified_paths:
+		var payload_path := package_root.path_join(relative_path)
+		if not FileAccess.file_exists(payload_path):
+			return false
+		var payload := FileAccess.get_file_as_bytes(payload_path)
+		integrity["files"][relative_path] = {
+			"bytes": payload.size(),
+			"sha256": _sha256_fixture_bytes(payload),
+		}
+	integrity.erase("packageHash")
+	var canonical_manifest := JSON.stringify(BundleScript._canonical_value(manifest))
+	integrity["packageHash"] = _sha256_fixture_bytes(
+		canonical_manifest.to_utf8_buffer()
+	)
+	var manifest_file := FileAccess.open(manifest_path, FileAccess.WRITE)
+	if manifest_file == null:
+		return false
+	manifest_file.store_string(JSON.stringify(manifest, "  ") + "\n")
+	manifest_file.close()
+	return true
+
+
+func _sha256_fixture_bytes(payload: PackedByteArray) -> String:
+	var context := HashingContext.new()
+	if context.start(HashingContext.HASH_SHA256) != OK:
+		return ""
+	if context.update(payload) != OK:
+		return ""
+	return context.finish().hex_encode()
 
 
 func _test_failed_save_restore_rolls_back() -> void:
@@ -35996,7 +36123,7 @@ func _execution_audit_test_bundle():
 		"maxTimes": 1,
 		"prompt": 0,
 	}
-	bundle.dispatcher_noop_keys["Data ED2:2:1:200"] = true
+	bundle.dispatcher_noop_keys["encounter:complex:2:1:200"] = true
 	return bundle
 
 

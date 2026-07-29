@@ -1,9 +1,11 @@
-# Classic behavior in scenario runtime v2
+# Classic behavior in the modular scenario runtime
 
 This directory contains the source-backed Classic mechanics consumed by the
 modular scenario runtime. The public execution, extension, port, rules, and save
 contracts live under `scripts/scenario_runtime`; Providence produces the
-`realmz-remake-scenario` v2 package consumed here.
+`realmz-remake-scenario` v3 package consumed here. Named scenario scripts also
+enter through `ScenarioInterpreter`: safe scripts are VM instructions, while
+full GDScript uses the sandboxed or explicitly approved trusted reducer policy.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the ownership boundary between the
 scenario VM, six Godot ports, trusted extensions, and gameplay rules.
@@ -18,7 +20,8 @@ The custom-rule audit command inventories a supplied scenario library's spell,
 race, and caste payloads without turning preserved definitions into inferred
 runtime usage.
 
-`ClassicCampaignBundle` validates and indexes format v2. `ClassicExecutionAudit`
+`ClassicCampaignBundle` validates and indexes format v3, including complete
+payload integrity, the evidence sidecar, and script manifests. `ClassicExecutionAudit`
 inventories executable map, encounter, and combat actions without turning those
 counts into a playability percentage. `ClassicRuntimeState` owns source-specific
 mutations. `ScenarioInterpreter` is the public AP/XAP engine; handler families

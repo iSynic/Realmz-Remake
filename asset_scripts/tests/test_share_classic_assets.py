@@ -31,8 +31,14 @@ class ShareClassicAssetsTests(unittest.TestCase):
                     json.dumps(
                         {
                             "format": MODULE.CAMPAIGN_FORMAT,
+                            "formatVersion": MODULE.CAMPAIGN_FORMAT_VERSION,
                             "id": f"campaign-{index}",
                             "name": campaign_name,
+                            "integrity": {
+                                "algorithm": MODULE.HASH_ALGORITHM,
+                                "files": {},
+                                "packageHash": "fixture",
+                            },
                         }
                     ),
                     encoding="utf-8",
@@ -105,8 +111,14 @@ class ShareClassicAssetsTests(unittest.TestCase):
                     json.dumps(
                         {
                             "format": MODULE.CAMPAIGN_FORMAT,
+                            "formatVersion": MODULE.CAMPAIGN_FORMAT_VERSION,
                             "id": f"campaign-{index}",
                             "name": campaign_name,
+                            "integrity": {
+                                "algorithm": MODULE.HASH_ALGORITHM,
+                                "files": {},
+                                "packageHash": "fixture",
+                            },
                         }
                     ),
                     encoding="utf-8",

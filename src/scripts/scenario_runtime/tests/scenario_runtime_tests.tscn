@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource path="res://scripts/scenario_runtime/tests/scenario_runtime_tests.gd" type="Script" id="1"]
+
+[node name="ScenarioRuntimeTests" type="Node"]
+script = ExtResource("1")

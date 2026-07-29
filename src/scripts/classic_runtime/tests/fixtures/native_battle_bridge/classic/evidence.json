@@ -1,12 +1,1 @@
-{
-  "schemaVersion": 1,
-  "fixture": "Native map/battle bridge integration fixture",
-  "fixtureNote": "Purpose-built records exercise a native City of Bywater map and Battle_24 resource.",
-  "validation": {
-    "ok": true,
-    "errors": []
-  },
-  "semanticDecoding": {
-    "dispatcherNoops": []
-  }
-}
+{"schemaVersion":2,"fixture":"Native map/battle bridge integration fixture","fixtureNote":"Purpose-built records exercise a native City of Bywater map and Battle_24 resource.","validation":{"ok":true,"errors":[]},"semanticDecoding":{"dispatcherNoops":[]},"source":{"origin":"test-fixture","files":[]},"recordCatalog":{"counts":{},"alignments":[],"records":[{"key":"field:#/shell","kind":"field","id":"#/shell","document":"classic/scenario.json","path":"#/shell","metadata":{"sourceFile":"Integration fixture"}},{"key":"randomLevels:land:0:randlevel","kind":"randomLevels","id":"land:0:randlevel","document":"classic/scripts.json","path":"#/randomLevels/0","metadata":{"source":"Data RD"}},{"key":"triggers:Data DD:0:200","kind":"triggers","id":"Data DD:0:200","document":"classic/scripts.json","path":"#/scripts/triggers/0","metadata":{"source":"Data DD","recordIndex":200}},{"key":"triggers:Data ED3:macro:900","kind":"triggers","id":"Data ED3:macro:900","document":"classic/scripts.json","path":"#/scripts/triggers/1","metadata":{"source":"Data ED3","recordIndex":900}},{"key":"triggers:Data ED3:macro:901","kind":"triggers","id":"Data ED3:macro:901","document":"classic/scripts.json","path":"#/scripts/triggers/2","metadata":{"source":"Data ED3","recordIndex":901}}]},"diagnostics":[]}

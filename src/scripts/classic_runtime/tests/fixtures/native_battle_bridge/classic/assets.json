@@ -1,13 +1,1 @@
-{
-  "schemaVersion": 1,
-  "managedAssets": [],
-  "catalog": {
-    "tilesets": [],
-    "pictures": [],
-    "icons": [],
-    "sounds": [],
-    "specialLandTiles": []
-  },
-  "monsterIconOverrides": [],
-  "scenarioIconResources": []
-}
+{"schemaVersion":2,"managedAssets":[],"catalog":{"tilesets":[],"pictures":[],"icons":[],"sounds":[],"specialLandTiles":[]},"monsterIconOverrides":[],"scenarioIconResources":[]}

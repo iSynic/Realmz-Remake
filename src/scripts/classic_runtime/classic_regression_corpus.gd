@@ -492,21 +492,27 @@ func _record_confidence(
 	bundle: ClassicCampaignBundle,
 	action: Dictionary
 ) -> String:
-	var record: Dictionary = {}
+	var evidence: Dictionary = {}
 	match str(action.get("storageContext", "")):
 		"data-ed-result":
-			record = bundle.get_encounter(
-				"simple",
+			evidence = bundle.evidence_record(
+				"simpleEncounters",
 				int(action.get("recordIndex", -1))
 			)
 		"data-ed2-result":
-			record = bundle.get_encounter(
-				"complex",
+			evidence = bundle.evidence_record(
+				"complexEncounters",
 				int(action.get("recordIndex", -1))
 			)
 		_:
-			record = bundle.get_trigger(str(action.get("recordId", "")))
-	var provenance: Variant = record.get("provenance", {})
+			evidence = bundle.evidence_record(
+				"triggers",
+				str(action.get("recordId", ""))
+			)
+	var metadata: Variant = evidence.get("metadata", {})
+	var provenance: Variant = (
+		metadata.get("provenance", {}) if metadata is Dictionary else {}
+	)
 	return str(provenance.get("confidence", "")) \
 		if provenance is Dictionary else ""
 

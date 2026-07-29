@@ -16,12 +16,14 @@ func inspect(bundle: ClassicCampaignBundle) -> Dictionary:
 	trigger_ids.sort()
 	for trigger_id: Variant in trigger_ids:
 		var trigger: Dictionary = bundle.triggers_by_id[trigger_id]
+		var trigger_source := _record_source(trigger)
+		var trigger_index := _record_index(trigger)
 		var storage_context := (
-			"data-ed3-xap" if str(trigger.get("source", "")) == "Data ED3" else "map-trigger"
+			"data-ed3-xap" if trigger_source == "Data ED3" else "map-trigger"
 		)
 		var trigger_contexts: Array = [storage_context]
 		if storage_context == "data-ed3-xap":
-			for context: Variant in root_contexts.get(int(trigger.get("recordIndex", -1)), []):
+			for context: Variant in root_contexts.get(trigger_index, []):
 				if not trigger_contexts.has(context):
 					trigger_contexts.append(context)
 		_append_record_actions(
@@ -128,7 +130,11 @@ func _append_encounter_actions(
 		var record_id := int(record_id_value)
 		var encounter: Dictionary = records_by_id[record_id_value]
 		var action_record := {
-			"id": "%s:%d" % [storage_context, record_id],
+			"id": "%s:%s:%d" % [
+				"encounter",
+				"simple" if storage_context == "data-ed-result" else "complex",
+				record_id,
+			],
 			"source": source,
 			"recordIndex": record_id,
 			"actions": encounter.get("actions", []),
@@ -156,15 +162,17 @@ func _append_record_actions(
 	var record_actions: Variant = record.get("actions", [])
 	if not (record_actions is Array):
 		return
+	var record_source := _record_source(record)
+	var record_index := _record_index(record)
 	if not executable and not record_actions.is_empty():
 		diagnostics.append({
 			"severity": "warning",
 			"code": "inactive-action-record",
-			"source": str(record.get("source", "")),
-			"recordIndex": int(record.get("recordIndex", -1)),
+			"source": record_source,
+			"recordIndex": record_index,
 			"message": "%s record %d contains actions but has no active execution path" % [
-				str(record.get("source", "Unknown source")),
-				int(record.get("recordIndex", -1)),
+				record_source if not record_source.is_empty() else "Unknown source",
+				record_index,
 			],
 		})
 	var flow_executable := executable
@@ -189,14 +197,14 @@ func _append_record_actions(
 			support = "source-backed-noop"
 		var entry := {
 			"key": "%s:%d:%d:%d" % [
-				str(record.get("source", "")),
-				int(record.get("recordIndex", -1)),
+				record_source,
+				record_index,
 				slot,
 				raw_code,
 			],
 			"recordId": str(record.get("id", "")),
-			"source": str(record.get("source", "")),
-			"recordIndex": int(record.get("recordIndex", -1)),
+			"source": record_source,
+			"recordIndex": record_index,
 			"slot": slot,
 			"rawCode": raw_code,
 			"code": code,
@@ -235,6 +243,26 @@ func _append_record_actions(
 		if flow_executable and not _has_linear_fallthrough(bundle, action_value):
 			flow_executable = false
 			blocked_by_slot = slot
+
+
+func _record_source(record: Dictionary) -> String:
+	var source := str(record.get("source", "")).strip_edges()
+	if not source.is_empty():
+		return source
+	var stable_id := str(record.get("id", ""))
+	var separator := stable_id.find(":")
+	return stable_id.left(separator) if separator >= 0 else ""
+
+
+func _record_index(record: Dictionary) -> int:
+	if record.has("recordIndex"):
+		return int(record["recordIndex"])
+	var stable_id := str(record.get("id", ""))
+	var separator := stable_id.rfind(":")
+	if separator < 0:
+		return -1
+	var suffix := stable_id.substr(separator + 1)
+	return int(suffix) if suffix.is_valid_int() else -1
 
 
 func _collect_macro_roots(

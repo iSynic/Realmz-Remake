@@ -33,6 +33,12 @@ const InstructionRegistryScript = preload(
 const InterpreterScript = preload(
 	"res://scripts/scenario_runtime/scenario_interpreter.gd"
 )
+const CapabilityCatalogScript = preload(
+	"res://scripts/scenario_runtime/scenario_capability_catalog.gd"
+)
+const ScenarioScriptRuntimeScript = preload(
+	"res://scripts/scenario_runtime/scenario_script_runtime.gd"
+)
 const ScenarioGodotServicesScript = preload(
 	"res://scripts/scenario_runtime/godot/scenario_godot_services.gd"
 )
@@ -40,7 +46,7 @@ const HostScript = preload(
 	"res://scripts/classic_runtime/classic_runtime_host.gd"
 )
 
-const V2_FIXTURE := \
+const V3_FIXTURE := \
 	"res://scripts/classic_runtime/tests/fixtures/war_in_the_sword_lands_gosub"
 const V1_FIXTURE := \
 	"res://scripts/scenario_runtime/tests/fixtures/v1_rejected"
@@ -49,7 +55,7 @@ var failures := 0
 
 
 func _ready() -> void:
-	_test_v2_bundle_contract()
+	_test_v3_bundle_contract()
 	_test_extension_registry()
 	await _test_gameplay_rules()
 	_test_handler_registry()
@@ -58,25 +64,26 @@ func _ready() -> void:
 	_test_classic_execution_state_ownership()
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
+	_test_safe_script_quest_slice()
 	_test_old_save_rejection()
 	if failures == 0:
-		print("Scenario runtime v2 tests passed")
+		print("Scenario runtime tests passed")
 		get_tree().quit(0)
 	else:
-		push_error("Scenario runtime v2 tests failed: %d" % failures)
+		push_error("Scenario runtime tests failed: %d" % failures)
 		get_tree().quit(1)
 
 
-func _test_v2_bundle_contract() -> void:
+func _test_v3_bundle_contract() -> void:
 	var bundle := BundleScript.new()
-	_expect(bundle.load_from_directory(V2_FIXTURE), "v2 bundle loads")
+	_expect(bundle.load_from_directory(V3_FIXTURE), "v3 bundle loads")
 	if not bundle.last_error.is_empty():
 		push_error(bundle.last_error)
 	_expect(
 		str(bundle.manifest.get("format", "")) == "realmz-remake-scenario",
-		"v2 bundle uses generalized identity"
+		"v3 bundle uses generalized identity"
 	)
-	_expect(bundle.documents.has("runtime"), "v2 bundle includes runtime document")
+	_expect(bundle.documents.has("runtime"), "v3 bundle includes runtime document")
 	var action: Dictionary = bundle.documents["scripts"]["triggers"][0]["actions"][0]
 	_expect(action.get("kind") == "classic", "Classic instruction kind is explicit")
 	_expect(action.get("rawCode") == action.get("code"), "Classic instruction preserves raw code")
@@ -84,8 +91,8 @@ func _test_v2_bundle_contract() -> void:
 	var old_bundle := BundleScript.new()
 	_expect(not old_bundle.load_from_directory(V1_FIXTURE), "v1 bundle is rejected")
 	_expect(
-		old_bundle.last_error.contains("Re-export"),
-		"v1 rejection contains an upgrade action"
+		old_bundle.last_error.contains("Unsupported scenario campaign format"),
+		"obsolete bundle rejection identifies the unsupported contract"
 	)
 
 
@@ -420,7 +427,7 @@ func _test_classic_dispatcher_noops() -> void:
 		}],
 	}
 	bundle.triggers_by_id[trigger["id"]] = trigger
-	bundle.dispatcher_noop_keys["Data ED3:73:2:200"] = true
+	bundle.dispatcher_noop_keys["Data ED3:macro:73:2:200"] = true
 	var state := ClassicRuntimeStateScript.new()
 	state.configure_from_bundle(bundle)
 	var vm := InterpreterScript.new()
@@ -457,7 +464,7 @@ func _test_classic_dispatcher_noops() -> void:
 
 func _test_builtin_extension_execution() -> void:
 	var bundle := BundleScript.new()
-	_expect(bundle.load_from_directory(V2_FIXTURE), "extension host fixture bundle loads")
+	_expect(bundle.load_from_directory(V3_FIXTURE), "extension host fixture bundle loads")
 	if not bundle.last_error.is_empty():
 		return
 	bundle.documents["runtime"]["requiredExtensions"] = [{
@@ -473,7 +480,7 @@ func _test_builtin_extension_execution() -> void:
 		"lifecycle": {"load": "scenario.runtime-fixture.lifecycle"},
 	}
 	bundle.documents["scripts"]["triggers"].append({
-		"id": "scenario-runtime-v2:semantic",
+		"id": "scenario-runtime:semantic",
 		"source": "Remake runtime fixture",
 		"recordIndex": 0,
 		"active": true,
@@ -497,7 +504,7 @@ func _test_builtin_extension_execution() -> void:
 	var interpreter := InterpreterScript.new()
 	interpreter.configure(bundle, state)
 	_expect(
-		interpreter.begin_trigger("scenario-runtime-v2:semantic"),
+		interpreter.begin_trigger("scenario-runtime:semantic"),
 		"semantic operation starts through Classic compatibility"
 	)
 	var semantic_yield := interpreter.run_until_yield()
@@ -532,7 +539,7 @@ func _test_builtin_extension_execution() -> void:
 	)
 	host.use_campaign(bundle)
 	_expect(
-		host.start_trigger("scenario-runtime-v2:semantic"),
+		host.start_trigger("scenario-runtime:semantic"),
 		"semantic operation starts through the normal runtime host"
 	)
 	await get_tree().process_frame
@@ -563,6 +570,195 @@ func _test_builtin_extension_execution() -> void:
 			"built-in fixture invokes %s" % capability_and_binding[0]
 		)
 	host.queue_free()
+
+
+func _test_safe_script_quest_slice() -> void:
+	var bundle := BundleScript.new()
+	_expect(bundle.load_from_directory(V3_FIXTURE), "safe script fixture bundle loads")
+	if not bundle.last_error.is_empty():
+		return
+	var program := {
+		"kind": "function",
+		"name": "offer_quest",
+		"parameters": [],
+		"returnType": "void",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.state.write",
+				"arguments": {
+					"scope": {"kind": "literal", "value": "quest"},
+					"id": {"kind": "literal", "value": 42},
+					"value": {"kind": "literal", "value": 1},
+				},
+				"sourceNode": "quest-write",
+			},
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {
+					"text": {"kind": "literal", "value": "The quest has begun."},
+				},
+				"sourceNode": "quest-text",
+			},
+			{
+				"kind": "operation",
+				"capability": "core.presentation.choice",
+				"arguments": {
+					"prompt": {"kind": "literal", "value": "Help the town?"},
+					"options": {
+						"kind": "array",
+						"values": [
+							{"kind": "literal", "value": "Yes"},
+							{"kind": "literal", "value": "No"},
+						],
+					},
+				},
+				"result": "answer",
+				"sourceNode": "quest-choice",
+			},
+			{
+				"kind": "operation",
+				"capability": "core.map.teleport",
+				"arguments": {
+					"levelType": {"kind": "literal", "value": "land"},
+					"levelIndex": {"kind": "literal", "value": 2},
+					"x": {"kind": "literal", "value": 10},
+					"y": {"kind": "literal", "value": 6},
+				},
+				"sourceNode": "quest-teleport",
+			},
+			{
+				"kind": "operation",
+				"capability": "core.encounter.start-battle",
+				"arguments": {
+					"battleId": {"kind": "literal", "value": 7},
+				},
+				"sourceNode": "quest-battle",
+			},
+			{"kind": "return", "sourceNode": "quest-return"},
+		],
+	}
+	var state_schema: Dictionary = {}
+	var catalog := CapabilityCatalogScript.new()
+	_expect(catalog.load_builtin(), "safe script capability catalog loads")
+	var script := {
+		"id": "scenario.test.offer-quest",
+		"name": "Offer quest",
+		"documentation": "Scenario runtime quest vertical slice.",
+		"tier": "safe",
+		"apiVersion": 1,
+		"parameters": [],
+		"returnType": "void",
+		"requestedCapabilities": [
+			"core.encounter.start-battle",
+			"core.map.teleport",
+			"core.presentation.choice",
+			"core.presentation.text",
+			"core.state.write",
+		],
+		"stateSchema": state_schema,
+		"stateSchemaHash": ScenarioScriptRuntimeScript._sha256_json(state_schema),
+		"sourceMap": {
+			"quest-text": {"line": 2, "column": 1},
+			"quest-choice": {"line": 3, "column": 1},
+			"quest-teleport": {"line": 4, "column": 1},
+			"quest-battle": {"line": 5, "column": 1},
+		},
+		"contentHash": ScenarioScriptRuntimeScript._sha256_json(program),
+		"program": program,
+	}
+	bundle.documents["remakeScripts"] = {
+		"schemaVersion": 2,
+		"apiVersion": 1,
+		"capabilityCatalogHash": catalog.catalog_hash(),
+		"scripts": [script],
+		"attachments": [],
+		"persistentVariables": [],
+	}
+	var trigger_id := str(bundle.documents["scripts"]["triggers"][0]["id"])
+	bundle.triggers_by_id[trigger_id]["actions"] = [{
+		"kind": "semantic",
+		"slot": 0,
+		"operation": "core.script.call",
+		"parameters": {
+			"scriptId": script["id"],
+			"arguments": {},
+		},
+	}]
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var interpreter := InterpreterScript.new()
+	interpreter.configure(bundle, state)
+	_expect(
+		interpreter.scenario_script_runtime != null
+			and interpreter.scenario_script_runtime.last_error.is_empty(),
+		"safe script configures under the central scenario interpreter"
+	)
+	_expect(interpreter.begin_trigger(trigger_id), "safe script action point starts")
+	var result := interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text",
+		"safe script yields presentation text through its owning port"
+	)
+	_expect(
+		state.get_quest_value(42) == 1,
+		"safe script mutates the Classic quest flag store"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "choice",
+		"safe script resumes into a choice"
+	)
+	var saved := interpreter.make_execution_snapshot()
+	var saved_validation := InterpreterScript.validate_execution_snapshot(
+		saved.get("snapshot")
+	)
+	_expect(
+		saved.get("status") == "ok"
+			and saved_validation.get("status") == "ok",
+		"pending safe-script dialogue has a valid serializable snapshot: %s"
+			% saved_validation.get("message", "")
+	)
+	_expect(
+		saved.get("snapshot", {}).get("scenarioScriptRuntime", {}).get(
+			"pendingOperation",
+			{}
+		).get("sourceNode") == "quest-choice",
+		"safe-script snapshot retains source-map identity"
+	)
+	result = interpreter.resume_command({"choice": 0})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "teleport"
+			and result.get("payload", {}).get("levelIndex") == 2,
+		"safe script resumes into a typed teleport command"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "start_battle"
+			and result.get("payload", {}).get("battleId") == 7,
+		"safe script resumes into a typed battle command"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "completed",
+		"safe script returns to the Classic action point"
+	)
+	var script_trace: Array = interpreter.scenario_script_runtime.trace
+	var found_teleport_trace := false
+	for entry: Variant in script_trace:
+		if entry is Dictionary \
+				and entry.get("sourceNode") == "quest-teleport" \
+				and entry.get("capability") == "core.map.teleport":
+			found_teleport_trace = true
+	_expect(
+		found_teleport_trace,
+		"safe script trace preserves source node and capability identity"
+	)
 
 
 func _test_old_save_rejection() -> void:

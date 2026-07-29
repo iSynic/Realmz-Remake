@@ -1,15 +1,15 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "producer": {
     "repository": "Realmz - Providence",
-    "commit": "c26443b85ee3a0e883bf0a8b1d46d27ccf9818ca",
+    "commit": "b2129b7f267b655191594371532e8322c814e144",
     "sourceFixture": "fixtures/scenario-seeds/authoritative-ownership-proof.seed.json"
   },
   "bundleDirectory": "providence_authoritative_export",
   "readiness": {
     "ready": true,
     "progressionBlockers": 0,
-    "fidelityFallbacks": 0
+    "fidelityFallbacks": 1
   },
   "files": [
     {
@@ -34,48 +34,48 @@
     },
     {
       "path": "campaign.json",
-      "bytes": 2263,
-      "sha256": "a523907e74656e9495c5c6efefad3765b7206c0385a3279dbc37e16947dd1745"
+      "bytes": 4107,
+      "sha256": "198e31f23841b8addbb06d4896a4407196e660eb0f6a40df6ed517bfdaca2fe6"
     },
     {
       "path": "classic/assets.json",
-      "bytes": 8218,
-      "sha256": "ec4f1d19d4ab75e6d734f705e3bc4dd799e7f46bb83549dc13de26d72b4c2c27"
+      "bytes": 5748,
+      "sha256": "5d6771dc3c617cdf33169d1e59fa6d390d94df024d17e75b1815d51d7364cda0"
     },
     {
       "path": "classic/content.json",
-      "bytes": 13114,
-      "sha256": "a917f254030b9c3cadf5843dbdf19b0f101fccc02f57d3dcc151cae8d8155bef"
+      "bytes": 4636,
+      "sha256": "fc5310b2ec5b917f8621533c38c048cd97a44e0c6721546606f293fe4254b699"
     },
     {
       "path": "classic/encounters.json",
-      "bytes": 7262,
-      "sha256": "fdf4cc123e2fdc642975d336dce920352074b5327e04e773b3b3ca111fecba30"
+      "bytes": 6503,
+      "sha256": "808b80613fc782c5f30d1a8a1ee96ebaa951f93e0074025987e6ff65044e5f25"
     },
     {
       "path": "classic/evidence.json",
-      "bytes": 1415,
-      "sha256": "d47ed4248e78f1691bc0b7d301a600796ec4279ff7a437273f81f020d472d2bd"
+      "bytes": 313941,
+      "sha256": "1a8fcd0717c7ef88851ac8d406e4813e3ed6b13e3f93a6678ac711888c684211"
     },
     {
       "path": "classic/maps.json",
-      "bytes": 1279105,
-      "sha256": "a01ab79e3a6c88479932bb3399c837f86e0be11ee1c1a7f8ace8754cb26d4f0f"
+      "bytes": 522621,
+      "sha256": "db4aeb62f7a6e3c0e783ec1e699bad3a3d9cd9ac2c45b384027bd5fb1f86655e"
     },
     {
       "path": "classic/rules.json",
-      "bytes": 9674,
-      "sha256": "ae6a376c4daab78a2a5365c925dda35444d23c670c78cbd8fb95360e0cbe0262"
+      "bytes": 3475,
+      "sha256": "8ad2a83f858f1e71b3c08fb5fb4df3927d9149e8568afc8c6605b37d380e8f43"
     },
     {
       "path": "classic/scenario.json",
-      "bytes": 2375,
-      "sha256": "3b5fe395969caf9402ea43b51d1df236a58c9707cde994c3daf524e43516d9e7"
+      "bytes": 1448,
+      "sha256": "0008ddae6af9dce55f17a25485ac2940f9b9def9ac7f1e5f8bf84cec8661ef54"
     },
     {
       "path": "classic/scripts.json",
-      "bytes": 3115,
-      "sha256": "c1b1945869a96272b335bc9fba6affca3af775c77a42f79e9f63f8f296e0fb42"
+      "bytes": 1867,
+      "sha256": "4a2b76896c5557407a945b67510909224099cf7db83425e009805248300d6bf2"
     },
     {
       "path": "media/images/cicn-neg-100-31df32a766f9.png",
@@ -93,9 +93,14 @@
       "sha256": "827bab3b7d1c45c535da4459e1e9544460c6c98a23be761f315f7159d2572c3b"
     },
     {
+      "path": "remake/scripts.json",
+      "bytes": 422,
+      "sha256": "2871e496dad2f9cf62b96bdd16e02b7cfeddc1112aea2bc897536f91f58eb257"
+    },
+    {
       "path": "runtime.json",
-      "bytes": 326,
-      "sha256": "b4ae9ae161fd06806fa28a50b719179926087e79bbfe47b0d83f8d9f754873c0"
+      "bytes": 401,
+      "sha256": "4bbf985df6206095c68f26a53c49892b3fd0426ff23da825ecb7005c27c32241"
     }
   ]
 }
