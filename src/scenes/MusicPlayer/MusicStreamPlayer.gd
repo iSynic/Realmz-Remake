@@ -7,6 +7,7 @@ var mute: bool = false
 var currently_playing: Dictionary = {"path": 'none', "type": 'none'}
 var map_music_dict: Dictionary = {"path": ""}
 var map_music_position: float = 0
+var _warned_missing_tracker_backend := false
 
 # Called when the node enters the scene tree for the first time.
 func _ready() -> void:
@@ -27,10 +28,13 @@ func play_music_type(type: String) -> Dictionary:
 	var resources = NodeAccess.__Resources()
 	var musicsbookdict = resources.musics_book
 	var musictypes = resources.musics_types_book
-	var musicsofthistype: Dictionary = musictypes[type]
+	var musicsofthistype_value: Variant = musictypes.get(type, {})
+	var musicsofthistype: Dictionary = (
+		musicsofthistype_value if musicsofthistype_value is Dictionary else {}
+	)
 
 	var picked_music_name: String = ''
-	var type_fav_music_name: String = oneofeachtype[type]
+	var type_fav_music_name := str(oneofeachtype.get(type, "Random !"))
 
 	if type_fav_music_name == "No Music" or type_fav_music_name == null:
 		set_stream(null)
@@ -113,13 +117,23 @@ func play_music(musicdict: Dictionary) -> void:
 	elif music_type == 'mod':
 		# Load the tracker file using OpenMPT (supports MOD, S3M, XM, IT, and many more formats)
 		print("Loading tracker music: ", musicdict["path"])
+		if not ClassDB.class_exists("AudioStreamMPT"):
+			set_stream(null)
+			stop()
+			currently_playing = {"path": "", "type": ""}
+			if not _warned_missing_tracker_backend:
+				_warned_missing_tracker_backend = true
+				push_warning(
+					"Tracker music is unavailable. Install the bundled godot-openmpt add-on."
+				)
+			return
 		var file = FileAccess.open(musicdict["path"], FileAccess.READ)
 		if file:
 			var data = file.get_buffer(file.get_length())
 			file.close()
-			var mpt_stream = AudioStreamMPT.new()
-			mpt_stream.data = data
-			mpt_stream.loop_mode = 1  # Enable looping
+			var mpt_stream: Variant = ClassDB.instantiate("AudioStreamMPT")
+			mpt_stream.set("data", data)
+			mpt_stream.set("loop_mode", 1)  # Enable looping
 			set_stream(mpt_stream)
 			if musicdict["path"] == map_music_dict["path"]:
 				# TODO: Implement position saving for tracker files if needed

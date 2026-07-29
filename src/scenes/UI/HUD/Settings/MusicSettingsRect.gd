@@ -27,7 +27,12 @@ func _ready():
 func _initialize() :
 	print("\n\n\n MusicSettingsRect READY")
 	var _index : int = 0
-	var favourites = MusicStreamPlayer.oneofeachtype
+	var favourites_value: Variant = MusicStreamPlayer.get("oneofeachtype")
+	var favourites: Dictionary = (
+		favourites_value
+		if favourites_value is Dictionary
+		else MusicSettingsScript.DEFAULT_MUSIC_BY_TYPE.duplicate()
+	)
 	
 	var music_volume := MusicSettingsScript.setting_from_volume_db(
 		MusicStreamPlayer.volume_db
@@ -40,14 +45,21 @@ func _initialize() :
 	musicvolLabel.text = str(music_volume) + "%"
 	soundvolLabel.text = str(sound_volume) + "%"
 	
+	for previous_control: Node in mus_vbox.get_children():
+		previous_control.queue_free()
 	for mt in music_types :
 		var mtypectrl = MusicTypeTSCN.instantiate()
 		mus_vbox.add_child(mtypectrl)
 		mtypectrl.set_type(mt,favourites)
 		mtypectrl.button.connect("pressed",Callable(self,"_on_typebutton_pressed").bind(mtypectrl,mt))
 		#get all the musics of this type
-		#TODO check if  no such key ?
-		var typemusicnames : Array = NodeAccess.__Resources().musics_types_book[mt].keys()
+		var music_catalog_value: Variant = (
+			NodeAccess.__Resources().musics_types_book.get(mt, {})
+		)
+		var music_catalog: Dictionary = (
+			music_catalog_value if music_catalog_value is Dictionary else {}
+		)
+		var typemusicnames : Array = music_catalog.keys()
 		typemusicnames.append("Random !")
 		typemusicnames.append("No Change")
 		typemusicnames.append("No Music")

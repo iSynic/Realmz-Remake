@@ -49,9 +49,11 @@ func _on_MapDebugCheckButton_toggled(button_pressed: bool) -> void:
 
 
 func _on_ButtonDone_pressed():
-	MusicStreamPlayer.play_music_map()
 	#GameState.set_paused(false)
 	hide()
+	# Closing the menu is independent of the optional music backend.
+	if MusicStreamPlayer.has_method("play_music_map"):
+		MusicStreamPlayer.play_music_map()
 
 
 func _on_MainMenuButton_pressed():

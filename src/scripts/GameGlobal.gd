@@ -1442,7 +1442,6 @@ func change_map(mapname : String, x : int, y : int) :
 	currentmap_name = mapname
 
 
-	MusicStreamPlayer.play_music_map()
 	map.set_ow_character_icon(GameGlobal.player_characters[0].icon)
 #	GameState.map.focuscharacter.tile_position_x = x
 #	GameState.map.focuscharacter.tile_position_y = y
@@ -1452,6 +1451,10 @@ func change_map(mapname : String, x : int, y : int) :
 	map.explore_tiles_from_tilepos(Vector2(x,y))
 	#	GameState.map.focuscharacter.tile_position_x = pos_when_battle_started.x
 #	GameState.map.focuscharacter.tile_position_y = pos_when_battle_started.y
+	# Audio is presentation-only. A missing or unavailable music backend must
+	# never interrupt the authoritative map and party-position transition.
+	if MusicStreamPlayer.has_method("play_music_map"):
+		MusicStreamPlayer.play_music_map()
 
 
 func is_map_tile_walkable_by_char(chara, pos : Vector2)->bool : #battle mode, chara is creature

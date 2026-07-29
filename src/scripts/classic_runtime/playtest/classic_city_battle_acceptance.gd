@@ -167,6 +167,9 @@ func _start_playtest() -> void:
 	if not smoke_failures.is_empty():
 		_finish_smoke()
 		return
+	if not await _verify_settings_and_map_music():
+		_finish_smoke()
+		return
 	if interactive_overworld:
 		print("CLASSIC_CITY_DEMO READY: City of Bywater map_0 at (2, 1)")
 		if automated_smoke:
@@ -723,6 +726,45 @@ func _launch_installed_campaign() -> bool:
 			and GameGlobal.currentmap_name == "map_0"
 			and _native_position() == Vector2i(2, 1),
 		"the normal party and Start controls enter the compiled City start location"
+	)
+	return smoke_failures.is_empty()
+
+
+func _verify_settings_and_map_music() -> bool:
+	var settings: Control = UI.ow_hud.settingsControl
+	var music_choices: VBoxContainer = settings.get_node(
+		"HBoxContainer/VBoxContainer/MusicSettingsRect/VBoxContainer/MusScroll/MusVBox"
+	)
+	var tracker_backend_available := ClassDB.class_exists("AudioStreamMPT")
+	UI.ow_hud._on_SettingsButton_pressed()
+	await get_tree().process_frame
+	_verify_stage(
+		"01d_music_settings",
+		settings.visible
+			and music_choices.get_child_count() > 0
+			and (
+				not tracker_backend_available
+				or str(MusicStreamPlayer.currently_playing.get(
+				"path",
+				""
+				)).ends_with("create.mod")
+			),
+		"Settings lists the music categories and uses its configured music when available"
+	)
+	settings.get_node("ButtonDone").pressed.emit()
+	await get_tree().process_frame
+	_verify_stage(
+		"01e_settings_done",
+		not settings.visible
+			and _native_position() == Vector2i(2, 1)
+			and (
+				not tracker_backend_available
+				or str(MusicStreamPlayer.currently_playing.get(
+					"path",
+					""
+				)).ends_with("outdoor.mod")
+			),
+		"Done closes Settings, restores map music, and preserves the authored start"
 	)
 	return smoke_failures.is_empty()
 
