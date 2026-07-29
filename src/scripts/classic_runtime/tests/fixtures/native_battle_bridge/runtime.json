@@ -1,1 +1,1 @@
-{"schemaVersion":2,"recommendedGameplayProfile":"core.classic","requiredExtensions":[],"bindings":{"spells":{},"items":{},"encounters":{},"monsterAi":{},"lifecycle":{}},"targetSupport":{"realmzRemake":true,"nativeRealmz":true,"remakeOnlyReasons":[]}}
+{"bindings":{"encounters":{},"items":{},"lifecycle":{},"monsterAi":{},"ruleModifiers":{},"spells":{}},"recommendedGameplayProfile":"core.classic","requiredExtensions":[],"requiredPlugins":[],"schemaVersion":2,"targetSupport":{"nativeRealmz":true,"realmzRemake":true,"remakeOnlyReasons":[]}}

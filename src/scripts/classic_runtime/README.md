@@ -3,12 +3,13 @@
 This directory contains the source-backed Classic mechanics consumed by the
 modular scenario runtime. The public execution, extension, port, rules, and save
 contracts live under `scripts/scenario_runtime`; Providence produces the
-`realmz-remake-scenario` v3 package consumed here. Named scenario scripts also
-enter through `ScenarioInterpreter`: safe scripts are VM instructions, while
-full GDScript uses the sandboxed or explicitly approved trusted reducer policy.
+`realmz-remake-scenario` v3 package consumed here. Named scenario behaviors
+also enter through `ScenarioInterpreter`: Safe behavior is VM data, while full
+GDScript uses only the isolated sandbox reducer.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the ownership boundary between the
-scenario VM, six Godot ports, trusted extensions, and gameplay rules.
+scenario VM, six Godot ports, built-in extensions, installed engine plug-ins,
+and gameplay rules.
 [BUNDLE_CONTRACT.md](BUNDLE_CONTRACT.md) defines the versioned
 Providence-to-Remake runtime artifact. [INSTALLING_CLASSIC_CAMPAIGNS.md](INSTALLING_CLASSIC_CAMPAIGNS.md)
 defines its self-contained layout below Remake's `Campaigns` directory and the

@@ -34,8 +34,8 @@
     },
     {
       "path": "campaign.json",
-      "bytes": 4107,
-      "sha256": "198e31f23841b8addbb06d4896a4407196e660eb0f6a40df6ed517bfdaca2fe6"
+      "bytes": 4106,
+      "sha256": "9ed4f31daacbf46e67f84976e8f5d4dcbbaa29fa1625ebe2328f65ca67532743"
     },
     {
       "path": "classic/assets.json",
@@ -94,13 +94,13 @@
     },
     {
       "path": "remake/scripts.json",
-      "bytes": 422,
-      "sha256": "2871e496dad2f9cf62b96bdd16e02b7cfeddc1112aea2bc897536f91f58eb257"
+      "bytes": 303,
+      "sha256": "fc5747bfa9f1134ad1042a3d29ed65f597a41f65a91bdf713679aae2afe21005"
     },
     {
       "path": "runtime.json",
-      "bytes": 401,
-      "sha256": "4bbf985df6206095c68f26a53c49892b3fd0426ff23da825ecb7005c27c32241"
+      "bytes": 440,
+      "sha256": "623c34282e00762b2260d04e411126cab47932f4594b4b038984144f2bcc42ba"
     }
   ]
 }

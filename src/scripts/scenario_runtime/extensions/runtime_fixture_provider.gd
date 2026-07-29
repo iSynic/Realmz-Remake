@@ -19,6 +19,9 @@ func binding_ids() -> Dictionary:
 		"encounterResolvers": ["scenario.runtime-fixture.echo-encounter"],
 		"monsterAiProviders": ["scenario.runtime-fixture.echo-ai"],
 		"lifecycleHooks": ["scenario.runtime-fixture.lifecycle"],
+		"gameplayRuleProviders": [
+			"scenario.runtime-fixture.presentation-rules",
+		],
 	}
 
 
@@ -33,6 +36,11 @@ func invoke(
 	payload: Dictionary,
 	_context: Object
 ) -> Dictionary:
+	if capability == "gameplayRuleProviders":
+		return {
+			"status": "ok",
+			"value": payload.get("currentValue", payload.get("baseValue", 0)),
+		}
 	return {
 		"status": "ok",
 		"providerId": provider_id(),

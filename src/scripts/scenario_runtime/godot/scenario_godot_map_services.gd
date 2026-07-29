@@ -5,6 +5,33 @@ const MAP_GAINED_MESSAGE := \
 	"You gain a map, to view the map use Maps/Notes in the Menu."
 
 
+func _query_location(_payload: Dictionary = {}) -> Dictionary:
+	var runtime_state := _classic_runtime_state()
+	if runtime_state == null:
+		return _error("Classic scenario location is unavailable")
+	return {
+		"levelType": str(runtime_state.get("level_type")),
+		"levelIndex": int(runtime_state.get("level_index")),
+		"x": int(runtime_state.get("x")),
+		"y": int(runtime_state.get("y")),
+	}
+
+
+func _query_time(_payload: Dictionary = {}) -> Dictionary:
+	var game_global: Object = _autoload("GameGlobal")
+	if game_global == null:
+		return _error("Realmz game clock is unavailable")
+	var total_seconds := maxi(0, int(game_global.get("time")))
+	var day_seconds := posmod(total_seconds, 86400)
+	return {
+		"day": floori(float(total_seconds) / 86400.0) + 1,
+		"hour": floori(float(day_seconds) / 3600.0),
+		"minute": floori(float(day_seconds % 3600) / 60.0),
+		"second": day_seconds % 60,
+		"totalSeconds": total_seconds,
+	}
+
+
 func _set_map_tile(payload: Dictionary) -> Dictionary:
 	return service_owner.classic_map_bridge.set_tile(
 		payload,
@@ -126,6 +153,17 @@ static func teleport_message_present(payload: Dictionary) -> bool:
 
 
 func _alter_game_time(payload: Dictionary) -> Dictionary:
+	if payload.has("seconds"):
+		var game_global: Object = _autoload("GameGlobal")
+		if game_global == null or not game_global.has_method("pass_time"):
+			return _error("Realmz game clock is unavailable")
+		var seconds := int(payload.get("seconds", 0))
+		if seconds < 0:
+			return _error("Scenario behavior cannot move the clock backwards")
+		game_global.call("pass_time", seconds)
+		var advanced := _query_time()
+		advanced["advancedSeconds"] = seconds
+		return advanced
 	var result: Dictionary = service_owner.call(
 		"alter_classic_game_time",
 		_autoload("GameGlobal"),

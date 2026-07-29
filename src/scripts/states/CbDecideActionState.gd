@@ -13,6 +13,12 @@ const ClassicPlayerAutoCombatScript = preload(
 const ClassicMonsterDecisionScript = preload(
 	"res://scripts/classic_runtime/classic_monster_decision.gd"
 )
+const ScenarioMonsterFleeScript = preload(
+	"res://shared_assets/CreatureScripts/runningaway.gd"
+)
+const ScenarioMonsterSpellDecisionScript = preload(
+	"res://shared_assets/CreatureScripts/test_crea_script.gd"
+)
 const CLASSIC_BATTLE_MINIMUM_OFFSET := 5
 const CLASSIC_BATTLE_MAXIMUM_LOCAL_COORDINATE := 7
 
@@ -669,7 +675,10 @@ func do_ai_creature_action(cur_act_crea : Creature) :
 		return
 	print("CbDecideAction : "+ cur_act_crea.name+" is going to take a decision")
 	var decision_array: Array
-	if auto_turn_creature == cur_act_crea \
+	var scenario_decision := await _scenario_monster_decision(cur_act_crea)
+	if not scenario_decision.is_empty():
+		decision_array = scenario_decision
+	elif auto_turn_creature == cur_act_crea \
 			and GameGlobal.is_classic_campaign(GameGlobal.currentcampaign):
 		decision_array = ClassicPlayerAutoCombatScript.decide_action(cur_act_crea)
 	else:
@@ -728,12 +737,171 @@ func do_ai_creature_action(cur_act_crea : Creature) :
 		action_msg = {"type" : "Spell", "spell" : spell, "s_plvl" : power, "targeted_tiles" : tg_tiles, "used_item" : item , "must_add_terrain" : true, "override_aoe" : [] }
 		on_spellcast_confirmed(action_msg)
 		return
+	if decision_array[0] == 2: #behavior-backed item use completed
+		if StateMachine.state == self \
+				and is_instance_valid(current_active_creabutton) \
+				and current_active_creabutton.creature == cur_act_crea:
+			await end_active_creature_turn(true)
+		return
 
 	combat_state.add_to_action_queue([action_msg])
 	await get_tree().create_timer(GameGlobal.gamespeed).timeout
 	StateMachine.transition_to("Combat/CbAnimation")
 
 
+
+
+func _scenario_monster_decision(creature: Creature) -> Array:
+	if creature == null or creature.is_crea_player_controlled():
+		return []
+	var host: Variant = GameGlobal.classic_runtime_host
+	if not is_instance_valid(host) \
+			or not host.has_method("has_monster_ai_behavior") \
+			or not bool(host.call("has_monster_ai_behavior", creature)):
+		return []
+	var result: Dictionary = await host.call("run_monster_ai_behavior", creature)
+	if str(result.get("status", "")) == "error":
+		push_error(str(result.get("message", "Scenario monster AI behavior failed")))
+		return []
+	var decision: Dictionary = {}
+	for behavior_result_value: Variant in result.get("results", []):
+		if behavior_result_value is Dictionary \
+				and behavior_result_value.get("value") is Dictionary:
+			decision = behavior_result_value["value"]
+			break
+	if decision.is_empty() and result.get("value") is Dictionary:
+		decision = result["value"]
+	match str(decision.get("kind", "")):
+		"wait":
+			return [0, Vector2i.ZERO]
+		"move":
+			return [0, Vector2i(
+				clampi(int(decision.get("dx", 0)), -1, 1),
+				clampi(int(decision.get("dy", 0)), -1, 1)
+			)]
+		"attack":
+			var attack_target := _scenario_combat_target(
+				str(decision.get("targetId", ""))
+			)
+			if attack_target != null:
+				var delta: Vector2 = attack_target.position - creature.position
+				return [0, Vector2i(
+					clampi(roundi(delta.x), -1, 1),
+					clampi(roundi(delta.y), -1, 1)
+				)]
+		"cast":
+			return _scenario_monster_cast_decision(creature, decision)
+		"use-item":
+			return await _scenario_monster_item_decision(creature, decision)
+		"flee":
+			return ScenarioMonsterFleeScript.decide_action(creature)
+	push_error("Scenario monster AI returned a decision the native combat bridge cannot apply")
+	return []
+
+
+func _scenario_combat_target(target_id: String) -> Creature:
+	if not target_id.begins_with("combat:") \
+			or not target_id.substr(7).is_valid_int():
+		return null
+	var target_index := int(target_id.substr(7))
+	if target_index < 0 \
+			or target_index >= combat_state.all_battle_creatures_btns.size():
+		return null
+	var target_button: Variant = combat_state.all_battle_creatures_btns[target_index]
+	if not is_instance_valid(target_button) \
+			or not (target_button.creature is Creature):
+		return null
+	return target_button.creature
+
+
+func _scenario_monster_cast_decision(
+	creature: Creature,
+	decision: Dictionary
+) -> Array:
+	if not creature.can_cast_spells() or creature.get_spellsperround_left() <= 0:
+		return []
+	var spell_id := str(decision.get("spellId", "")).strip_edges()
+	var spell: Variant = null
+	for known_spell_value: Variant in creature.get_all_spells():
+		if not (known_spell_value is Dictionary):
+			continue
+		var known_spell: Dictionary = known_spell_value
+		var known_script: Variant = known_spell.get("script")
+		if str(known_spell.get("name", "")) == spell_id \
+				or (
+					known_script is Object
+					and str(known_script.get("name")) == spell_id
+				):
+			spell = known_script
+			break
+	if spell == null:
+		return []
+	var power := clampi(int(decision.get("power", 1)), 1, 7)
+	if creature.get_spell_resource_cost(spell, power) > creature.get_stat("curSP"):
+		return []
+	var target := _scenario_combat_target(str(decision.get("targetId", "")))
+	if target == null:
+		return []
+	return ScenarioMonsterSpellDecisionScript.get_spell_cast_message(
+		creature,
+		spell,
+		power,
+		target,
+		false,
+		null
+	)
+
+
+func _scenario_monster_item_decision(
+	creature: Creature,
+	decision: Dictionary
+) -> Array:
+	var instance_id := str(decision.get("itemInstanceId", "")).strip_edges()
+	var selected_item: ItemInstance = null
+	for item: ItemInstance in creature.inventory_instances():
+		if item.instance_id == instance_id:
+			selected_item = item
+			break
+	if selected_item == null:
+		return []
+	var host: Variant = GameGlobal.classic_runtime_host
+	if is_instance_valid(host) \
+			and host.has_method("has_item_behavior") \
+			and bool(host.call("has_item_behavior", selected_item, "combat_use")):
+		var behavior_result: Dictionary = await host.call(
+			"run_item_behavior",
+			selected_item,
+			"combat_use",
+			creature,
+			_scenario_combat_target(str(decision.get("targetId", "")))
+		)
+		if str(behavior_result.get("status", "")) == "error":
+			push_error(str(behavior_result.get(
+				"message",
+				"Scenario monster item behavior failed"
+			)))
+			return []
+		if bool(behavior_result.get("handled", false)):
+			return [2]
+	var spell_use: Array = NodeAccess.__Resources().item_spell_use(
+		selected_item,
+		"combat"
+	)
+	if spell_use.size() < 2 \
+			or not GameGlobal.cmp_resources.spells_book.has(str(spell_use[0])):
+		return []
+	var target := _scenario_combat_target(str(decision.get("targetId", "")))
+	if target == null:
+		return []
+	var spell: Variant = GameGlobal.cmp_resources.spells_book[str(spell_use[0])]["script"]
+	return ScenarioMonsterSpellDecisionScript.get_spell_cast_message(
+		creature,
+		spell,
+		clampi(int(spell_use[1]), 1, 7),
+		target,
+		true,
+		selected_item
+	)
 
 
 func end_active_creature_turn(set_apr_zero : bool)->void :
@@ -942,6 +1110,25 @@ func use_inventory_item(item: ItemInstance, user: Creature) -> void:
 	if definition == null:
 		return
 	print("CbDecideState use_inventory_item " + definition.display_name_for(item))
+	var scenario_host: Variant = GameGlobal.classic_runtime_host
+	if is_instance_valid(scenario_host) \
+			and scenario_host.has_method("has_item_behavior") \
+			and bool(scenario_host.call("has_item_behavior", item, "combat_use")):
+		var scenario_result: Dictionary = await scenario_host.call(
+			"run_item_behavior",
+			item,
+			"combat_use",
+			user
+		)
+		if str(scenario_result.get("status", "")) == "error":
+			push_error(str(scenario_result.get(
+				"message",
+				"Scenario combat-item behavior failed"
+			)))
+			return
+		if bool(scenario_result.get("handled", false)):
+			GameGlobal.refresh_OW_HUD()
+			return
 	if resources.item_has_hook(item, "combat_use"):
 		var hook_result: Dictionary = resources.run_item_hook(
 			item,

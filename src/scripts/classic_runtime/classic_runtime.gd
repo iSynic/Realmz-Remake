@@ -207,12 +207,17 @@ func restore(saved_state: Dictionary) -> void:
 
 
 func make_continuation_snapshot() -> Dictionary:
+	var script_snapshot := (
+		interpreter.scenario_script_runtime.snapshot()
+		if interpreter.scenario_script_runtime != null else {}
+	)
 	if last_result.is_empty() or str(last_result.get("status", "")) == "completed":
 		return {
 			"status": "ok",
 			"snapshot": {
 				"schemaVersion": CONTINUATION_SCHEMA_VERSION,
 				"state": "idle",
+				"scenarioScriptRuntime": script_snapshot,
 			},
 		}
 	if str(last_result.get("status", "")) != "yield":
@@ -236,6 +241,7 @@ func make_continuation_snapshot() -> Dictionary:
 			"state": "suspended",
 			"yieldedResult": last_result.duplicate(true),
 			"executionState": execution_result["snapshot"],
+			"scenarioScriptRuntime": script_snapshot,
 		},
 	}
 
@@ -248,7 +254,11 @@ func restore_continuation(snapshot: Variant) -> Dictionary:
 	if str(saved.get("state", "")) == "idle":
 		interpreter.reset_execution()
 		last_result.clear()
-		return {"status": "ok"}
+		if interpreter.scenario_script_runtime == null:
+			return {"status": "ok"}
+		return interpreter.scenario_script_runtime.restore(
+			saved.get("scenarioScriptRuntime", {})
+		)
 	var execution_result := interpreter.restore_execution_snapshot(saved["executionState"])
 	if str(execution_result.get("status", "")) != "ok":
 		return execution_result
@@ -273,6 +283,14 @@ static func validate_continuation_snapshot(snapshot: Variant) -> Dictionary:
 	if int(snapshot.get("schemaVersion", 0)) != CONTINUATION_SCHEMA_VERSION:
 		return _continuation_error("Classic continuation schema is not supported")
 	var state := str(snapshot.get("state", ""))
+	var script_validation := ScenarioScriptRuntime.validate_snapshot(
+		snapshot.get("scenarioScriptRuntime")
+	)
+	if not bool(script_validation.get("valid", false)):
+		return _continuation_error(str(script_validation.get(
+			"message",
+			"Scenario continuation has invalid script state"
+		)))
 	if state == "idle":
 		return {"status": "ok"}
 	if state != "suspended":

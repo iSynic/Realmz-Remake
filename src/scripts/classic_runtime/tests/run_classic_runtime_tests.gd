@@ -3760,6 +3760,7 @@ func _minimal_contract_documents() -> Dictionary:
 				"encounters": {},
 				"monsterAi": {},
 				"lifecycle": {},
+				"ruleModifiers": {},
 			},
 			"targetSupport": {
 				"realmzRemake": true,
@@ -3769,11 +3770,19 @@ func _minimal_contract_documents() -> Dictionary:
 		},
 		"remakeScripts": {
 			"schemaVersion": 2,
-			"apiVersion": 1,
+			"apiVersion": 2,
 			"capabilityCatalogHash": capability_catalog.catalog_hash(),
-			"scripts": [],
-			"attachments": [],
-			"persistentVariables": [],
+			"limits": {
+				"maxArrayLength": 256,
+				"maxAstNodes": 4096,
+				"maxCallDepth": 32,
+				"executionBudget": 65536,
+			},
+			"capabilities": [],
+			"behaviors": [],
+			"bindings": [],
+			"stateDefinitions": [],
+			"migrations": [],
 		},
 	}
 

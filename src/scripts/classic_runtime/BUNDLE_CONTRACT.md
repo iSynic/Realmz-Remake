@@ -1,12 +1,16 @@
 # Realmz Remake scenario contract, version 3
 
 This is the coordinated Providence-to-Remake runtime artifact. It is distinct
-from Providence's editable project and from a native Realmz export. Providence
-is the producer; Remake is the runtime and preview companion.
+from a Providence project and from a native Realmz export. Providence produces
+the package; Realmz Remake installs, validates, previews, and executes it.
+
+Bundle v3 is still pre-release. The current contract is completed in place:
+Remake accepts only the current document shapes, Providence exports only those
+shapes, and the 13 built-in campaigns are regenerated with the app.
 
 ## Manifest and package identity
 
-Every package contains `campaign.json` with:
+Every package contains `campaign.json`:
 
 ```json
 {
@@ -47,60 +51,45 @@ Every package contains `campaign.json` with:
 }
 ```
 
-All ten document paths are required, unique, package-relative JSON paths.
-Absolute paths, URI schemes, drive prefixes, empty segments, parent traversal,
-and symbolic links are invalid.
+All document paths are required, unique, package-relative JSON paths. Absolute
+paths, URI schemes, drive prefixes, empty segments, parent traversal, and
+symbolic links are invalid.
 
 The manifest lists every payload by byte size and SHA-256. The package hash is
 the SHA-256 of the canonical manifest with `integrity.packageHash` omitted.
 Canonical JSON sorts object keys and renders integral values as integers so
-Rust, JavaScript, and Godot calculate the same identity. A package may not
-contain an undeclared file.
+Rust, JavaScript, and Godot calculate the same identity. Undeclared files are
+invalid.
 
-Remake accepts only format 3. This is a pre-release cutover; older bundles and
-saves are rejected without a converter or a version-specific migration warning.
+## Runtime data and evidence
 
-## Runtime and evidence documents
+All Classic runtime documents use `schemaVersion: 2`. Runtime records keep
+stable IDs and gameplay fields. Source paths, record indices, byte ranges,
+confidence, source hashes, decoding evidence, and diagnostics live in
+`classic/evidence.json`, keyed by record kind and stable record ID.
 
-All runtime documents use `schemaVersion: 2`. `runtime.json` declares the
-recommended gameplay profile, trusted built-in extension requirements,
-bindings, and computed target support:
+The installer verifies the evidence sidecar's integrity and shape. Ordinary
+gameplay does not load it. Preview and debug tooling can resolve trace IDs
+through it on demand.
 
-```json
-{
-  "schemaVersion": 2,
-  "recommendedGameplayProfile": "core.classic",
-  "requiredExtensions": [],
-  "bindings": {
-    "spells": {},
-    "items": {},
-    "encounters": {},
-    "monsterAi": {},
-    "lifecycle": {}
-  },
-  "targetSupport": {
-    "realmzRemake": true,
-    "nativeRealmz": true,
-    "remakeOnlyReasons": []
-  }
-}
-```
+Evidence is not an execution dependency. Fields needed to execute a record,
+including authoritative dispatcher no-op classification, remain in runtime
+data under stable trigger and slot identities.
 
-Runtime records retain stable IDs and gameplay fields. Source paths,
-`recordIndex`, byte offsets and lengths, confidence, source hashes, decoding
-evidence, and diagnostics live only in `classic/evidence.json`. Evidence rows
-are keyed by both record kind and stable record ID. The installer verifies the
-sidecar's hash and shape, but normal gameplay does not load it. Preview and
-debug tooling may resolve a runtime record ID through the sidecar when a
-source-linked diagnostic is requested.
+`runtime.json` uses schema 2 and declares:
 
-Evidence is not an execution dependency. Information needed to execute a
-record, such as whether an opcode is an authoritative dispatcher no-op, remains
-in the appropriate runtime document under stable trigger/slot identity.
+- the recommended gameplay profile;
+- required built-in extensions and their API versions;
+- required separately installed engine plug-ins and their API versions;
+- script or extension provider bindings;
+- computed native Realmz and Realmz Remake target support.
 
-## Instructions and script calls
+Requirements are explicit. An unavailable extension, plug-in, provider, or API
+version blocks readiness; it never selects a fallback implementation.
 
-Imported Classic actions retain their original signed opcode and slot:
+## Instructions and central execution
+
+Imported Classic instructions preserve their signed source opcode and slot:
 
 ```json
 {
@@ -121,61 +110,130 @@ An authored Remake operation is explicit and namespaced:
   "slot": 1,
   "operation": "core.script.call",
   "parameters": {
-    "scriptId": "scenario.bywater.offer_help",
+    "behaviorId": "scenario.bywater.offer_help",
     "arguments": {}
   }
 }
 ```
 
-Existing Classic action records are not rewritten merely because a project is
-opened in Providence. Adding a script attachment deliberately replaces the
-selected slot with `core.script.call`. `ScenarioInterpreter` remains the only
-AP/XAP executor; script frames live inside its serializable continuation state.
+Opening a Classic project does not rewrite its actions. Adding an Action Point
+behavior deliberately places `core.script.call` in the selected slot.
 
-## Scenario scripts
+`ScenarioInterpreter` is the only AP/XAP and behavior execution authority. It
+owns the instruction cursor, GOSUB frames, behavior frames, locals, iterators,
+return values, event contexts, pending commands, limits, trace, and serializable
+continuation state. Script execution never creates a second map-script engine.
 
-`remake/scripts.json` contains the capability-catalog hash, persistent variable
-declarations, attachment records, and a manifest entry for every named script.
-Each script declares a stable ID, name, documentation, tier, API version, typed
-signature, requested capabilities, state schema and hash, content hash, and
-source map.
+## Behavior document
 
-The three execution tiers are:
+`remake/scripts.json` uses schema 2 and contains:
 
-| Tier | Canonical content | Execution boundary |
+- the Scenario API catalog version and hash;
+- shared deterministic execution limits;
+- typed behavior definitions;
+- contextual behavior and provider bindings;
+- scoped state definitions;
+- explicit state-migration chains;
+- a source manifest for every sandboxed script;
+- source maps and documentation metadata.
+
+A `BehaviorDefinition` declares a stable ID, display metadata, entry or helper
+kind, role and hook, API and behavior versions, state-schema version, typed
+parameters and result, generated or declared capabilities, and either a Safe
+program or exact sandboxed source.
+
+A `BehaviorBinding` declares a target record reference, hook or action
+position, implementation (`script` or `extension`), typed argument bindings,
+and deterministic priority. The owning port validates role, hook, target, and
+arguments before dispatch.
+
+State may be scoped to Campaign, Map, Encounter, Character, Item Instance, or
+Combat. Script locals are transient. Classic quest flags are exposed through a
+named adapter rather than duplicated as Remake variables.
+
+## Behavior roles and outcomes
+
+Entry behaviors use immutable typed contexts and typed results:
+
+| Role | Typical hooks | Result |
 | --- | --- | --- |
-| Safe | Structured, typed AST | Compiled instructions in the central scenario VM |
-| Sandboxed | Exact UTF-8 GDScript | Persistent headless Godot child in a Windows LPAC AppContainer and Job Object |
-| Trusted | Exact UTF-8 GDScript | In-process after developer mode and exact-package approval |
+| Action | AP/XAP action | Continue, halt, call, replace, or return |
+| Encounter | entry, option, result, completion | Continue, resolve, repeat, close, or branch |
+| Spell | validation, casting, effect, duration, expiration | Validation or effect outcome |
+| Item | use, equip, unequip, attack, defense, passive | Use, equip, or effect outcome |
+| Monster AI | decision | Validated combat decision |
+| Lifecycle | campaign and gameplay events | Commands or completion |
+| Rule modifier | typed calculation event | Additive, multiplicative, or clamped modifier |
+| Helper | typed parameters | Typed value |
 
-Safe scripts do not create or execute `.gd` files. They support typed locals and
-parameters, bounded homogeneous arrays, assignment, expressions, conditions,
-returns, acyclic named-script calls, persistent state, and `await` only on
-registered yielding capabilities. Loops, recursion, classes, inheritance,
-signals, lambdas, reflection, dynamic calls, file access, and arbitrary Godot
-APIs are not part of the safe grammar.
+Validation and rule-modifier hooks are pure and cannot yield. Other hooks may
+yield only when both the role and the called Scenario API operation allow it.
 
-Sandboxed and trusted source is stored under `remake/source/`. Every `.gd` must
-be declared in `remake/scripts.json` and in manifest integrity with its exact
-SHA-256. `.gdc`, PCK, native libraries, executables, WebAssembly, undeclared
-GDScript, and symlinks are always rejected.
+Scenario rule modifiers cannot replace the rules engine. Resolution order is:
 
-The initial capability slice is:
+1. selected gameplay-profile provider;
+2. built-in extension modifiers;
+3. scenario modifiers ordered by explicit priority and stable binding ID;
+4. domain validation and clamping;
+5. post-resolution notification events.
 
-- read and write Classic quest flags and typed persistent variables;
-- present text and a choice;
-- teleport the party;
-- start a battle; and
-- use deterministic scenario RNG.
+## Scenario API catalog
 
-Every capability has a typed request/result schema, minimum tier, yield flag,
-and owning port in `remake-scenario-capabilities.v1.json`. Missing or
-incompatible capabilities fail readiness. Scripts cannot replace core Classic
-opcode registrations.
+Remake owns `remake-scenario-capabilities.v2.json`. Providence consumes the
+byte-identical file and verifies its hash. Each entry declares:
 
-## Full-tier reducer contract
+- stable ID and API version;
+- friendly name, category, summary, detailed reference, and examples;
+- owning port;
+- typed parameters, result, enums, and domain references;
+- compatible roles;
+- yield, mutation, and security properties;
+- deprecation and editor metadata.
 
-Sandboxed and trusted scripts implement:
+Queries return immutable snapshots and opaque stable references. Mutations are
+validated commands routed through Map, Combat, Inventory, Character,
+Presentation, or Persistence ports. A behavior receives no live Godot node,
+resource, singleton, UI object, mutable character dictionary, or item
+dictionary.
+
+Adding a public operation is incomplete until the catalog, port, Providence
+editor, validation, save/restore behavior, preview diagnostics, examples,
+generated reference, and cross-repository tests agree.
+
+## Safe behavior
+
+Safe behavior is the normal authoring tier. Providence stores a canonical
+typed AST and Remake executes it inside the central interpreter. Safe behavior
+does not create or execute a `.gd` file.
+
+The language supports:
+
+- bool, signed 64-bit integer, 64-bit float, and string;
+- optionals, enums, opaque domain references, and immutable context records;
+- homogeneous arrays bounded to 256 entries;
+- typed locals, parameters, results, and helpers;
+- assignment, arithmetic, comparisons, and boolean expressions;
+- `if`, `elif`, `else`, `match`, and bounded `for`;
+- bounded collection queries;
+- `await` only for catalog operations marked as yielding.
+
+It prohibits `while`, recursion, inheritance, classes, signals, lambdas,
+reflection, dynamic calls, arbitrary callables, nodes, resources, engine
+singletons, filesystem, network, processes, native code, and wall-clock access.
+
+Providence, export validation, and Remake enforce the same limits: 4,096 AST
+nodes, 256 array entries, 32 call frames, and one shared deterministic
+instruction budget. Frames, locals, iterators, return values, contexts, and
+pending commands are serializable.
+
+## Sandboxed GDScript
+
+Sandboxed full GDScript is the only executable source tier distributed inside
+a scenario. Exact UTF-8 source lives below `remake/source/`; each file is
+declared in `remake/scripts.json` and manifest integrity with its exact hash,
+API version, role, capabilities, and state-schema hash.
+
+Sandboxed scripts implement an explicit reducer:
 
 ```gdscript
 func step(event: Dictionary, state: Dictionary, context) -> Dictionary:
@@ -185,63 +243,93 @@ func step(event: Dictionary, state: Dictionary, context) -> Dictionary:
     }
 ```
 
-State and results must be bounded JSON. Nodes, resources, callables, and live
-coroutines never cross a process or save boundary. A yield names one declared
-capability plus JSON arguments; Remake validates it before routing the command
-through the same six ports used by Classic and safe execution.
+State and results are bounded JSON. Nodes, resources, callables, and live
+coroutines never cross the process, command, or save boundary. Every requested
+operation is checked against the declared capabilities and routed through the
+same ports used by Classic and Safe execution.
 
-Sandbox enforcement is operating-system based. The child has no network
-capabilities, cannot create child processes, runs under memory/CPU/process and
-wall-time limits, and sees only a private staging directory containing the
-declared source plus scratch space. Static token scanning is defense in depth,
-not the security boundary. If the isolation helper is unavailable, sandboxed
-campaigns fail readiness and never fall back to trusted execution.
+On Windows the persistent headless runner is isolated with AppContainer/LPAC
+and Job Object limits. It is denied network, child processes, native
+libraries, arbitrary filesystem access, PCK loading, and access to the main
+Remake process. Messages, state size and depth, process count, memory, CPU
+time, wall time, and request rate are bounded. Static source scanning is
+defense in depth, not the security boundary.
 
-Trusted scripts run with the user's account privileges. Installation,
-inspection, export, and unlaunched preview never execute them. Execution
-requires Developer Scripting plus approval of the exact package hash and
-aggregate requested capabilities. Any package or manifest change invalidates
-approval. Approvals are user-local and never enter projects or saves.
+If the isolation feasibility gate fails, sandbox-required campaigns fail
+readiness. They never run in process.
 
-## Persistence
+Undeclared `.gd`, `.gdc`, PCK, native libraries, executables, WebAssembly, and
+symlinks are invalid package contents.
 
-Campaign saves use schema 4 and pin:
+## Engine plug-ins and built-in extensions
 
-- campaign ID and package hash;
-- capability-catalog hash;
-- each script's tier, API version, content hash, and state-schema hash;
-- Classic mutations and the fully resolved gameplay rules;
-- the VM cursor, GOSUB and encounter frames, safe-script frames and locals;
-- one pending script or Classic command; and
-- explicit sandboxed/trusted reducer state.
+Raw Godot or Remake access belongs to separately installed engine plug-ins,
+not scenario packages. Plug-ins:
 
-Saving is valid at safe and reducer step boundaries, including pending
-dialogue, choice, teleport, and battle commands. Restore fails if a package,
-provider, script, API, or state schema changed. Trust approval is checked again
-at execution and is not restored from the save. Saving is blocked only while a
-developer-only unmanaged legacy compatibility script is active.
+- are installed and approved independently;
+- declare a versioned plug-in API;
+- may register namespaced capabilities or providers;
+- cannot replace reserved core opcode, command, rule, or provider IDs;
+- are named explicitly by packages that require them.
 
-## Managed preview
+Built-in extensions ship under reserved `res://` game paths and follow the same
+namespace and duplicate-ownership rules. A package may select and configure a
+built-in extension by stable ID, but it cannot supply or replace its code.
+
+## Persistence and scenario updates
+
+Campaign saves use schema 5 and pin:
+
+- campaign ID, content version, and package hash;
+- Scenario API catalog hash;
+- behavior versions, tiers, content hashes, and state-schema versions;
+- interpreter and Safe behavior frames;
+- pending commands and event queue;
+- explicit sandbox reducer state;
+- fully resolved gameplay rules;
+- required extension and engine plug-in versions.
+
+Saving is valid at Safe or reducer boundaries, including a pending dialogue,
+choice, movement, battle, spell, or item command whose owning port provides a
+save policy.
+
+A released package may update an existing save only when it keeps the stable
+campaign identity, declares a compatible content-version range, and supplies a
+complete exact migration chain. Migration functions are pure, parameterless,
+non-yielding Safe helpers. Remake validates the migrated state against every
+resulting schema before gameplay resumes. Missing, cyclic, ambiguous, yielding,
+or incompatible migrations fail with an actionable message.
+
+## Managed preview and debugging
 
 Providence desktop exports the current project atomically to a temporary v3
 package and launches Remake with an ephemeral profile and deterministic test
-party. A nonce-authenticated, versioned loopback WebSocket carries handshake,
-load, launch, stop, ping, diagnostics, trace, location, and state-summary
-messages.
+party. A random nonce authenticates a versioned loopback WebSocket.
 
-Preview can start at campaign start, a map, an AP, or a battle. Apply and
-Restart always begins from a clean package state. Trace records carry script
-node and runtime record IDs; Remake resolves those through source maps and,
-when requested, the evidence sidecar. Browser Providence can author, validate,
-and export, but it cannot launch a local process.
+Preview entry points include campaign start, map position, AP/XAP, encounter
+option, spell cast, item use, battle or monster decision, lifecycle event, and
+rule-calculation fixture. Apply and Restart always starts from clean package
+state.
+
+The protocol carries diagnostics, VM trace, location, state summaries, active
+behavior, stack, locals, persistent state, event and command timeline, pending
+yield, breakpoints, and step controls. Safe behaviors support block-level
+stepping; sandboxed behaviors pause at reducer boundaries. Source maps and the
+evidence sidecar connect runtime diagnostics to Providence records and blocks.
+
+Browser Providence can author, validate, and export, but cannot launch a local
+process.
 
 ## Producer and consumer gates
 
-Providence must prove stable safe parsing/printing, script validation,
-byte-exact full-tier source, deterministic v3 exports, and native-export
-blocking for Remake-only behavior. Remake validates package integrity, script
-policy, save restoration, all opcode ownership, all 13 campaign readiness
-reports, and representative scenario routes.
+Providence proves project migration, guided/Safe AST round trips, type and role
+validation, deterministic exports, exact sandbox source, generated
+documentation, and native-export blocking for Remake-only behavior.
+
+Remake proves package integrity, unique opcode and port ownership, role
+dispatch, command validation, sandbox policy, save restoration and migration,
+modifier ordering, engine plug-in readiness, all 13 campaigns, and
+representative Classic routes.
 
 The cross-repository verifier exports twice, compares every package byte, and
 passes the result through Remake's consumer:

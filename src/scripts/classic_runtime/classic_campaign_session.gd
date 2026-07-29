@@ -18,7 +18,7 @@ const GameplayRuleRegistryScript = preload(
 const GameplayRuleSetScript = preload(
 	"res://scripts/scenario_runtime/gameplay_rule_set.gd"
 )
-const SAVE_SCHEMA_VERSION := 4
+const SAVE_SCHEMA_VERSION := 5
 
 var install: Object
 var host: Object
@@ -120,6 +120,10 @@ func activate_start_location(force_reload := false) -> Dictionary:
 	}
 	if str(normalized.get("status", "")) != "error":
 		_drain_timed_encounter_scans()
+		host.call_deferred("emit_lifecycle_event", "map-enter", {
+			"event": "map-enter",
+			"location": install.bundle.start_location().duplicate(true),
+		})
 	return normalized
 
 
@@ -166,6 +170,13 @@ func on_native_time_advanced(
 		queued_days > 0 or not runtime_state.pending_timed_encounter_scan().is_empty()
 	):
 		_drain_timed_encounter_scans()
+	host.call_deferred("emit_lifecycle_event", "time-advanced", {
+		"event": "time-advanced",
+		"previousTime": previous_time,
+		"currentTime": current_time,
+		"elapsedSeconds": maxi(0, current_time - previous_time),
+		"location": location,
+	})
 	return {
 		"status": "ok",
 		"queuedDays": queued_days,
@@ -294,9 +305,11 @@ func make_save_result() -> Dictionary:
 		"payload": {
 			"schemaVersion": SAVE_SCHEMA_VERSION,
 			"campaignId": _campaign_id(),
+			"campaignContentVersion": _campaign_content_version(),
 			"campaignPackageHash": _campaign_package_hash(),
-			"scriptApiVersions": {"scenarioScripts": 1},
+			"scriptApiVersions": {"scenarioScripts": 2},
 			"scenarioScriptContract": _scenario_script_contract(),
+			"requiredPlugins": _required_plugins(),
 			"runtimeState": runtime_state.call("snapshot"),
 			"portState": port_state,
 			"continuationState": continuation_result["snapshot"],
@@ -306,8 +319,12 @@ func make_save_result() -> Dictionary:
 
 
 func restore_save_payload(payload: Dictionary) -> Dictionary:
+	var prepared_result := _prepare_save_payload(payload)
+	if str(prepared_result.get("status", "")) != "ok":
+		return prepared_result
+	var prepared_payload: Dictionary = prepared_result["payload"]
 	var validation := validate_save_payload(
-		payload,
+		prepared_payload,
 		_campaign_id(),
 		_campaign_package_hash(),
 		_scenario_script_contract()
@@ -316,7 +333,7 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 		return validation
 	if not is_instance_valid(host) or host.runtime == null:
 		return _error("Classic campaign runtime is not loaded")
-	var rules_restore := gameplay_rule_registry.restore(payload["gameplayRules"])
+	var rules_restore := gameplay_rule_registry.restore(prepared_payload["gameplayRules"])
 	if str(rules_restore.get("status", "")) != "ok":
 		return rules_restore
 	gameplay_rule_set = rules_restore["ruleset"]
@@ -327,8 +344,10 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 	if str(previous_continuation_result.get("status", "")) != "ok":
 		return previous_continuation_result
 	var previous_port_state: Dictionary = host.snapshot_port_state()
-	runtime_state.call("restore", payload["runtimeState"])
-	var port_result: Dictionary = host.restore_port_state(payload.get("portState", {}))
+	runtime_state.call("restore", prepared_payload["runtimeState"])
+	var port_result: Dictionary = host.restore_port_state(
+		prepared_payload.get("portState", {})
+	)
 	if str(port_result.get("status", "")) == "error":
 		_rollback_restore(
 			runtime_state,
@@ -337,7 +356,7 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 			previous_continuation_result["snapshot"]
 		)
 		return port_result
-	var continuation_state: Dictionary = payload.get("continuationState", {
+	var continuation_state: Dictionary = prepared_payload.get("continuationState", {
 		"schemaVersion": RuntimeScript.CONTINUATION_SCHEMA_VERSION,
 		"state": "idle",
 	})
@@ -349,7 +368,74 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 			previous_port_state,
 			previous_continuation_result["snapshot"]
 		)
+	if str(continuation_result.get("status", "")) == "ok":
+		host.call_deferred("emit_lifecycle_event", "campaign-resume", {
+			"event": "campaign-resume",
+			"migrated": bool(prepared_result.get("migrated", false)),
+		})
 	return continuation_result
+
+
+func _prepare_save_payload(payload: Dictionary) -> Dictionary:
+	var prepared := payload.duplicate(true)
+	if str(prepared.get("campaignPackageHash", "")) == _campaign_package_hash():
+		return {"status": "ok", "payload": prepared}
+	if str(prepared.get("campaignId", "")) != _campaign_id():
+		return {
+			"status": "ok",
+			"payload": prepared,
+		}
+	var from_version := str(prepared.get("campaignContentVersion", ""))
+	var to_version := _campaign_content_version()
+	if from_version.is_empty() or to_version.is_empty() \
+			or from_version == to_version:
+		return _error(
+			"Classic save belongs to a different build of this campaign"
+		)
+	if not is_instance_valid(host) \
+			or host.runtime == null \
+			or host.runtime.interpreter == null \
+			or host.runtime.interpreter.scenario_script_runtime == null:
+		return _error("Scenario state migration runtime is unavailable")
+	var continuation: Variant = prepared.get("continuationState", {})
+	if not (continuation is Dictionary):
+		return _error("Scenario state migration requires a valid continuation")
+	var migrated_result: Dictionary = (
+		host.runtime.interpreter.scenario_script_runtime.migrate_snapshot(
+			continuation.get("scenarioScriptRuntime", {}),
+			from_version,
+			to_version
+		)
+	)
+	if str(migrated_result.get("status", "")) != "ok":
+		return _error(
+			"Campaign update cannot restore this save: %s" % migrated_result.get(
+				"message",
+				"state migration failed"
+			)
+		)
+	var migrated_snapshot: Dictionary = migrated_result["snapshot"]
+	continuation["scenarioScriptRuntime"] = migrated_snapshot
+	if str(continuation.get("state", "")) == "suspended":
+		var execution_state: Variant = continuation.get("executionState", {})
+		if not (execution_state is Dictionary):
+			return _error(
+				"Scenario update cannot migrate an invalid suspended continuation"
+			)
+		execution_state["scenarioScriptRuntime"] = migrated_snapshot
+		continuation["executionState"] = execution_state
+	prepared["continuationState"] = continuation
+	prepared["campaignContentVersion"] = to_version
+	prepared["campaignPackageHash"] = _campaign_package_hash()
+	prepared["scenarioScriptContract"] = _scenario_script_contract()
+	prepared["requiredPlugins"] = _required_plugins()
+	return {
+		"status": "ok",
+		"payload": prepared,
+		"migrated": true,
+		"fromContentVersion": from_version,
+		"toContentVersion": to_version,
+	}
 
 
 func _rollback_restore(
@@ -484,7 +570,7 @@ static func validate_save_payload(
 			)
 	var script_versions: Variant = payload.get("scriptApiVersions")
 	if not (script_versions is Dictionary) \
-			or int(script_versions.get("scenarioScripts", 0)) != 1:
+			or int(script_versions.get("scenarioScripts", 0)) != 2:
 		return _error("Scenario script save API is unavailable or incompatible")
 	var saved_script_contract: Variant = payload.get("scenarioScriptContract")
 	if not (saved_script_contract is Dictionary):
@@ -530,29 +616,78 @@ func _campaign_package_hash() -> String:
 	return install.bundle.package_hash()
 
 
+func _campaign_content_version() -> String:
+	if install == null or install.bundle == null:
+		return ""
+	return str(install.bundle.manifest.get(
+		"contentVersion",
+		install.bundle.manifest.get("version", "")
+	))
+
+
+func _required_plugins() -> Array:
+	if install == null or install.bundle == null:
+		return []
+	var runtime_document: Variant = install.bundle.documents.get("runtime", {})
+	if not (runtime_document is Dictionary):
+		return []
+	var requirements: Variant = runtime_document.get("requiredPlugins", [])
+	return requirements.duplicate(true) if requirements is Array else []
+
+
 func _scenario_script_contract() -> Dictionary:
 	if install == null or install.bundle == null:
 		return {}
 	var document: Variant = install.bundle.documents.get("remakeScripts", {})
 	if not (document is Dictionary):
 		return {}
-	var scripts: Array[Dictionary] = []
-	for script_value: Variant in document.get("scripts", []):
-		if not (script_value is Dictionary):
+	var behaviors: Array[Dictionary] = []
+	for behavior_value: Variant in document.get("behaviors", []):
+		if not (behavior_value is Dictionary):
 			continue
-		scripts.append({
-			"id": str(script_value.get("id", "")),
-			"tier": str(script_value.get("tier", "")),
-			"apiVersion": int(script_value.get("apiVersion", 0)),
-			"contentHash": str(script_value.get("contentHash", "")),
-			"stateSchemaHash": str(script_value.get("stateSchemaHash", "")),
+		behaviors.append({
+			"id": str(behavior_value.get("id", "")),
+			"role": str(behavior_value.get("role", "")),
+			"hook": str(behavior_value.get("hook", "")),
+			"tier": str(behavior_value.get("tier", "")),
+			"apiVersion": int(behavior_value.get("apiVersion", 0)),
+			"behaviorVersion": int(behavior_value.get("behaviorVersion", 0)),
+			"stateSchemaVersion": int(
+				behavior_value.get("stateSchemaVersion", 0)
+			),
+			"contentHash": str(behavior_value.get("contentHash", "")),
+			"stateSchemaHash": str(
+				behavior_value.get("stateSchemaHash", "")
+			),
 		})
-	scripts.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+	behaviors.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
 		return left["id"] < right["id"]
+	)
+	var state_definitions: Array = document.get(
+		"stateDefinitions",
+		[]
+	).duplicate(true)
+	state_definitions.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		return (
+			"%s:%s:%s" % [
+				left.get("scope", ""),
+				left.get("ownerId", ""),
+				left.get("name", ""),
+			]
+			<
+			"%s:%s:%s" % [
+				right.get("scope", ""),
+				right.get("ownerId", ""),
+				right.get("name", ""),
+			]
+		)
 	)
 	return {
 		"capabilityCatalogHash": str(document.get("capabilityCatalogHash", "")),
-		"scripts": scripts,
+		"behaviors": behaviors,
+		"stateDefinitions": state_definitions,
+		"migrations": document.get("migrations", []).duplicate(true),
+		"requiredPlugins": _required_plugins(),
 	}
 
 

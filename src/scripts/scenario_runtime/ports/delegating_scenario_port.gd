@@ -5,6 +5,7 @@ var _port_runtime: Object
 var gameplay_rules: GameplayRuleSet
 var extension_registry: ScenarioExtensionRegistry
 var runtime_bindings: Dictionary = {}
+var behavior_runner: Object
 
 
 func configure(services: Dictionary) -> void:
@@ -20,6 +21,7 @@ func configure(services: Dictionary) -> void:
 	gameplay_rules = services.get("gameplayRules")
 	extension_registry = services.get("extensionRegistry")
 	runtime_bindings = services.get("runtimeBindings", {}).duplicate(true)
+	behavior_runner = services.get("behaviorRunner")
 
 
 func rule_option(domain: String, option_id: String, fallback: Variant) -> Variant:
@@ -121,8 +123,6 @@ func invoke_runtime_binding(
 	lookup_keys: Array,
 	request: Dictionary
 ) -> Dictionary:
-	if extension_registry == null:
-		return {"handled": false}
 	var group: Variant = runtime_bindings.get(binding_group, {})
 	if not (group is Dictionary):
 		return {"handled": false}
@@ -130,14 +130,93 @@ func invoke_runtime_binding(
 		var lookup_key := str(lookup_key_value)
 		if lookup_key.is_empty() or not group.has(lookup_key):
 			continue
-		var binding_id := str(group[lookup_key])
-		var result := extension_registry.invoke_binding(
-			capability,
-			binding_id,
-			request,
-			self
-		)
+		var binding_value: Variant = group[lookup_key]
+		if not (binding_value is Dictionary):
+			return {
+				"status": "error",
+				"handled": true,
+				"message": "Scenario runtime binding '%s' is invalid" % lookup_key,
+			}
+		var binding: Dictionary = binding_value
+		var result: Dictionary
+		var binding_id := ""
+		if str(binding.get("kind", "")) == "script":
+			binding_id = str(binding.get("behaviorId", ""))
+			if behavior_runner == null \
+					or not behavior_runner.has_method("run_bound_behavior"):
+				return {
+					"status": "error",
+					"handled": true,
+					"message": "Scenario behavior runner is unavailable",
+				}
+			result = await behavior_runner.call(
+				"run_bound_behavior",
+				binding_id,
+				request,
+				{
+					"portId": port_id(),
+					"bindingGroup": binding_group,
+					"bindingKey": lookup_key,
+				}
+			)
+		elif str(binding.get("kind", "")) == "extension":
+			if extension_registry == null:
+				return {
+					"status": "error",
+					"handled": true,
+					"message": "Scenario extension registry is unavailable",
+				}
+			binding_id = str(binding.get("providerId", ""))
+			result = extension_registry.invoke_binding(
+				capability,
+				binding_id,
+				request,
+				self
+			)
+		else:
+			return {
+				"status": "error",
+				"handled": true,
+				"message": "Scenario runtime binding '%s' has an unknown kind"
+					% lookup_key,
+			}
 		result["handled"] = true
 		result["runtimeBinding"] = binding_id
 		return result
 	return {"handled": false}
+
+
+func invoke_behavior_attachments(
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_ids: Array,
+	request: Dictionary
+) -> Dictionary:
+	if behavior_runner == null \
+			or not behavior_runner.has_method("run_behavior_attachments"):
+		return {"handled": false}
+	return await behavior_runner.call(
+		"run_behavior_attachments",
+		role,
+		hook,
+		target_kind,
+		target_ids,
+		request
+	)
+
+
+func apply_rule_modifiers(
+	event_id: String,
+	base_value: float,
+	context := {}
+) -> Dictionary:
+	if behavior_runner == null \
+			or not behavior_runner.has_method("resolve_rule_modifiers"):
+		return {"status": "ok", "value": base_value, "applied": []}
+	return await behavior_runner.call(
+		"resolve_rule_modifiers",
+		event_id,
+		base_value,
+		context
+	)

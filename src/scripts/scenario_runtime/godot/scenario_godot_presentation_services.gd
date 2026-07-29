@@ -9,6 +9,27 @@ const SoundResolutionScript = preload(
 )
 const STOP_CHOICE_TOKEN := "STOP"
 
+signal scenario_debugger_resumed(action: String)
+
+var _scenario_debugger_waiting := false
+
+
+func _scenario_debug_pause(_payload: Dictionary) -> Dictionary:
+	_scenario_debugger_waiting = true
+	var action: String = await scenario_debugger_resumed
+	_scenario_debugger_waiting = false
+	return {"action": action}
+
+
+func resume_scenario_debugger(action: String) -> Dictionary:
+	if not _scenario_debugger_waiting:
+		return {
+			"status": "error",
+			"message": "Scenario debugger is not waiting",
+		}
+	scenario_debugger_resumed.emit(action)
+	return {"status": "ok"}
+
 
 func _show_text(payload: Dictionary) -> Dictionary:
 	var override: Variant = service_owner.call(

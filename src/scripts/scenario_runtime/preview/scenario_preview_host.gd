@@ -17,6 +17,8 @@ var session: ClassicCampaignSession
 var _connected := false
 var _launching := false
 var _evidence_index: Dictionary = {}
+var _debug_breakpoints: Array = []
+var _debug_pause_on_start := false
 
 
 func start_from_command_line() -> bool:
@@ -99,6 +101,35 @@ func _handle_message(message: Dictionary) -> void:
 				"status": "ok",
 				"summary": _state_summary(),
 			})
+		"set-breakpoints":
+			var breakpoints: Variant = message.get("breakpoints", [])
+			if not (breakpoints is Array):
+				_respond(request_id, {
+					"status": "error",
+					"message": "Preview breakpoints must be an array",
+				})
+			else:
+				_debug_breakpoints = breakpoints.duplicate(true)
+				_debug_pause_on_start = bool(message.get("pauseOnStart", false))
+				_respond(request_id, _configure_scenario_debugger())
+		"debug-state":
+			_respond(request_id, {
+				"status": "ok",
+				"debugger": _debugger_snapshot(),
+			})
+		"debug-command":
+			if not is_instance_valid(session) or session.host == null:
+				_respond(request_id, {
+					"status": "error",
+					"message": "Preview scenario runtime is unavailable",
+				})
+			else:
+				_respond(
+					request_id,
+					session.host.resume_scenario_debugger(
+						str(message.get("action", "resume"))
+					)
+				)
 		"stop":
 			_respond(request_id, {"status": "ok"})
 			get_tree().quit()
@@ -156,6 +187,18 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 		return
 	session = GameGlobal.classic_campaign_session
 	var entry: Dictionary = entry_value if entry_value is Dictionary else {}
+	_debug_breakpoints = entry.get("breakpoints", []).duplicate(true) \
+		if entry.get("breakpoints", []) is Array else []
+	_debug_pause_on_start = bool(entry.get("pauseOnStart", false))
+	var debug_result := _configure_scenario_debugger()
+	if str(debug_result.get("status", "")) == "error":
+		_launching = false
+		_respond(request_id, debug_result)
+		return
+	if not session.host.command_started.is_connected(_on_command_started):
+		session.host.command_started.connect(_on_command_started)
+	if not session.host.command_finished.is_connected(_on_command_finished):
+		session.host.command_finished.connect(_on_command_finished)
 	var kind := str(entry.get("kind", "start"))
 	if kind == "ap":
 		var trigger_id := str(entry.get("triggerId", ""))
@@ -166,8 +209,6 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 				"message": "Preview action point is unavailable",
 			})
 			return
-		session.host.command_started.connect(_on_command_started)
-		session.host.command_finished.connect(_on_command_finished)
 		call_deferred("_run_preview_trigger", trigger_id, int(entry.get("slot", 0)))
 	elif kind == "battle":
 		var battle_id := int(entry.get("battleId", -1))
@@ -201,6 +242,21 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 			_launching = false
 			_respond(request_id, teleport_result)
 			return
+	elif kind == "behavior":
+		var behavior_id := str(entry.get("behaviorId", ""))
+		if behavior_id.is_empty():
+			_launching = false
+			_respond(request_id, {
+				"status": "error",
+				"message": "Preview behavior ID is unavailable",
+			})
+			return
+		call_deferred(
+			"_run_preview_behavior",
+			behavior_id,
+			entry.get("arguments", {}),
+			entry.get("context", {})
+		)
 	_respond(request_id, {
 		"status": "ok",
 		"entry": entry,
@@ -264,6 +320,32 @@ func _run_preview_trigger(trigger_id: String, slot: int) -> void:
 	})
 
 
+func _run_preview_behavior(
+	behavior_id: String,
+	arguments_value: Variant,
+	context_value: Variant
+) -> void:
+	var arguments: Dictionary = (
+		arguments_value if arguments_value is Dictionary else {}
+	)
+	var context: Dictionary = (
+		context_value if context_value is Dictionary else {}
+	)
+	var result: Dictionary = await session.host.run_bound_behavior(
+		behavior_id,
+		arguments,
+		context
+	)
+	_send({
+		"type": "runtime-event",
+		"event": "behavior-finished",
+		"behaviorId": behavior_id,
+		"result": result,
+		"trace": _vm_trace(),
+		"debugger": _debugger_snapshot(),
+	})
+
+
 func _on_command_started(command: String, payload: Dictionary) -> void:
 	_send({
 		"type": "runtime-event",
@@ -271,6 +353,7 @@ func _on_command_started(command: String, payload: Dictionary) -> void:
 		"command": command,
 		"payload": payload,
 		"location": _current_location(),
+		"debugger": _debugger_snapshot(),
 	})
 
 
@@ -353,7 +436,7 @@ func _script_source_location(script_id: String, source_node: String) -> Dictiona
 	var document: Variant = install.bundle.documents.get("remakeScripts", {})
 	if not (document is Dictionary):
 		return {}
-	for script_value: Variant in document.get("scripts", []):
+	for script_value: Variant in document.get("behaviors", []):
 		if not (script_value is Dictionary) or str(script_value.get("id", "")) != script_id:
 			continue
 		var source_map: Variant = script_value.get("sourceMap", {})
@@ -375,7 +458,31 @@ func _state_summary() -> Dictionary:
 		"commandPending": (
 			session.host.active if is_instance_valid(session) else false
 		),
+		"debugger": _debugger_snapshot(),
 	}
+
+
+func _configure_scenario_debugger() -> Dictionary:
+	if not is_instance_valid(session) \
+			or session.host == null \
+			or session.host.runtime == null \
+			or session.host.runtime.interpreter == null \
+			or session.host.runtime.interpreter.scenario_script_runtime == null:
+		return {"status": "ok", "deferred": true}
+	return session.host.runtime.interpreter.scenario_script_runtime.configure_debugger(
+		_debug_breakpoints,
+		_debug_pause_on_start
+	)
+
+
+func _debugger_snapshot() -> Dictionary:
+	if not is_instance_valid(session) \
+			or session.host == null \
+			or session.host.runtime == null \
+			or session.host.runtime.interpreter == null \
+			or session.host.runtime.interpreter.scenario_script_runtime == null:
+		return {"enabled": false, "paused": false}
+	return session.host.runtime.interpreter.scenario_script_runtime.debugger_snapshot()
 
 
 func _current_location() -> Dictionary:

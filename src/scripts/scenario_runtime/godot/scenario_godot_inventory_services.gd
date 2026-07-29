@@ -6,12 +6,101 @@ const InventoryRulesScript = preload(
 )
 
 
+func _query_party_wealth(_payload: Dictionary = {}) -> Dictionary:
+	var game_global: Object = _autoload("GameGlobal")
+	if game_global == null:
+		return _error("Realmz party wealth is unavailable")
+	var pooled: Variant = game_global.get("money_pool")
+	if not (pooled is Array) or pooled.size() < 3:
+		return _error("Realmz pooled wealth is unavailable")
+	var totals := [
+		int(pooled[0]),
+		int(pooled[1]),
+		int(pooled[2]),
+	]
+	for character_value: Variant in service_owner.call("_party_characters"):
+		if not (character_value is Object):
+			continue
+		var money: Variant = character_value.get("money")
+		if not (money is Array):
+			continue
+		for index: int in range(mini(3, money.size())):
+			totals[index] += int(money[index])
+	return {
+		"gold": totals[0],
+		"gems": totals[1],
+		"jewelry": totals[2],
+		"pooledGold": int(pooled[0]),
+	}
+
+
 func classic_save_state() -> Dictionary:
 	return service_owner.call("classic_save_state")
 
 
 func restore_classic_save_state(saved_state: Dictionary) -> Dictionary:
 	return service_owner.call("restore_classic_save_state", saved_state)
+
+
+func scenario_item_behavior_context(
+	instance: Object,
+	user: Object = null,
+	target: Object = null
+) -> Dictionary:
+	if instance == null:
+		return _error("Scenario item behavior requires an item instance")
+	var node_access: Object = _autoload("NodeAccess")
+	var resources: Object = node_access.__Resources() if node_access != null else null
+	if resources == null or not resources.has_method("get_item_definition"):
+		return _error("Realmz item definitions are unavailable")
+	var definition: Variant = resources.get_item_definition(instance)
+	if definition == null:
+		return _error("Scenario item behavior cannot resolve its item definition")
+	var target_ids: Array = [str(instance.get("definition_id"))]
+	if definition.has_method("classic_item_ids"):
+		for classic_id: Variant in definition.call("classic_item_ids"):
+			var id_text := str(classic_id)
+			if not target_ids.has(id_text):
+				target_ids.append(id_text)
+	var instance_state: Dictionary = {}
+	if instance.has_method("state_data"):
+		var state_value: Variant = instance.call("state_data")
+		if state_value is Dictionary:
+			instance_state = state_value.duplicate(true)
+	return {
+		"status": "ok",
+		"targetIds": target_ids,
+		"request": {
+			"item": {
+				"definitionId": str(instance.get("definition_id")),
+				"instanceId": str(instance.get("instance_id")),
+				"charges": int(instance.get("charges")),
+				"state": instance_state,
+			},
+			"definition": {
+				"id": str(definition.get("definition_id")),
+				"name": str(definition.get("name")),
+			},
+			"user": _scenario_creature_snapshot(user),
+			"target": _scenario_creature_snapshot(target),
+		},
+	}
+
+
+func _scenario_creature_snapshot(creature: Object) -> Dictionary:
+	if creature == null:
+		return {}
+	var health := int(creature.call("get_stat", "curHP")) \
+		if creature.has_method("get_stat") else 0
+	var maximum_health := int(creature.call("get_stat", "maxHP")) \
+		if creature.has_method("get_stat") else health
+	return {
+		"id": str(creature.get_instance_id()),
+		"name": str(creature.get("name")),
+		"health": health,
+		"maximumHealth": maximum_health,
+		"alive": health > 0,
+	}
 
 
 func _offer_temple(payload: Dictionary) -> Dictionary:

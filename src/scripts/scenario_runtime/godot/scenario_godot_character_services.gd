@@ -6,6 +6,30 @@ const CharacterConditionRulesScript = preload(
 )
 
 
+func _query_party_members(_payload: Dictionary = {}) -> Dictionary:
+	var snapshots: Array = []
+	var party: Array = service_owner.call("_party_characters")
+	for index: int in range(party.size()):
+		var character_value: Variant = party[index]
+		if not (character_value is Object):
+			continue
+		var stats: Variant = character_value.get("stats")
+		if not (stats is Dictionary):
+			stats = {}
+		var current_health := int(stats.get("curHP", 0))
+		snapshots.append({
+			"id": "party:%d" % index,
+			"name": str(character_value.get("name")),
+			"level": int(character_value.get("level")),
+			"health": current_health,
+			"maximumHealth": int(stats.get("maxHP", current_health)),
+			"spellPoints": int(stats.get("curSP", 0)),
+			"maximumSpellPoints": int(stats.get("maxSP", 0)),
+			"alive": current_health > 0 and int(character_value.get("life_status")) < 3,
+		})
+	return {"members": snapshots, "value": snapshots}
+
+
 func _alter_party_fatigue(payload: Dictionary) -> Dictionary:
 	var game_global: Object = _autoload("GameGlobal")
 	if game_global == null \

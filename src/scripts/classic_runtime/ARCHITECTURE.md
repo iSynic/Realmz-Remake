@@ -1,1154 +1,410 @@
-# The modular scenario runtime
+# Realmz Remake scenario runtime architecture
 
-This is the developer guide to the modular scenario runtime: what it is, how a campaign
-gets from Providence into a running game, where the important boundaries are,
-and how this differs from Samuel Rabreau's earlier implementation in the Realmz
-Castle repository.
+This document describes the current modular runtime shared by compiled Classic
+campaigns and Remake-authored behavior. It is written for contributors working
+on the interpreter, Godot integration, Providence contract, saves, preview, or
+scenario extensions.
 
-The short version is that I want scenarios to be **content the engine
-interprets**, not a collection of campaign-specific scripts the engine happens
-to execute. That one decision drives most of the architecture.
+## The central rule
 
-Samuel's implementation was useful. It got native Godot campaigns, map Action
-Points, encounters, shops, spells, battles, and custom behavior moving quickly.
-It was also very direct: a campaign shipped GDScript, that GDScript called
-`GameGlobal`, `UI`, and `ScriptHelperFuncsClass`, and the game trusted it. That
-is a reasonable way to prove a game loop. It is a difficult foundation for
-portable Classic scenarios, deterministic Providence exports, safe third-party
-packages, resumable scenario execution, and multiple selectable gameplay
-models.
+`ScenarioInterpreter` is the only scenario execution authority.
 
-The modular runtime keeps the parts of the Remake that already work well--the map, HUD,
-combat system, inventory, characters, audio, and save UI--but puts a versioned
-scenario VM and explicit engine APIs in front of them.
+Classic AP/XAP instructions, semantic instructions, Safe behaviors, encounter
+hooks, spell and item hooks, monster decisions, lifecycle events, and scenario
+rule modifiers all enter the same interpreter and continuation model. There is
+no parallel “Remake map-script mode.”
 
-This guide describes the implementation on `feature/scenario-scripting-preview`.
-It includes the earlier domain extraction plus bundle v3, safe scripts inside
-the VM, isolated and trusted full GDScript reducers, save schema 4, and managed
-Providence previewing.
+The interpreter never touches `SceneTree`, scenes, UI nodes, `GameGlobal`,
+resources, character objects, or item objects. It owns only deterministic,
+serializable execution state:
 
-> **Scope of this guide**
->
-> "Samuel's implementation" means the Realmz Castle `Realmz-Remake`
-> `origin/dev` tree at commit `f44a53dfb2d62dcf9783b31d9a9f0b6241394c23`
-> (`Wolf Morph, improved Status AI functions`, authored by Samuel Rabreau).
-> The `core.samuel` rules preset is an experimental set of implemented
-> Samuel-style differences characterized against that baseline. It does not
-> claim complete native parity, and it does not reload or re-enable the old
-> campaign scripts.
+- trigger and action identity;
+- instruction cursor;
+- GOSUB and behavior call frames;
+- typed locals, iterators, and return values;
+- immutable event contexts;
+- encounter origin and result state;
+- pending command and resume data;
+- mutation ordering;
+- execution limits and trace;
+- snapshot and restoration.
 
-## The mental model
+Godot-facing state belongs behind ports.
 
-There are three different things here, and keeping them separate makes the
-whole system much easier to understand:
+## Runtime flow
 
-1. **The scenario package** says what was authored. It contains maps, messages,
-   encounters, Classic actions, media, scripts, runtime declarations, and a
-   separate evidence sidecar.
-2. **The scenario runtime** decides what instruction runs next, what owns that
-   instruction, when execution must pause, and how it resumes.
-3. **The Godot game** actually draws a picture, opens a shop, moves the party,
-   starts combat, changes a character, or saves state.
-
-The normal flow looks like this:
-
-```mermaid
-flowchart LR
-    P["Providence project"] --> B["Scenario v3 package"]
-    B --> I["Install, validate, and index"]
-    I --> S["Campaign session and pinned rules"]
-    S --> VM["ScenarioInterpreter"]
-    VM --> H["One registered instruction handler"]
-    H --> R["ScenarioStepResult"]
-    R -->|continue or branch| VM
-    R -->|yield command| HOST["ClassicRuntimeHost"]
-    HOST --> PORT["One command port"]
-    PORT --> DOMAIN["One domain Godot service"]
-    DOMAIN --> G["ScenarioGodotServices coordinator"]
-    G --> GAME["Map, HUD, combat, inventory, characters"]
-    GAME -->|structured response| HOST
-    HOST --> VM
+```text
+Classic trigger, semantic instruction, or gameplay hook
+                         |
+                         v
+                ScenarioInterpreter
+                         |
+          handler or Safe behavior step
+                         |
+       continue / branch / call / return / yield
+                         |
+                         v
+             ScenarioCommandRouter
+                         |
+      Map / Combat / Inventory / Character /
+             Presentation / Persistence
+                         |
+                         v
+            validated response to the VM
 ```
 
-This is not a second game engine living beside Godot. The scenario side owns
-authored execution and continuation. The existing Godot side still owns game
-objects and presentation.
+The runtime host is the pump around that loop. It asks the interpreter to
+advance, routes a yielded command, and resumes the serialized pending record
+with the response. It does not contain a command-name continuation switch.
 
-## A quick vocabulary pass
+## Instructions and handlers
 
-| Term | What it means here |
-| --- | --- |
-| **Classic action** | A preserved Realmz action slot with a signed raw opcode, normalized opcode, stable record ID, slot, and GOSUB flag. Source evidence is resolved through the sidecar. |
-| **Semantic operation** | A namespaced instruction such as `core.script.call` or `scenario.example.open_portal`. It is not limited to the original Classic opcode table. |
-| **Scenario script** | A named safe AST or exact-source full GDScript reducer attached to an AP/XAP slot, encounter result, or lifecycle hook. |
-| **Execution tier** | Safe VM execution, isolated sandbox execution, or explicitly approved trusted execution. Tiers never escalate automatically. |
-| **Capability** | A typed, versioned operation exposed to scripts and owned by one port. |
-| **Trigger** | A stable, indexed action list. A map AP, XAP, encounter result, timed event, or battle macro can all resolve to a trigger. |
-| **Handler** | The one registered owner of an opcode or semantic operation. A handler decides what that instruction means. |
-| **Step result** | The handler's control-flow answer: continue, yield, branch, call, return, replace, halt, or error. |
-| **Command** | A request for the Godot side to do something, such as show text, start a battle, check an item, or teleport. |
-| **Port** | The single owner and validator for a family of commands crossing into Godot. |
-| **Service** | The domain-specific Godot implementation behind a port. It can use shared native helpers from the services coordinator. |
-| **Continuation** | The saved identity and data required to resume the exact handler that yielded. |
-| **Runtime state** | Mutable scenario state: AP replacements, quest state, map mutations, encounter changes, timed events, and similar campaign-owned changes. |
-| **Gameplay ruleset** | Six resolved domain providers plus validated options, chosen at new-game time and locked into the save. |
-| **Extension** | Trusted engine code registered in Remake's built-in extension catalog. A campaign can require and configure it, but cannot replace a core opcode. |
+Classic instructions preserve the source slot, signed opcode, normalized
+opcode, ID, and GOSUB bit. Semantic instructions use namespaced operation IDs.
 
-## The architecture, layer by layer
+`ScenarioInstructionRegistry` owns handler registration. Every supported
+Classic opcode registers exactly once. Duplicate opcode ownership, duplicate
+semantic operation ownership, missing handlers, and attempts to replace
+reserved core IDs are startup errors.
 
-### 1. Providence produces a versioned package
+Handlers implement cohesive families:
 
-The runtime consumes `realmz-remake-scenario` format 3 with document schema 2.
-Providence's editable
-project and native Realmz export are separate artifacts; neither is treated as
-the Remake runtime package.
+- control flow;
+- encounters;
+- map and time;
+- combat;
+- inventory;
+- character;
+- state and rules;
+- presentation;
+- behavior calls.
 
-Every installed package starts with `campaign.json` and names ten JSON
-documents:
+A handler returns a `ScenarioStepResult`: continue, yield, branch, call,
+return, replace, halt, or error. Cursor normalization, negative/GOSUB handling,
+stack mutation, pending records, and application of the result remain in the
+interpreter.
 
-| Document | Main responsibility |
-| --- | --- |
-| `classic/scenario.json` | Scenario identity and Classic shell metadata |
-| `classic/maps.json` | Land and dungeon maps and player-map records |
-| `classic/scripts.json` | Triggers, Extra Codes, messages, and random levels |
-| `classic/encounters.json` | Battles, treasure, shops, and encounter records |
-| `classic/content.json` | Monsters, scenario items, and item text |
-| `classic/rules.json` | Spell, race, and caste definitions |
-| `classic/assets.json` | Packaged payload and runtime-media catalogs |
-| `classic/evidence.json` | Required source observations and diagnostics, not ordinary gameplay input |
-| `runtime.json` | Rules recommendation, extensions, bindings, and target support |
-| `remake/scripts.json` | Named script manifests, safe AST, source maps, attachments, and persistent variables |
+## Behavior runtime
 
-The detailed interchange rules live in
-[BUNDLE_CONTRACT.md](BUNDLE_CONTRACT.md). The important architectural rule is
-that **array position is never identity**. Records have stable IDs, and
-references are validated before the runtime indexes them.
+`ScenarioScriptRuntime` executes the behavior document in
+`remake/scripts.json` schema 2. A behavior is either:
 
-A Classic instruction is explicit data:
+- an entry behavior attached to a typed gameplay role and hook; or
+- a helper with typed parameters and return value.
 
-```json
-{
-  "kind": "classic",
-  "slot": 0,
-  "rawCode": -42,
-  "code": 42,
-  "id": 17,
-  "gosub": true
-}
-```
+The supported roles are Action, Encounter, Spell, Item, Monster AI, Lifecycle,
+Rule Modifier, and Helper. Each role receives an immutable context and returns
+a role-specific typed outcome. A result with the wrong shape is an execution
+error, not an implicit continuation.
 
-A Remake-specific operation uses the same instruction stream but is namespaced:
+Behavior bindings identify:
 
-```json
-{
-  "kind": "semantic",
-  "slot": 1,
-  "operation": "scenario.example.open_portal",
-  "parameters": {
-    "destination": "vault"
-  }
-}
-```
+- the target record;
+- hook or action position;
+- behavior or extension provider;
+- typed argument mapping;
+- deterministic priority.
 
-`core.script.call` is the reserved semantic operation used when an author
-attaches a named script to a Classic action slot. Safe scripts remain canonical
-AST and never produce `.gd`. Sandboxed and trusted scripts name exact,
-manifested source under `remake/source/`; no other campaign GDScript is valid.
+Argument values can come from constants, declared state, current context, or
+selected record references. The runtime validates the complete mapping before
+opening a behavior frame.
 
-The manifest records the size and SHA-256 of every payload. The package hash is
-derived from the canonical manifest and those file hashes. Runtime records keep
-stable IDs and gameplay fields; provenance, source files, record indices, byte
-ranges, confidence, and decoding evidence live in the required evidence
-sidecar. Installation validates its integrity, while gameplay loads it only
-when a source-linked trace or diagnostic is requested.
+### Safe behavior
 
-### 2. Installation is a real trust and readiness boundary
+Safe behavior is a canonical AST executed in the central interpreter. It
+supports typed values, optionals, enums, opaque references, immutable context
+records, bounded arrays, locals, helper calls, conditionals, match, bounded
+for-each, collection queries, and yield only through catalog operations that
+allow it.
 
-`ClassicCampaignInstall` is not just a folder loader. It:
+It cannot access Godot APIs, nodes, resources, engine singletons, files,
+network, processes, native code, reflection, dynamic calls, classes, signals,
+lambdas, wall-clock time, recursion, or unbounded loops.
 
-1. accepts only a safe installed campaign directory name;
-2. requires `campaign.json`;
-3. recursively rejects symlinks and undeclared executable payloads;
-4. loads and validates the complete bundle;
-5. verifies packaged asset byte counts and hashes;
-6. builds the same native resource context used by campaign selection;
-7. runs readiness against that context; and
-8. verifies that the materialized start map exists.
+The same limits are enforced by Providence, the exporter, and Remake:
 
-The forbidden package types include undeclared GDScript, compiled GDScript, PCK
-files, native libraries, executables, and WebAssembly. A declared `.gd` file is
-still inert during installation and inspection; it can execute only under its
-declared sandboxed or trusted policy.
+- 4,096 AST nodes;
+- 256 entries per array;
+- 32 behavior call frames;
+- a shared deterministic instruction budget.
 
-This matters for more than security. It also means the runtime can reason about
-what a package requires before the player starts it. Missing media, unsupported
-records, invalid IDs, unknown extensions, and progression blockers become
-diagnostics instead of a late dynamic-call failure.
+Safe frames, locals, iterators, contexts, return values, and pending commands
+are part of the interpreter snapshot.
 
-The campaign selector lists only manifest-bearing scenario-v3 directories.
-Legacy native campaign folders can remain in the repository as source fixtures,
-but the game does not execute them.
+### Sandboxed GDScript
 
-### 3. `ClassicCampaignBundle` is immutable product input
+Sandboxed GDScript is the only executable source shipped in a scenario. It
+runs as an explicit-state reducer in a separate persistent headless Godot
+process. The main game sends a bounded JSON event, prior state, and restricted
+context. The runner returns bounded JSON state and a continue, yield, halt, or
+error result.
 
-`ClassicCampaignBundle` validates the runtime documents, verifies the evidence
-sidecar and complete integrity manifest, and builds lookup indexes
-for triggers, maps, messages, encounters, monsters, items, pictures, sounds,
-random rectangles, and other source records.
+On Windows, AppContainer/LPAC and Job Objects form the enforcement boundary.
+The runner has no network capability, cannot create child processes, cannot
+load native libraries or PCKs, cannot access the main process, and sees only
+its declared source plus a private scratch directory. Memory, CPU, process
+count, wall time, state depth, message size, and request rate are limited.
 
-Once loaded, code should treat the bundle as immutable. If an action changes an
-AP, removes an encounter option, rewrites a tile, or alters a timed event, that
-change belongs in `ClassicRuntimeState`.
+Every yielded operation is checked against the source manifest and capability
+catalog before it reaches a port. If isolation is unavailable, readiness
+fails. Sandboxed source never falls back to in-process execution.
 
-That separation is deliberate:
+Scenario packages do not have a trusted/in-process script tier.
 
-- the bundle continues to describe what Providence exported;
-- runtime state describes what this playthrough changed;
-- a save can serialize only mutations rather than rewritten campaign files;
-- tests can compare source data and effective state independently; and
-- loading a save never edits the installed package.
+## Scenario API catalog
 
-### 4. `ClassicCampaignSession` owns one playthrough
+`src/Data/remake-scenario-capabilities.v2.json` is the public script surface.
+Providence consumes the byte-identical catalog. Its hash is pinned by packages
+and saves.
 
-`ClassicCampaignSession` is the aggregate for a running campaign. It:
+Every operation declares:
 
-- uses the already validated install;
-- resolves the selected gameplay rules;
-- creates and configures the runtime host;
-- loads materialized item definitions;
-- applies campaign character rules;
-- activates the authored start location;
-- drains timed-encounter scans after native time advances; and
-- creates and restores the complete scenario save envelope.
+- stable ID and API version;
+- friendly name, category, reference text, examples, and editor metadata;
+- owning port;
+- typed parameters and result;
+- compatible roles;
+- whether it yields or mutates state;
+- minimum security tier and deprecation state.
 
-`GameGlobal.start_current_classic_campaign()` is the normal engine entry point.
-It creates a session with `ScenarioGodotServices`, restores a schema-4 save when
-present, applies character rules, activates the start location, and registers
-the session's host for map and combat integration.
+Queries produce immutable values, snapshots, or opaque stable references.
+Mutations become validated commands. Public operations never return live
+Godot objects.
 
-The distinction between **session** and **host** is useful:
+The generated reference is a contract check, not separate prose. CI rejects a
+public entry without role compatibility, parameter/result documentation, or a
+compiling example.
 
-- the session owns campaign lifecycle, rules, time scheduling, and aggregate
-  persistence;
-- the host owns one active scenario execution and its command round trips.
+## Six Godot ports
 
-### 5. `ScenarioInterpreter` is the public execution owner
+Only ports and their Godot services may touch the native game.
 
-Every scenario action now enters `ScenarioInterpreter`. The interpreter owns
-or exposes the important execution facts:
+### MapPort
 
-- current trigger and action position;
-- call/GOSUB frames;
-- encounter origins;
-- the pending command;
-- execution context;
-- trace output;
-- halted/completed state;
-- step and stack limits; and
-- execution snapshots and restoration.
+Owns map lookup, movement, edge transitions, teleportation, exploration,
+world time, timed encounters, random rectangles, camping/rest integration,
+map mutation, and map-scoped state.
 
-For Classic execution, those mutable facts live in
-`ClassicScenarioExecutionState`, which the interpreter creates and owns.
-`ClassicOpcodeRuntime` is bound to that state; it does not create a second
-cursor, stack, trace, or continuation store. Keeping the state object explicit
-also gives snapshots and restoration one concrete schema boundary.
+### CombatPort
 
-There are two instruction shapes, but not two campaign execution systems.
-Generic semantic triggers and preserved Classic triggers both resolve through
-`ScenarioInstructionRegistry`. Classic execution uses
-`ClassicOpcodeRuntime` as a compatibility coordinator for shared bundle access,
-state proxies, cursor lifecycle, and the unusual original stack behavior. The
-actual opcode mechanics are split across eight handler-aligned domain runtimes.
-The VM still resolves the registered handler before a mechanic can run,
-captures the yield as a `ScenarioPendingCommand`, and owns the public resume
-path.
+Owns battle creation, combatants, battlefield snapshots, damage, healing,
+effects, spawning, morale, rewards, spell integration, and Monster AI
+dispatch. Scenario AI receives an immutable combat snapshot and returns a
+decision that native combat validates before use.
 
-There is only one execution loop. The old loop inside
-`ClassicOpcodeRuntime` has been removed. The active path is:
+### InventoryPort
 
-1. normalize the instruction;
-2. ask the registry for its one owner;
-3. fail if no owner exists, except for an evidence-listed original dispatcher
-   no-op;
-4. ask `ClassicOpcodeRuntime` for that handler's domain runtime;
-5. execute the mechanic through the registered handler;
-6. apply or capture its `ScenarioStepResult`; and
-7. continue until the VM yields, completes, or errors.
+Owns item definitions and instances, equipment, charges, treasure, shops,
+wealth, storage, and item hooks. Field and combat item-use paths consult the
+scenario binding before the native item provider. The behavior receives
+stable item/user/target snapshots, not the mutable inventory object.
 
-The hard limits are intentional. The VM stops after 256 internal steps instead
-of hanging, and Classic GOSUB depth is capped at 20 frames instead of writing
-past the original fixed array.
+### CharacterPort
 
-### 6. Handler families own meaning
-
-`CoreScenarioHandlerCatalog` registers the built-in handler families:
-
-| Handler ID | Domain |
-| --- | --- |
-| `core.control-flow` | AP replacement, branches, calls, returns, and encounter-flow changes |
-| `core.encounters` | Simple and complex encounter operations |
-| `core.map-time` | Map mutation, teleporting, time, darkness, view, and random rectangles |
-| `core.combat` | Battle requests, battle state, macros, morale, and combatant mutations |
-| `core.inventory` | Treasure, shops, temples, banking, items, charges, and equipment storage |
-| `core.character` | Character selection, abilities, health, experience, allies, and conditions |
-| `core.rules-state` | Scenario rule and persistent state operations |
-| `core.presentation` | Text, pictures, sound, clicks, and presentation branches |
-
-Each Classic opcode is registered once. Duplicate ownership is a startup error,
-and non-core extensions cannot claim Classic opcodes.
-
-Handlers should answer in `ScenarioStepResult`, not manipulate the VM's
-instruction pointer themselves. The result vocabulary is intentionally small:
-
-| Result | Meaning |
-| --- | --- |
-| `continue` | Advance to the next instruction |
-| `yield` | Ask Godot to perform one command and save a continuation |
-| `branch` | Continue at another action index |
-| `call` | Push a frame and enter another trigger |
-| `return` | Pop a frame |
-| `replace` | Enter another trigger without pushing a frame |
-| `halt` | Finish intentionally |
-| `error` | Stop with a developer- and source-visible failure |
-
-Classic handlers currently call focused mechanics on
-their matching domain runtime:
-
-| Handler | Mechanic implementation |
-| --- | --- |
-| `core.control-flow` | `ClassicControlFlowOpcodeRuntime` |
-| `core.encounters` | `ClassicEncounterOpcodeRuntime` |
-| `core.map-time` | `ClassicMapTimeOpcodeRuntime` |
-| `core.combat` | `ClassicCombatOpcodeRuntime` |
-| `core.inventory` | `ClassicInventoryOpcodeRuntime` |
-| `core.character` | `ClassicCharacterOpcodeRuntime` |
-| `core.rules-state` | `ClassicRulesStateOpcodeRuntime` |
-| `core.presentation` | `ClassicPresentationOpcodeRuntime` |
-
-Those objects own the complicated source-fidelity mechanics: signed opcodes,
-encounter result blocks, AP/XAP replacement, Classic selection tracking, GOSUB
-quirks, source-specific branching, combat macros, and mutation ordering.
-`ClassicOpcodeRuntime.classic_handler_runtime()` is the narrow coordinator that
-maps a registered core handler to its mechanic object and supplies shared
-bundle/state helpers. The handler owns instruction dispatch, the domain runtime
-owns the mechanic, `ClassicScenarioExecutionState` owns mutable execution
-facts, and `ScenarioInterpreter` owns the loop.
-
-### 7. A yield becomes one structured pending command
-
-Most interesting scenario actions cannot finish synchronously. Text waits for
-acknowledgement. Choices need an answer. Encounters need an outcome. Battles
-may take several minutes. Character selection and item checks need native game
+Owns party selection, character snapshots, statistics, progression,
+conditions, health, spell points, allies, abilities, and character-scoped
 state.
 
-When a handler yields, the VM creates one `ScenarioPendingCommand` containing:
+### PresentationPort
 
-- the handler ID that yielded;
-- the command ID;
-- stable action identity; and
-- structured continuation data.
+Owns text, choices, pictures, sound, music, waits, encounter UI, animation,
+camera/interface markers, and presentation pacing. Presentation is always
+performed by the real Remake UI in play and managed preview.
 
-On response, the VM looks up that same handler by ID and calls its `resume`
-method. It does not use a giant host-side switch to guess which opcode a command
-belonged to.
+### PersistencePort
 
-Classic mechanics still expose properties such as `pending_choice` and
-`pending_battle` for focused source-fidelity tests. Those are compatibility
-views over the active Classic mechanic. The serialized scenario-level identity
-is the single pending-command record.
+Owns port-state aggregation, save policy, validation, snapshots, and
+restoration. A port that cannot serialize an in-flight native action must
+report that boundary instead of producing an unsafe save.
 
-### 8. `ClassicRuntimeHost` drives the asynchronous round trip
+Each port declares a stable ID, owned command IDs, request/response schemas,
+save policy, and optional state serializer. Duplicate command ownership is a
+startup error.
 
-The host connects the runtime's signals to the command router:
+## Dispatch outside AP slots
 
-1. a map AP calls `run_trigger()`;
-2. the runtime runs instructions until one yields;
-3. `command_requested` reaches the host;
-4. the host merges map/combat execution context into the request;
-5. `ScenarioCommandRouter` sends the command to its owning port;
-6. the port awaits the Godot service response;
-7. the host sends that response back to the runtime; and
-8. the VM resumes through the handler recorded in the pending command.
+The host exposes typed entry dispatch so native systems do not need to know
+how a behavior executes.
 
-The host also handles nested battle macros. A map AP may be suspended inside
-`start_battle` while a separate host runs a battle-round or queued combat macro
-against the same immutable bundle and shared runtime state. That keeps the outer
-AP continuation intact.
+- Encounter entry, selected option/result, and completion hooks run around the
+  native encounter flow. A plain Continue does not suppress the native
+  encounter.
+- Spell validation runs before resolution. Cast and effect hooks may own
+  resolution; without an attachment, the built-in or extension spell provider
+  remains authoritative.
+- Field and combat item-use paths ask InventoryPort for a matching behavior
+  before using the native provider.
+- Monster turns ask CombatPort for an attached AI behavior before native AI.
+  The returned action is validated against the current combat snapshot.
+- Campaign start/resume, map entry, and time-advance events enter the
+  Lifecycle role. Additional lifecycle boundaries use the same typed event
+  contract as they are wired into their native owner.
 
-### 9. Six ports are the engine API
+Bindings may include an action/result slot. Matching filters that slot before
+priority ordering so one encounter result cannot fire another result's
+behavior.
 
-The ports are the most practical boundary in the system. If a scenario action
-needs the Godot game to do something, it should cross one of these:
+## Rules and modifiers
 
-| Port | Owns |
-| --- | --- |
-| `MapPort` | Map redraw and mutation, teleporting, party movement, time, camping, view state, darkness, random rectangles, land looks, and player maps |
-| `CombatPort` | Battle construction, combatant queries and mutations, macros, turning, battle end, rewards, and coward penalties |
-| `InventoryPort` | Treasure, item drops, shops, temples, banking, identity-aware checks and mutations, wealth, equipment storage, and inventory save state |
-| `CharacterPort` | Fatigue, conditions, allies, experience, character picking, ability checks, health, and field spell integration |
-| `PresentationPort` | Text, scrolling text, choices, encounters, sound, authored waits, pictures, and random-branch presentation |
-| `PersistencePort` | Aggregate port snapshots and restoration |
+Gameplay profiles still select independently versioned Map/Time, Combat,
+Inventory, Character, Presentation, and Persistence providers. The resolved
+selection is pinned in the save.
 
-`ScenarioCommandRouter` enforces:
+Scenario behaviors may observe stable calculation events and return bounded
+modifiers. They do not replace the core rules engine.
 
-- one port ID per port;
-- one owning port per command;
-- a request contract for every command;
-- a response contract for every command; and
-- request/response validation at the boundary.
+Resolution order is:
 
-The contract mechanism supports required fields and primitive property types,
-but most core commands currently declare only an object-level contract. Treat
-that as a real ownership and shape check, not as full payload schema coverage.
-When changing a command, strengthen its field contract where practical instead
-of describing the current shallow schema as more precise than it is.
+1. active gameplay-profile provider;
+2. built-in extension modifiers;
+3. scenario modifiers by explicit priority and stable binding ID;
+4. domain validation and clamping;
+5. post-resolution notification.
 
-The core command names are registered by the six default ports before any
-extension port. An extension command must be declared in the trusted extension
-catalog and cannot collide with an existing owner.
+The modifier pipeline covers attack chance, damage, healing, spell cost,
+movement cost, fatigue, experience, loot, encounter chance, rest recovery,
+time advancement, and condition resistance. Modifier hooks are pure and
+cannot yield.
 
-The five gameplay ports resolve their own native runtime during configuration.
-`DelegatingScenarioPort` asks the configured coordinator for
-`scenario_port_runtime(port_id)` and then validates and calls that domain
-service. `PersistencePort` remains the sixth boundary and aggregates saveable
-port and coordinator state rather than owning a separate gameplay service.
+## Extensions and engine plug-ins
 
-### 10. Domain services implement the native side
+Built-in scenario extensions are descriptors and GDScript providers shipped
+under `res://scripts/scenario_runtime/extensions/`. They can register
+namespaced handlers, commands, spells, item providers, encounter resolvers,
+AI, lifecycle hooks, and rules providers. Campaigns select and configure them
+by stable ID. They cannot replace reserved core IDs.
 
-`ScenarioGodotServices` now creates five Godot-facing domain services:
+Raw Godot access for third-party development belongs to separately installed
+engine plug-ins. `ScenarioEnginePluginRegistry` validates plug-in ID, API
+version, namespaced registrations, and duplicate ownership. A campaign can
+declare a required plug-in, but cannot package its executable code. Missing or
+incompatible requirements block readiness.
 
-| Port | Native implementation |
-| --- | --- |
-| `MapPort` | `ScenarioGodotMapServices` |
-| `CombatPort` | `ScenarioGodotCombatServices` |
-| `InventoryPort` | `ScenarioGodotInventoryServices` |
-| `CharacterPort` | `ScenarioGodotCharacterServices` |
-| `PresentationPort` | `ScenarioGodotPresentationServices` |
+The word “extension” in runtime JSON therefore means a built-in provider that
+ships with Remake. It does not mean a script loaded from a campaign folder.
 
-Each domain service exposes the operations for one port. A map command no
-longer reflects against one all-purpose adapter; it is validated against and
-executed by `ScenarioGodotMapServices`, and the same rule applies to the other
-domains.
+## Campaign and evidence boundary
 
-`ScenarioGodotServices` remains the coordinator and shared native owner. It
-holds campaign-wide resources and cross-domain state, creates the domain
-services, provides autoload/UI/native helper access, prepares save-safe command
-tracking, and aggregates persistence. The domain services inherit
-`ScenarioGodotDomainService` and currently call back to that coordinator for
-shared helpers that have not yet moved behind narrower typed collaborators.
+Bundle v3 contains:
 
-Neither the domain services nor the coordinator decide which command ID owns
-an action, which handler should resume, or where the scenario instruction
-pointer moves. Those decisions remain on the scenario side of the port
-boundary.
+- `campaign.json`, with complete integrity inventory and package hash;
+- Classic runtime documents with gameplay data;
+- `classic/evidence.json`, with source/provenance/decoding evidence;
+- `runtime.json`, with profiles, requirements, provider bindings, and target
+  support;
+- `remake/scripts.json` schema 2, with behaviors, state, bindings, migrations,
+  and sandbox source manifests;
+- immutable scenario-owned assets and decoded runtime media.
 
-### 11. Gameplay behavior is selected independently of execution
+The evidence file is verified at installation but not loaded in normal play.
+Trace and preview tooling can resolve a stable record ID through it when a
+source-linked diagnostic is requested.
 
-The modular runtime separates **how the scenario executes** from **which gameplay model
-the player selected**.
-
-There are six rule domains:
-
-- Map/Time
-- Combat
-- Inventory
-- Character
-- Presentation
-- Persistence
-
-`GameplayRuleRegistry` loads built-in provider descriptors and presets.
-Provider options are typed (`boolean`, `enum`, `integer`, or `float`) and
-validated. The new-campaign panel builds its advanced controls from that
-catalog, resolves the selection, and passes it into the campaign session.
-
-The resolved `GameplayRuleSet` stores, for every domain:
-
-- provider ID;
-- provider API version; and
-- complete validated options.
-
-That resolved set is locked into the save. A campaign can recommend
-`core.classic`, but it cannot silently force a profile over the player's
-selection, and an existing playthrough cannot change providers halfway through.
-
-Both the Classic and Samuel presets use the same VM, handlers, ports, package,
-and save architecture. Their defaults differ:
-
-| Domain | `core.classic` | `core.samuel` |
-| --- | --- | --- |
-| Map/Time | Adjacent edge transitions, timed encounters, and random rectangles enabled | Blocked edges, timed encounters disabled, and random rectangles disabled |
-| Combat | Battle macros and Classic morale | No Classic battle macros or Classic morale |
-| Inventory | Scenario-stable item identity | Native-name item identity |
-| Character | Classic conditions | No Classic conditions |
-| Presentation | Authored click waits | Skipped authored waits |
-| Persistence | Continuation saves | Saving waits for the current scenario action to finish |
-
-The Samuel preset is an experimental compatibility profile, not a fork of the
-runtime or a claim that every native behavior has been reproduced.
-Mixing providers is also supported. A developer can use Classic map/time with
-Samuel presentation, for example, and the resolved combination remains explicit
-in the save.
-
-Every option exposed by the catalog has a live consumer. The current runtime reads
-`edgeTransitions`, `timedEncounters`, `randomRectangles`, `battleMacros`,
-`classicMorale`, `itemIdentity`, `classicConditions`,
-`waitForAuthoredClicks`, and `continuationSaves`. Movement-time rate,
-initiative, unique-item enforcement, character statistics, general presentation
-pacing, and content-hash policy are not exposed as selectable levers until they
-have distinct live implementations.
-
-### 12. Extensions and scenario scripts solve different problems
-
-Some scenarios need behavior that does not belong in the original opcode table.
-There are now two explicit mechanisms, and they should not be conflated.
-
-The built-in extension catalog can declare:
-
-- semantic instruction handlers;
-- command ports;
-- spells;
-- item behaviors;
-- encounter resolvers;
-- monster AI providers;
-- lifecycle hooks; and
-- gameplay-rule providers.
-
-An installed campaign's `runtime.json` can require an extension by namespaced
-ID and exact API version, provide validated configuration, and bind scenario
-identities to capabilities exposed by that extension.
-
-The code still ships with Remake under
-`res://scripts/scenario_runtime/extensions`. `ScenarioExtensionRegistry`
-rejects script paths outside that trusted directory, rejects extension use of
-the reserved `core.` namespace, and rejects duplicate bindings.
-
-That gives us a reviewable modding surface:
-
-- scenario authors work with declared IDs and data;
-- engine maintainers review the code once;
-- extension code remains built-in and cannot be supplied by a package; and
-- missing or incompatible extensions fail during validation instead of halfway
-  through a playthrough.
-
-The `scenario.runtime-fixture` extension is deliberately small and boring. It
-exists to exercise every extension surface in tests and to give Providence an
-authoritative catalog fixture.
-
-Scenario scripts are campaign-authored behavior. `ScenarioScriptRuntime` runs
-under `ScenarioInterpreter`; it does not become another AP executor. The
-reserved `core.script.call` handler pushes a script frame, and a script either
-performs a local state/RNG operation or yields a catalog capability. The yield
-becomes the same `ScenarioPendingCommand` used by a Classic opcode and returns
-through the same owning port.
-
-The tier determines where script code executes:
-
-- **Safe** scripts are canonical typed AST. Providence parses and type-checks
-  the supported GDScript-like source, rejects cycles and forbidden syntax, and
-  exports instructions rather than `.gd`. Locals, return values, frames,
-  source nodes, and pending commands are part of the VM snapshot.
-- **Sandboxed** scripts preserve exact UTF-8 GDScript and run as explicit-state
-  reducers in a persistent headless Godot process. A Windows LPAC AppContainer
-  denies ambient network and filesystem authority; a Job Object caps process
-  count, memory, CPU, and lifetime. Pipe messages, JSON state, and request rates
-  are bounded. Static scanning remains defense in depth.
-- **Trusted** scripts use the same reducer/state contract in process. They
-  require Developer Scripting plus user-local approval of the exact package
-  hash and aggregate capabilities. Installation and inspection never execute
-  them, and a content change invalidates approval.
-
-Neither a sandbox failure nor an unavailable Windows isolation helper can
-promote code to trusted execution. A campaign that requires an unavailable
-tier fails readiness.
-
-### 13. Persistence is an aggregate, not a bag of global variables
-
-Scenario save schema 4 contains:
-
-- immutable campaign ID and package hash;
-- capability-catalog hash and the API/content/state-schema identity of every
-  script;
-- `ClassicRuntimeState`;
-- state owned by saveable ports;
-- VM continuation state, including safe script frames and the single pending
-  command;
-- explicit sandboxed/trusted reducer state; and
-- the complete pinned gameplay ruleset.
-
-Save and package compatibility are separate. A package can still validate while
-being incompatible with an old save because record identities or behavior
-changed.
-
-Restore is transactional at the session level. It validates the envelope and
-rules, captures current runtime/port/continuation state, restores each
-component, and rolls back if port or continuation restoration fails.
-
-Safe and reducer execution can be saved at every step boundary, including a
-pending text, choice, teleport, or battle command. Trust approvals are
-machine-local policy and are never serialized. Saving is blocked only while a
-developer-only unmanaged legacy compatibility script is executing.
-
-Pre-v3 bundles and saves before schema 4 are intentionally rejected. This is a
-pre-release coordinated cutover; there is no converter or dedicated migration
-warning.
-
-### 14. Providence owns authoring; Remake owns preview
-
-Providence desktop stores machine-local paths to a Godot executable and either
-a Remake checkout or an installed Remake build. Apply and Restart exports the
-current project atomically to a temporary v3 package, starts an ephemeral
-preview profile with the deterministic test party, and asks Remake to launch
-campaign start, a map, an AP, or a battle.
-
-The two applications communicate over a nonce-authenticated loopback WebSocket
-using `remake-preview-protocol.v1.json`. The protocol carries package load and
-launch requests plus diagnostics, VM trace, current location, state summaries,
-runtime errors, ping, and stop. Script trace rows preserve source-node IDs;
-Classic trace rows preserve stable record IDs. Preview resolves those through
-`remake/scripts.json` source maps and `classic/evidence.json`.
-
-Preview obeys ordinary execution policy. Sandboxed scripts still require the
-Windows isolation helper, and trusted scripts still require Developer
-Scripting plus exact-package approval. Providence cannot bypass either gate.
-Browser Providence can edit, validate, and export, but cannot launch a local
-process.
-
-## What actually happens when the party steps on an AP
-
-Here is the concrete map path:
-
-1. `ClassicMapMaterializer` turns a compiled trigger coordinate into the
-   existing map rectangle shape. Its `scriptToLoad` value is the trigger's
-   stable ID, not a function name.
-2. `game_state.gd` detects that rectangle through the normal movement path.
-3. `GameGlobal.dispatch_classic_map_script()` verifies that the registered
-   runtime host has that trigger.
-4. The host starts the trigger with map position and native execution context.
-5. `ScenarioInterpreter` asks `ScenarioInstructionRegistry` for the owner of
-   each instruction.
-6. The handler runs its domain opcode runtime and either completes a source-side
-   mechanic or yields a Godot command.
-7. The owning port calls its domain Godot service, which can use shared native
-   helpers from `ScenarioGodotServices`.
-8. The response resumes the same handler.
-9. When the trigger completes, the host clears the active execution and the map
-   refreshes through the existing game flow.
-
-There is deliberately no fallback to:
-
-```gdscript
-GameGlobal.map.mapscripts.call(script_name)
-```
-
-If a materialized scenario trigger is not registered with the VM, the game
-reports an error. It does not reinterpret the trigger ID as executable
+Undeclared executable content, `.gdc`, PCKs, native libraries, symlinks, and
+unmanifested files are rejected. The runtime never scans a campaign folder for
 GDScript.
 
-## What actually happens when an action starts a battle
+## Saves and content updates
 
-Battle is the easiest way to see why continuations matter:
+Campaign save schema 5 records:
 
-1. A combat handler resolves the Classic battle action.
-2. It yields `start_battle` with the authored battle identity and context.
-3. `CombatPort` validates and routes the request.
-4. `ScenarioGodotCombatServices` materializes or loads the native battle,
-   using shared coordinator helpers where needed, and enters the existing
-   combat state.
-5. The outer scenario execution remains suspended with its handler, action
-   identity, and continuation data intact.
-6. Battle-round and queued macros can run through nested hosts while sharing
-   campaign runtime state.
-7. Native combat reports victory, cowardice, selective survivors, or another
-   supported outcome.
-8. The recorded combat handler resumes the outer action and applies the
-   authored branch, penalty, reward, or fallthrough.
+- campaign identity, content version, and package hash;
+- API catalog hash;
+- behavior versions, hashes, and state-schema versions;
+- interpreter and behavior frames;
+- pending command and event queue;
+- sandbox reducer state;
+- Classic mutations and port state;
+- resolved gameplay rules;
+- required extension and engine plug-in versions.
 
-Samuel's scripts achieved the surface flow with `await
-ScriptHelperFuncsClass.start_battle_in_range(...)`. The modular runtime makes the state
-on both sides of that `await` explicit and save-aware.
+Idle state is serialized even when no instruction is suspended so persistent
+behavior state is not lost between APs.
 
-## Samuel's architecture in concrete terms
+An update under the same campaign identity requires an explicit compatible
+content-version range and complete migration chain. Each migration is a pure,
+parameterless, non-yielding Safe helper. The chain must be exact, acyclic, and
+unambiguous. Remake validates the resulting state schemas before restoring
+gameplay and never guesses a migration.
 
-At the comparison baseline, Samuel's campaign model consisted of native asset
-and JSON files plus executable campaign GDScript.
+## Managed preview
 
-The game loaded:
+Providence exports an atomic temporary v3 package and launches Remake with an
+ephemeral profile and deterministic party. A random nonce authenticates the
+versioned loopback WebSocket.
 
-- `on_select.gd` for description, party limit, and admission checks;
-- `on_campaign_start.gd` for start position, time, maps, and timed encounters;
-- `campaign_global_script.gd` for campaign globals and time callbacks;
-- `shops.gd` for shop construction;
-- `Maps/<map>/map_scripts.gd` for AP/XAP functions;
-- `Special Encounters/*.gd` for encounter UI callbacks;
-- `CreatureScripts/*.gd` for campaign AI;
-- campaign spell GDScript; and
-- script source embedded in battle JSON, compiled at runtime with
-  `GDScript.new()`.
+The preview host can launch campaign start, a map position, AP/XAP, encounter
+option, spell cast, item use, battle/monster decision, lifecycle event, or
+rule-calculation fixture. Apply and Restart always starts clean.
 
-`Resources.gd` stored the loaded map GDScript beside each map. The state machine
-looked up a string such as `AP0x9y17`, called that function dynamically, awaited
-it, and treated a returned string as the name of the next function to call.
+The debugger protocol exposes source-linked diagnostics, active behavior,
+stack, locals, persistent state, context snapshots, watches, event/command
+timeline, pending yield, trace, breakpoints, and step controls. Safe behavior
+can step at block level; sandboxed behavior pauses at reducer boundaries.
 
-A generated AP commonly looked conceptually like this:
+Providence never bypasses sandbox feasibility or engine plug-in readiness.
 
-```gdscript
-static func AP1x8y16():
-    await ScriptHelperFuncsClass.display_text_wait_noise("...", "message nod.wav")
-    var branch = ScriptHelperFuncsClass.branch_item_possession_divinity(...)
-    if not branch.is_empty():
-        return branch
-```
+## Important files
 
-The script was free to call helpers, edit `GameGlobal`, open UI directly, set a
-shop string, alter minimaps, or return another script name.
-
-This was not a tiny amount of glue. In the pinned baseline:
-
-- `src/Campaigns` contained 53 campaign GDScript files;
-- 22 of those were `map_scripts.gd`;
-- 13 were special-encounter scripts; and
-- City of Bywater's `map_0/map_scripts.gd` alone was 2,488 lines with 263
-  AP/XAP functions, 1,002 `ScriptHelperFuncsClass` references, and 43 direct
-  `GameGlobal` references.
-
-The current compiled Classic campaign directories contain zero GDScript files.
-City of Bywater's manifest instead inventories 1,341 trigger records, 882 active
-triggers, and 5,282 Extra Code records as data.
-
-## Old and new side by side
-
-| Concern | Samuel baseline | Modular scenario runtime |
-| --- | --- | --- |
-| Campaign unit | Native folder containing JSON, media, and executable GDScript | Versioned package with runtime data, evidence sidecar, and explicitly tiered script manifests |
-| Producer | Hand-authored or generated Godot campaign files | Providence canonical project exported through a documented contract |
-| Discovery | List directories and load `on_select.gd` | List only safe directories with a valid v3 manifest |
-| AP identity | GDScript function name such as `AP1x8y16` | Stable trigger ID with source and record identity |
-| Dispatch | Dynamic `mapscripts.call(function_name)` | Registry resolves a supported instruction to one handler and rejects an unowned instruction |
-| Branching | Return another function-name string | Typed branch/call/return/replace result |
-| Asynchronous work | Godot coroutine and `await` inside campaign code | Explicit yield, command, pending record, structured response, and handler resume |
-| Engine access | Campaign scripts call globals, UI, helpers, and nodes directly | Commands cross one validated port into Godot services |
-| Mutable campaign state | General `stuff_done`, globals, native objects, and script convention | Immutable bundle plus owned `ClassicRuntimeState` and port state |
-| Saving mid-action | No serialized VM instruction or continuation identity | Versioned VM snapshot and replayable pending command |
-| Shops | Campaign-provided `shops.gd` plus global shop state | Compiled shop records through `InventoryPort` and native inventory services |
-| Encounters | Instantiated campaign GDScript objects with UI callbacks | Indexed encounter data plus handlers, commands, and trusted bindings |
-| Battle scripts | Campaign GDScript or source compiled from JSON | Indexed Classic actions and engine-owned combat handlers |
-| Spell/item/AI customization | Load a campaign script path | Bind to a trusted built-in extension; future bounded script capabilities use the same catalog and ports |
-| Behavior profiles | Whatever the campaign script and current globals implement | Six independently selectable, typed, save-pinned rule domains |
-| Failure mode | Missing method, bad script path, invalid dynamic call, or partial mutation | Contract/readiness error, unowned instruction, invalid command, or validated restore failure |
-| Security boundary | Campaign is trusted code | Data and safe AST are untrusted; full source is isolated or requires exact-hash approval; extension code ships with Remake |
-| Testing | Exercise a campaign script through the live game | Contract, registry, VM, port, fixture, source corpus, integration, and route acceptance layers |
-
-The important difference is not simply "JSON instead of GDScript." JSON can
-still become a mess if every consumer guesses what it means. The real
-difference is **explicit ownership and state**.
-
-## Why I consider the new boundary worth the extra structure
-
-### Portable campaigns
-
-Providence can emit the same deterministic runtime artifact for desktop and
-browser workflows. The package does not depend on a local Godot script path or
-the exact shape of a scene tree.
-
-### Safer third-party distribution
-
-A package cannot execute arbitrary filesystem, network, process, or engine
-operations through GDScript. New executable behavior goes through normal Remake
-review as a built-in extension.
-
-### Better Classic fidelity work
-
-The bundle preserves raw action identity and evidence. The runtime can say
-"opcode 56 at Data DD record 7 slot 3 is unsupported" rather than "some map
-function returned the wrong thing." Mutations remain separate from the
-preserved source record.
-
-### Real continuation saves
-
-The runtime knows exactly where execution paused, which handler owns the pause,
-what command was issued, and which data is needed to resume. That is much more
-reliable than trying to reconstruct a suspended GDScript coroutine from global
-state.
-
-### Testable subsystems
-
-A handler and its domain runtime can be tested without a HUD. A port can be
-tested with a service double. A domain Godot service can be characterized
-without exposing unrelated port commands. A bundle can be validated without
-starting a game. A route test can still exercise the complete native stack
-when that is the claim we need.
-
-### Selectable behavior without campaign forks
-
-Classic fidelity and Samuel-style defaults are data-driven profiles over the
-same runtime. We do not need one copy of a scenario for each rules combination.
-
-## Where to make a change
-
-This is the practical part I expect developers to come back to.
-
-### I need to fix or add a Classic opcode
-
-1. Find its owner in `scripts/scenario_runtime/handlers`.
-2. If no family owns it yet, add it to the narrowest matching handler's opcode
-   list. Do not add a second dispatcher.
-3. Put source-specific calculations in that handler family's
-   `classic_*_opcode_runtime.gd`. Shared cursor, stack, continuation, or bundle
-   plumbing belongs in `ClassicOpcodeRuntime` only when more than one domain
-   genuinely needs it.
-4. If it needs native game state, yield a command instead of reaching into
-   `GameGlobal` from the handler.
-5. Add that command to exactly one port, with request and response contracts.
-6. Reuse or add a focused method in the matching
-   `ScenarioGodot*Services` domain service. Keep coordinator access limited to
-   shared native concerns.
-7. Add a source-backed fixture with exact record/slot evidence.
-8. Add a native integration or route smoke if the claim crosses map, UI,
-   inventory, combat, media, or persistence.
-9. Update the compatibility guide only to the level the evidence proves.
-
-Do not mark an opcode "supported" because it resolves to a handler. Handler
-presence proves routing, not correct behavior across every authored form.
-
-### I need a new core Godot command
-
-1. Choose the owning port by domain.
-2. Add the command ID once.
-3. Define its request and response contracts.
-4. Map it to a method on that port's domain Godot service.
-5. Keep scenario continuation out of the service.
-6. Test duplicate ownership and malformed request/response behavior where
-   relevant.
-
-If two ports both seem to own the command, the domain boundary probably needs a
-small design decision before coding.
-
-### I need scenario-specific behavior beyond Classic opcodes
-
-Use a trusted extension:
-
-1. choose a stable namespaced extension ID;
-2. declare its capabilities in `extensions/catalog.json`;
-3. add a handler, port, or provider below
-   `scripts/scenario_runtime/extensions`;
-4. declare the required extension and API version in `runtime.json`;
-5. bind the scenario identity to the declared capability;
-6. make Providence record `nativeRealmz: false` and a reason when the behavior
-   cannot be represented in native Realmz; and
-7. add conformance tests for validation, invocation, and missing-extension
-   failure.
-
-Do not put a `.gd` file in the campaign folder. The installer will reject it,
-as intended.
-
-### I need a new gameplay option or provider
-
-1. Decide which of the six domains owns the behavior.
-2. Add a typed option or provider descriptor to `rules/catalog.json`.
-3. Enforce it at the port or other domain boundary where the behavior actually
-   happens.
-4. Confirm the new-campaign UI renders and resolves it.
-5. Confirm the ruleset snapshot includes its resolved value.
-6. Confirm restore rejects missing providers or incompatible API versions.
-
-Changing a catalog default changes new playthroughs. It does not rewrite a
-ruleset already pinned into a save.
-
-### I need to change the package format
-
-This is a coordinated Providence-and-Remake change:
-
-1. update the written bundle contract;
-2. update Providence's canonical project/export model;
-3. update deterministic exporter tests;
-4. update `ClassicCampaignBundle` validation and indexing;
-5. update readiness and runtime consumers;
-6. run the cross-repository verifier; and
-7. decide explicitly whether the format is backward compatible.
-
-Do not make the loader silently accept two meanings for the same version.
-
-### I need to persist new runtime state
-
-First decide who owns it:
-
-- authored source stays in the bundle;
-- scenario mutations go in `ClassicRuntimeState`;
-- subsystem state goes in its owning port;
-- execution position goes in the VM snapshot; and
-- selected behavior goes in `GameplayRuleSet`.
-
-Then add validation and rollback coverage. A field merely appearing in a save
-dictionary is not enough; restore must reject invalid state and leave the
-session usable after failure.
-
-## A debugging route that usually works
-
-When an AP behaves incorrectly, follow the same path the runtime follows:
-
-1. **Bundle:** Find the trigger in `classic/scripts.json`. Confirm its source,
-   record index, coordinate, active flag, percentage, action slots, and raw
-   codes.
-2. **Materialization:** Confirm `map_scriptareas.json` names the stable trigger
-   ID at the expected coordinate.
-3. **Runtime state:** Check whether the AP was disabled, replaced, moved, or
-   had its percentage changed.
-4. **Registry:** Confirm the normalized opcode or semantic operation resolves
-   to one handler.
-5. **Trace:** Confirm the expected trigger ID, action index, slot, handler ID,
-   and command are present.
-6. **Port:** Confirm the command belongs to the expected domain and the request
-   passes its contract.
-7. **Godot domain service:** Confirm the port resolved the expected domain
-   service, that the service saw the expected native context, and that it
-   returned a valid response. If it delegated to the coordinator, trace that
-   shared helper separately.
-8. **Resume:** Confirm the pending record resumes through the same handler and
-   applies the authored branch.
-9. **Persistence:** If the bug appears after load, compare runtime, port,
-   continuation, and ruleset snapshots separately.
-
-This is more steps than putting a breakpoint in one giant AP function, but each
-step answers a specific ownership question. It also makes failures reproducible
-without manually replaying the whole campaign.
-
-## Files developers should know
-
-| File or directory | Why it matters |
+| Area | File |
 | --- | --- |
-| [`classic_runtime/BUNDLE_CONTRACT.md`](BUNDLE_CONTRACT.md) | Authoritative Providence-to-Remake package contract |
-| [`classic_runtime/classic_campaign_install.gd`](classic_campaign_install.gd) | Installed-package trust, payload, native-context, and readiness boundary |
-| [`classic_runtime/classic_campaign_bundle.gd`](classic_campaign_bundle.gd) | Format validation, document loading, and stable indexes |
-| [`classic_runtime/classic_campaign_session.gd`](classic_campaign_session.gd) | Playthrough lifecycle, rules, timed events, and aggregate save/restore |
-| [`classic_runtime/classic_runtime_state.gd`](classic_runtime_state.gd) | Mutable Classic scenario state |
-| [`classic_runtime/classic_runtime_host.gd`](classic_runtime_host.gd) | Active execution, nested macros, and command round trips |
-| [`scenario_runtime/scenario_interpreter.gd`](../scenario_runtime/scenario_interpreter.gd) | VM, handler routing, pending commands, trace, and snapshots |
-| [`scenario_runtime/classic_execution_state.gd`](../scenario_runtime/classic_execution_state.gd) | VM-owned mutable Classic cursor, stack, pending, encounter-origin, and trace state |
-| [`scenario_runtime/scenario_instruction_registry.gd`](../scenario_runtime/scenario_instruction_registry.gd) | Exclusive opcode and semantic-operation ownership |
-| [`scenario_runtime/handlers/`](../scenario_runtime/handlers/) | Core instruction families and Classic dispatch ownership |
-| [`scenario_runtime/handlers/classic_opcode_runtime.gd`](../scenario_runtime/handlers/classic_opcode_runtime.gd) | Shared Classic compatibility coordinator, lifecycle, state proxies, and handler-runtime lookup |
-| [`scenario_runtime/handlers/classic_control_flow_opcode_runtime.gd`](../scenario_runtime/handlers/classic_control_flow_opcode_runtime.gd) | AP/XAP lifecycle, branches, calls, returns, replacement, and encounter fallthrough mechanics |
-| [`scenario_runtime/handlers/classic_encounter_opcode_runtime.gd`](../scenario_runtime/handlers/classic_encounter_opcode_runtime.gd) | Simple/complex encounter execution and outcome mechanics |
-| [`scenario_runtime/handlers/classic_map_time_opcode_runtime.gd`](../scenario_runtime/handlers/classic_map_time_opcode_runtime.gd) | Map, movement, time, view, and random-rectangle mechanics |
-| [`scenario_runtime/handlers/classic_combat_opcode_runtime.gd`](../scenario_runtime/handlers/classic_combat_opcode_runtime.gd) | Battle, combatant, macro, morale, and combat mutation mechanics |
-| [`scenario_runtime/handlers/classic_inventory_opcode_runtime.gd`](../scenario_runtime/handlers/classic_inventory_opcode_runtime.gd) | Treasure, shop, wealth, item, and equipment mechanics |
-| [`scenario_runtime/handlers/classic_character_opcode_runtime.gd`](../scenario_runtime/handlers/classic_character_opcode_runtime.gd) | Character selection, health, progression, condition, and ally mechanics |
-| [`scenario_runtime/handlers/classic_rules_state_opcode_runtime.gd`](../scenario_runtime/handlers/classic_rules_state_opcode_runtime.gd) | Persistent rule and scenario-state mechanics |
-| [`scenario_runtime/handlers/classic_presentation_opcode_runtime.gd`](../scenario_runtime/handlers/classic_presentation_opcode_runtime.gd) | Text, sound, picture, and authored-wait mechanics |
-| [`scenario_runtime/scenario_step_result.gd`](../scenario_runtime/scenario_step_result.gd) | The VM control-flow vocabulary |
-| [`scenario_runtime/scenario_pending_command.gd`](../scenario_runtime/scenario_pending_command.gd) | Serializable yield/resume identity |
-| [`scenario_runtime/scenario_command_router.gd`](../scenario_runtime/scenario_command_router.gd) | Exclusive command ownership and boundary validation |
-| [`scenario_runtime/ports/`](../scenario_runtime/ports/) | Six domain APIs into the native game |
-| [`scenario_runtime/godot/scenario_godot_domain_service.gd`](../scenario_runtime/godot/scenario_godot_domain_service.gd) | Shared contract and coordinator access for native domain services |
-| [`scenario_runtime/godot/`](../scenario_runtime/godot/) | Five domain services plus the shared Godot coordinator |
-| [`scenario_runtime/godot/scenario_godot_services.gd`](../scenario_runtime/godot/scenario_godot_services.gd) | Campaign-wide native coordinator, shared helpers, cross-domain state, and persistence aggregation |
-| [`scenario_runtime/scenario_extension_registry.gd`](../scenario_runtime/scenario_extension_registry.gd) | Trusted extension catalog, validation, and bindings |
-| [`scenario_runtime/extensions/`](../scenario_runtime/extensions/) | Engine-shipped extension code and conformance fixture |
-| [`scenario_runtime/scenario_script_runtime.gd`](../scenario_runtime/scenario_script_runtime.gd) | Safe frames, typed state, full-tier reducer state, capabilities, trace, and restoration |
-| [`scenario_runtime/scenario_script_policy.gd`](../scenario_runtime/scenario_script_policy.gd) | Trusted-mode settings and exact-package capability approvals |
-| [`scenario_runtime/scenario_sandbox_client.gd`](../scenario_runtime/scenario_sandbox_client.gd) | Bounded JSON client for the isolated Windows runner |
-| [`scenario_runtime/sandbox/`](../scenario_runtime/sandbox/) | Headless reducer host executed inside the AppContainer |
-| [`scenario_runtime/preview/`](../scenario_runtime/preview/) | Authenticated managed-preview host and source-linked diagnostics |
-| [`scenario_runtime/gameplay_rule_registry.gd`](../scenario_runtime/gameplay_rule_registry.gd) | Provider/preset loading and resolution |
-| [`scenario_runtime/rules/catalog.json`](../scenario_runtime/rules/catalog.json) | Classic, Samuel, and extension rule descriptors |
-| [`classic_runtime/COMPATIBILITY_GAPS.md`](COMPATIBILITY_GAPS.md) | Evidence-backed support boundaries and open gaps |
-| [`classic_runtime/CLASSIC_PORTING_GUIDE.md`](CLASSIC_PORTING_GUIDE.md) | Producer, validation, readiness, installation, and support workflow |
+| Interpreter | `scenario_runtime/scenario_interpreter.gd` |
+| Behavior engine | `scenario_runtime/scenario_script_runtime.gd` |
+| Instruction registry | `scenario_runtime/scenario_instruction_registry.gd` |
+| Command router | `scenario_runtime/scenario_command_router.gd` |
+| Core ports | `scenario_runtime/ports/` |
+| Godot services | `scenario_runtime/godot/` |
+| Capability catalog | `Data/remake-scenario-capabilities.v2.json` |
+| Extension registry | `scenario_runtime/scenario_extension_registry.gd` |
+| Engine plug-ins | `scenario_runtime/scenario_engine_plugin_registry.gd` |
+| Rule modifiers | `scenario_runtime/scenario_rule_modifier_pipeline.gd` |
+| Sandbox runner | `scenario_runtime/sandbox/` |
+| Preview host | `scenario_runtime/preview/scenario_preview_host.gd` |
+| Runtime host | `classic_runtime/classic_runtime_host.gd` |
+| Campaign session/save | `classic_runtime/classic_campaign_session.gd` |
+| Package contract | `classic_runtime/BUNDLE_CONTRACT.md` |
 
-All paths in that table are relative to `src/scripts`.
+## Adding a capability
 
-## Invariants I do not want us to casually weaken
+1. Add the typed catalog entry, role compatibility, ownership, docs, example,
+   and editor metadata.
+2. Implement request validation and execution in exactly one port.
+3. Add Providence block/source support and type checking.
+4. Define yield and save/restore behavior.
+5. Add preview diagnostics and source mapping.
+6. Regenerate the public reference.
+7. Add cross-repository tests for success, invalid arguments, wrong role,
+   undeclared capability, save/restore, and deterministic export.
 
-1. **Installed scenario code is never ambient. Safe AST stays in the VM;
-   sandboxed source is OS-isolated; trusted source requires exact-hash approval.**
-2. **Every instruction has zero or one owner; zero is an explicit error unless
-   source evidence marks that exact Classic slot as a dispatcher no-op.**
-3. **Every command has exactly one port owner.**
-4. **Campaign trigger IDs never fall through to dynamic GDScript calls.**
-5. **The loaded bundle is immutable; playthrough mutations live in runtime
-   state.**
-6. **Array position is never used as persistent record identity.**
-7. **A yield has one serializable pending-command identity.**
-8. **Resume goes back through the handler that yielded.**
-9. **Godot services do not own scenario instruction flow.**
-10. **Extensions are additive, namespaced, engine-shipped, and unable to
-    replace core ownership.**
-11. **Gameplay providers and options are validated and pinned for the complete
-    playthrough.**
-12. **Package compatibility, readiness, component support, route acceptance,
-    and campaign completion remain separate claims.**
-13. **An unsupported or ambiguous source behavior fails visibly; it does not
-    become a guessed success path.**
+Do not add a host special case or expose a native object to avoid this path.
 
-## Tests and verification
+## Invariants
 
-### Runtime contract tests
+The architecture is considered intact only while all of these remain true:
 
-This is the quick architecture suite. It covers the v3 bundle contract,
-extension registry, Classic and Samuel rules, handler ownership, six default
-ports, VM yield/resume, dispatcher no-op evidence, built-in extension
-invocation, and old-save rejection.
+- one AP/XAP and behavior interpreter;
+- exactly one handler for every supported Classic opcode;
+- exactly one port owner for every command;
+- no core ID overrides;
+- no campaign-folder script scanning;
+- no in-process executable scenario source;
+- immutable query results and validated mutations;
+- serializable Safe and sandbox state;
+- save-pinned rules, APIs, behaviors, and plug-ins;
+- byte-identical Providence and Remake API catalogs;
+- generated public docs from that catalog;
+- no loss against the Classic trace and 13-campaign regression baseline.
+
+Run the focused scenario-runtime suite with:
 
 ```powershell
 Godot_v4.7.1-stable_win64_console.exe --headless --path src `
   res://scripts/scenario_runtime/tests/scenario_runtime_tests.tscn
 ```
 
-### Full Classic runtime suite
-
-Use this after changing Classic mechanics, native services, continuations,
-session persistence, materialization, or cross-domain behavior:
+The full Classic suite remains the behavioral regression authority:
 
 ```powershell
 Godot_v4.7.1-stable_win64_console.exe --headless --resolution 1100x619 `
-  --path src `
-  res://scripts/classic_runtime/tests/run_classic_runtime_tests.tscn
+  --path src res://scripts/classic_runtime/tests/run_classic_runtime_tests.tscn
 ```
-
-### Bundle validation
-
-This proves the supplied package satisfies the consumer contract. It does not
-prove the campaign is completable:
-
-```powershell
-Godot_v4.7.1-stable_win64_console.exe --headless --path src --script `
-  res://scripts/classic_runtime/tests/validate_classic_bundle.gd -- `
-  "F:\path\to\bundle"
-```
-
-### Regression corpus
-
-Use the checked multi-scenario source corpus for interpreter and runtime-state
-changes:
-
-```powershell
-Godot_v4.7.1-stable_win64_console.exe --headless --path src --script `
-  res://scripts/classic_runtime/tests/run_classic_regression_corpus.gd
-```
-
-### Providence-to-Remake gate
-
-Use this whenever the producer/consumer contract changes:
-
-```powershell
-powershell -ExecutionPolicy Bypass `
-  -File scripts/verify_remake_classic_export.ps1 `
-  -ProvidenceRoot "F:\Realmz - Providence" `
-  -RemakeRoot "F:\Realmz Remake"
-```
-
-Focused component tests and route acceptance still matter. A green VM fixture
-cannot prove HUD behavior, a native battle, save/reload, or campaign completion.
-Use the evidence ladder in [CLASSIC_PORTING_GUIDE.md](CLASSIC_PORTING_GUIDE.md).
-
-## The extraction is real, but the boundaries are still maturing
-
-This branch completed the first meaningful split of both POC seams:
-
-- the former Classic opcode implementation is now a compatibility coordinator,
-  one VM-owned execution-state object, and eight handler-aligned domain
-  runtimes; and
-- the native command implementation is now five port-aligned Godot services
-  behind a shared coordinator.
-
-That is more than moving code into smaller files. Registered handlers now
-resolve a domain mechanic object, and configured ports now resolve a domain
-native service. The old duplicate Classic loop is gone, and each domain can be
-reviewed and changed without searching one 4,000-line opcode implementation or
-one 6,000-line command adapter.
-
-The remaining debt is also concrete:
-
-- `ClassicOpcodeRuntime` still exposes compatibility proxies and shared helper
-  methods used by several domain runtimes;
-- the Classic domain runtimes are configured with that coordinator and use
-  dynamic helper invocation where the shared contract is not typed yet;
-- `ScenarioGodotServices` is still a large coordinator because many shared
-  constants, native-resource operations, cross-domain helpers, and persistence
-  concerns remain there;
-- the Godot domain services retain a `service_owner` callback for those shared
-  operations; and
-- `PersistencePort` aggregates state rather than having an independent native
-  service.
-
-Those seams are acceptable for this extraction, but they are not the final
-shape. The next useful refactors should replace broad coordinator callbacks
-with narrow typed collaborators, move truly domain-owned constants and state
-to their owners, and reduce compatibility proxies only after callers and tests
-use the new boundary directly.
-
-The stable IDs, registries, VM state, pending-command schema, ports, save
-contracts, and explicit execution-tier boundary are the architecture to preserve
-while doing that work. File size alone is not the target; explicit ownership
-is.
-
-## Frequently asked questions
-
-### Are scenario items, spells, or monsters supposed to become GDScript?
-
-Usually, no. Their identity and ordinary behavior should stay in data and use
-the existing item, spell, monster, and Classic materialization APIs. A broadly
-reusable engine mechanic belongs in a reviewed built-in extension. A
-campaign-local mechanic can use a scenario script once the relevant bounded
-capability family exists; it still does not get direct access to engine globals.
-
-### Can a campaign still have custom behavior?
-
-Yes. It can use preserved Classic actions, namespaced semantic operations, and
-trusted extension bindings. "Data-only package" does not mean "no custom
-behavior"; it means the executable implementation is versioned and shipped by
-the engine.
-
-### Does `core.samuel` run Samuel's old campaign scripts?
-
-No. It selects a deliberately limited set of implemented Samuel-style
-differences characterized against the pinned baseline. The same scenario
-package still runs through the modular runtime.
-
-### Can a campaign force `core.classic`?
-
-It can recommend it. The player selects the preset at new-game time, may mix
-advanced domain providers, and the resolved ruleset is then locked into that
-playthrough.
-
-### Why reject old saves instead of migrating them?
-
-The old save has no trustworthy VM instruction identity, pending handler,
-command continuation, port aggregate, or pinned provider set. Guessing those
-values would risk resuming after the wrong side effect. The current policy is
-an explicit compatibility break.
-
-### Why keep `ScriptHelperFuncsClass` and `GameGlobal` at all?
-
-They are still useful parts of the native Remake. The rule is not "never call
-them." The rule is that imported scenario instructions do not call them
-directly. A domain Godot service, or the shared coordinator behind it, can reuse
-proven native helpers behind a validated port.
-
-### Why not let extensions override a core opcode?
-
-Then a package could change the meaning of preserved Classic data based on
-extension load order. Additive semantic operations are easier to validate,
-reason about, save, and export back to native Realmz when possible.
-
-### Is every Classic campaign fully supported now?
-
-No. The architecture gives us a consistent way to add and prove support. The
-compatibility gap register and scenario acceptance documents define the current
-evidence. Format validity and handler coverage are not campaign-completion
-proof.
-
-## Final orientation
-
-If you remember only one path, remember this one:
-
-**Providence data -> validated bundle -> session and locked rules -> VM -> one
-handler -> one domain mechanic -> one command port -> one domain Godot service
--> shared native coordinator when needed -> structured response -> same handler
--> saveable continuation.**
-
-Samuel's architecture put campaign code inside the game and let it drive the
-engine directly. The modular runtime puts a stable, inspectable contract between authored
-scenario behavior and the engine. It is more ceremony up front, but it gives us
-the pieces we need for portable scenarios, Classic fidelity, safe distribution,
-reliable saves, focused testing, and future extensions without rebuilding the
-campaign system again.

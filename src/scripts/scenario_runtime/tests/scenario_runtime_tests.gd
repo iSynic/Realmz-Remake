@@ -45,6 +45,12 @@ const ScenarioGodotServicesScript = preload(
 const HostScript = preload(
 	"res://scripts/classic_runtime/classic_runtime_host.gd"
 )
+const RuntimeScript = preload(
+	"res://scripts/classic_runtime/classic_runtime.gd"
+)
+const RuleModifierPipelineScript = preload(
+	"res://scripts/scenario_runtime/scenario_rule_modifier_pipeline.gd"
+)
 
 const V3_FIXTURE := \
 	"res://scripts/classic_runtime/tests/fixtures/war_in_the_sword_lands_gosub"
@@ -65,6 +71,9 @@ func _ready() -> void:
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
 	_test_safe_script_quest_slice()
+	_test_behavior_role_capability_validation()
+	_test_typed_role_outcomes()
+	await _test_rule_modifier_pipeline()
 	_test_old_save_rejection()
 	if failures == 0:
 		print("Scenario runtime tests passed")
@@ -473,11 +482,37 @@ func _test_builtin_extension_execution() -> void:
 		"configuration": {"marker": "host"},
 	}]
 	bundle.documents["runtime"]["bindings"] = {
-		"spells": {"echo": "scenario.runtime-fixture.echo-spell"},
-		"items": {"echo": "scenario.runtime-fixture.echo-item"},
-		"encounters": {"echo": "scenario.runtime-fixture.echo-encounter"},
-		"monsterAi": {"echo": "scenario.runtime-fixture.echo-ai"},
-		"lifecycle": {"load": "scenario.runtime-fixture.lifecycle"},
+		"spells": {
+			"echo": {
+				"kind": "extension",
+				"providerId": "scenario.runtime-fixture.echo-spell",
+			},
+		},
+		"items": {
+			"echo": {
+				"kind": "extension",
+				"providerId": "scenario.runtime-fixture.echo-item",
+			},
+		},
+		"encounters": {
+			"echo": {
+				"kind": "extension",
+				"providerId": "scenario.runtime-fixture.echo-encounter",
+			},
+		},
+		"monsterAi": {
+			"echo": {
+				"kind": "extension",
+				"providerId": "scenario.runtime-fixture.echo-ai",
+			},
+		},
+		"lifecycle": {
+			"load": {
+				"kind": "extension",
+				"providerId": "scenario.runtime-fixture.lifecycle",
+			},
+		},
+		"ruleModifiers": {},
 	}
 	bundle.documents["scripts"]["triggers"].append({
 		"id": "scenario-runtime:semantic",
@@ -636,7 +671,14 @@ func _test_safe_script_quest_slice() -> void:
 				},
 				"sourceNode": "quest-battle",
 			},
-			{"kind": "return", "sourceNode": "quest-return"},
+			{
+				"kind": "return",
+				"value": {
+					"kind": "literal",
+					"value": {"kind": "continue"},
+				},
+				"sourceNode": "quest-return",
+			},
 		],
 	}
 	var state_schema: Dictionary = {}
@@ -645,11 +687,16 @@ func _test_safe_script_quest_slice() -> void:
 	var script := {
 		"id": "scenario.test.offer-quest",
 		"name": "Offer quest",
-		"documentation": "Scenario runtime quest vertical slice.",
+		"description": "Scenario runtime quest vertical slice.",
+		"kind": "entry",
+		"role": "action",
+		"hook": "run",
 		"tier": "safe",
-		"apiVersion": 1,
+		"apiVersion": 2,
+		"behaviorVersion": 1,
+		"stateSchemaVersion": 1,
 		"parameters": [],
-		"returnType": "void",
+		"returnType": "action-outcome",
 		"requestedCapabilities": [
 			"core.encounter.start-battle",
 			"core.map.teleport",
@@ -670,22 +717,40 @@ func _test_safe_script_quest_slice() -> void:
 	}
 	bundle.documents["remakeScripts"] = {
 		"schemaVersion": 2,
-		"apiVersion": 1,
+		"apiVersion": 2,
 		"capabilityCatalogHash": catalog.catalog_hash(),
-		"scripts": [script],
-		"attachments": [],
-		"persistentVariables": [],
+		"limits": {
+			"maxArrayLength": 256,
+			"maxAstNodes": 4096,
+			"maxCallDepth": 32,
+			"executionBudget": 65536,
+		},
+		"capabilities": script["requestedCapabilities"],
+		"behaviors": [script],
+		"bindings": [],
+		"stateDefinitions": [{
+			"name": "story_phase",
+			"displayName": "Story Phase",
+			"documentation": "Persistent fixture state.",
+			"scope": "campaign",
+			"ownerId": "",
+			"schemaVersion": 1,
+			"valueType": "int",
+			"maxLength": null,
+			"defaultValue": 0,
+		}],
+		"migrations": [],
 	}
 	var trigger_id := str(bundle.documents["scripts"]["triggers"][0]["id"])
 	bundle.triggers_by_id[trigger_id]["actions"] = [{
 		"kind": "semantic",
 		"slot": 0,
-		"operation": "core.script.call",
-		"parameters": {
-			"scriptId": script["id"],
-			"arguments": {},
-		},
-	}]
+			"operation": "core.script.call",
+			"parameters": {
+				"behaviorId": script["id"],
+				"argumentBindings": {},
+			},
+		}]
 	var state := ClassicRuntimeStateScript.new()
 	state.configure_from_bundle(bundle)
 	var interpreter := InterpreterScript.new()
@@ -759,6 +824,225 @@ func _test_safe_script_quest_slice() -> void:
 		found_teleport_trace,
 		"safe script trace preserves source node and capability identity"
 	)
+	var idle_runtime := RuntimeScript.new()
+	add_child(idle_runtime)
+	idle_runtime.use_shared_campaign(bundle, state)
+	var state_key := "campaign\u001f\u001fstory_phase"
+	idle_runtime.interpreter.scenario_script_runtime.persistent_values[state_key] = 7
+	var idle_snapshot: Dictionary = idle_runtime.make_continuation_snapshot()
+	_expect(
+		idle_snapshot.get("status") == "ok"
+			and idle_snapshot.get("snapshot", {}).get("state") == "idle",
+		"idle continuation captures scenario behavior state"
+	)
+	idle_runtime.interpreter.scenario_script_runtime.persistent_values[state_key] = 0
+	var idle_restore: Dictionary = idle_runtime.restore_continuation(
+		idle_snapshot.get("snapshot", {})
+	)
+	_expect(
+		idle_restore.get("status") == "ok"
+			and idle_runtime.interpreter.scenario_script_runtime.persistent_values.get(
+				state_key
+			) == 7,
+		"idle continuation restores persistent scenario behavior state"
+	)
+	idle_runtime.queue_free()
+
+	var migration_program := {
+		"kind": "function",
+		"name": "migrate_story_phase",
+		"parameters": [],
+		"returnType": "void",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.state.write",
+				"arguments": {
+					"scope": {"kind": "literal", "value": "campaign"},
+					"name": {"kind": "literal", "value": "story_phase"},
+					"value": {"kind": "literal", "value": 2},
+				},
+				"sourceNode": "migration-write",
+			},
+			{"kind": "return", "value": null, "sourceNode": "migration-return"},
+		],
+	}
+	var migration_helper := {
+		"id": "scenario.test.migrate-story-phase",
+		"name": "Migrate story phase",
+		"description": "Moves fixture state to schema two.",
+		"kind": "helper",
+		"role": "helper",
+		"hook": "call",
+		"tier": "safe",
+		"apiVersion": 2,
+		"behaviorVersion": 1,
+		"stateSchemaVersion": 1,
+		"parameters": [],
+		"returnType": "void",
+		"requestedCapabilities": ["core.state.write"],
+		"stateSchema": {},
+		"stateSchemaHash": ScenarioScriptRuntimeScript._sha256_json({}),
+		"sourceMap": {},
+		"contentHash": ScenarioScriptRuntimeScript._sha256_json(migration_program),
+		"program": migration_program,
+	}
+	var migration_document: Dictionary = bundle.documents["remakeScripts"].duplicate(true)
+	migration_document["behaviors"].append(migration_helper)
+	migration_document["migrations"] = [{
+		"id": "scenario.test.migration-1-2",
+		"fromContentVersion": "1.0.0",
+		"toContentVersion": "2.0.0",
+		"behaviorId": migration_helper["id"],
+	}]
+	var migration_runtime := ScenarioScriptRuntimeScript.new()
+	_expect(
+		migration_runtime.configure(migration_document, state, bundle),
+		"versioned scenario migration runtime configures"
+	)
+	var old_snapshot: Dictionary = migration_runtime.snapshot()
+	old_snapshot["persistentValues"][state_key] = 1
+	var migrated: Dictionary = migration_runtime.migrate_snapshot(
+		old_snapshot,
+		"1.0.0",
+		"2.0.0"
+	)
+	_expect(
+		migrated.get("status") == "ok"
+			and migrated.get("snapshot", {}).get("persistentValues", {}).get(
+				state_key
+			) == 2,
+		"exact Safe migration chain updates persistent scenario state"
+	)
+
+
+func _test_rule_modifier_pipeline() -> void:
+	var pipeline := RuleModifierPipelineScript.new()
+	pipeline.configure(RuleBehaviorRunner.new(), null, {})
+	var result: Dictionary = await pipeline.resolve("damage", 10.0, {
+		"minimum": 0.0,
+		"maximum": 25.0,
+	})
+	_expect(
+		result.get("status") == "ok"
+			and is_equal_approx(float(result.get("value", 0.0)), 25.0),
+		"scenario rule modifiers apply in order and clamp after resolution"
+	)
+
+
+func _test_behavior_role_capability_validation() -> void:
+	var catalog := CapabilityCatalogScript.new()
+	_expect(catalog.load_builtin(), "behavior role validation catalog loads")
+	var program := {
+		"kind": "function",
+		"name": "decide",
+		"parameters": [],
+		"returnType": "monster-decision",
+		"body": [{
+			"kind": "return",
+			"value": {"kind": "literal", "value": {"kind": "wait"}},
+		}],
+	}
+	var behavior := {
+		"id": "scenario.test.non-yielding-ai",
+		"name": "Non-yielding AI",
+		"description": "Rejects port-yielding queries from monster AI.",
+		"kind": "entry",
+		"role": "monster-ai",
+		"hook": "decide",
+		"tier": "safe",
+		"apiVersion": 2,
+		"behaviorVersion": 1,
+		"stateSchemaVersion": 1,
+		"parameters": [],
+		"returnType": "monster-decision",
+		"requestedCapabilities": ["core.combat.snapshot"],
+		"stateSchema": {},
+		"stateSchemaHash": ScenarioScriptRuntimeScript._sha256_json({}),
+		"sourceMap": {},
+		"contentHash": ScenarioScriptRuntimeScript._sha256_json(program),
+		"program": program,
+	}
+	var document := {
+		"schemaVersion": 2,
+		"apiVersion": 2,
+		"capabilityCatalogHash": catalog.catalog_hash(),
+		"limits": {
+			"maxArrayLength": 256,
+			"maxAstNodes": 4096,
+			"maxCallDepth": 32,
+			"executionBudget": 65536,
+		},
+		"capabilities": ["core.combat.snapshot"],
+		"behaviors": [behavior],
+		"bindings": [],
+		"stateDefinitions": [],
+		"migrations": [],
+	}
+	var validation := ScenarioScriptRuntimeScript.validate_document(document)
+	_expect(
+		not bool(validation.get("valid", true))
+			and str(validation.get("message", "")).contains("cannot use yielding capability"),
+		"non-yielding behavior roles reject yielding capabilities at readiness"
+	)
+
+
+func _test_typed_role_outcomes() -> void:
+	var record_runtime := ScenarioScriptRuntimeScript.new()
+	record_runtime.frames = [{"locals": {"outcome": 2}}]
+	var dynamic_record := record_runtime._evaluate({
+		"kind": "record",
+		"fields": {
+			"kind": {"kind": "literal", "value": "branch"},
+			"outcome": {"kind": "variable", "scope": "local", "name": "outcome"},
+		},
+	})
+	_expect(
+		dynamic_record.get("status") == "ok"
+			and dynamic_record.get("value", {}).get("kind") == "branch"
+			and dynamic_record.get("value", {}).get("outcome") == 2,
+		"Safe role outcomes evaluate dynamic typed record fields"
+	)
+	_expect(
+		ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "wait"},
+			"monster-decision"
+		),
+		"monster AI accepts a wait decision"
+	)
+	_expect(
+		ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "move", "dx": -1, "dy": 1},
+			"monster-decision"
+		),
+		"monster AI accepts a bounded movement decision shape"
+	)
+	_expect(
+		ScenarioScriptRuntimeScript._value_matches_script_type(
+			{
+				"kind": "cast",
+				"spellId": "Disease",
+				"power": 4,
+				"targetId": "combat:0",
+			},
+			"monster-decision"
+		),
+		"monster AI accepts an explicit spell decision"
+	)
+	_expect(
+		not ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "cast", "spellId": "Disease"},
+			"monster-decision"
+		),
+		"monster AI rejects a spell decision without power and target"
+	)
+	_expect(
+		not ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "use-item", "targetId": "combat:0"},
+			"monster-decision"
+		),
+		"monster AI rejects item use without a stable item-instance ID"
+	)
 
 
 func _test_old_save_rejection() -> void:
@@ -782,3 +1066,23 @@ class IncompleteScenarioGodotServices:
 
 	func scenario_service_contract_version() -> int:
 		return 1
+
+
+class RuleBehaviorRunner:
+	extends RefCounted
+
+	func run_behavior_attachments(
+		_role: String,
+		_hook: String,
+		_target_kind: String,
+		_target_ids: Array,
+		_request: Dictionary
+	) -> Dictionary:
+		return {
+			"status": "ok",
+			"handled": true,
+			"results": [
+				{"status": "ok", "value": {"add": 5}},
+				{"status": "ok", "value": {"multiply": 2, "maximum": 30}},
+			],
+		}

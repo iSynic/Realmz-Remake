@@ -154,6 +154,25 @@ func use_inventory_item(item: ItemInstance, user: Creature) -> void:
 	if definition == null:
 		return
 	print("ExMenusState use_inventory_item " + definition.display_name_for(item))
+	var scenario_host: Variant = GameGlobal.classic_runtime_host
+	if is_instance_valid(scenario_host) \
+			and scenario_host.has_method("has_item_behavior") \
+			and bool(scenario_host.call("has_item_behavior", item, "field_use")):
+		var scenario_result: Dictionary = await scenario_host.call(
+			"run_item_behavior",
+			item,
+			"field_use",
+			user
+		)
+		if str(scenario_result.get("status", "")) == "error":
+			push_error(str(scenario_result.get(
+				"message",
+				"Scenario field-item behavior failed"
+			)))
+			return
+		if bool(scenario_result.get("handled", false)):
+			GameGlobal.refresh_OW_HUD()
+			return
 	if resources.item_has_hook(item, "field_use"):
 		var hook_result: Dictionary = resources.run_item_hook(
 			item,

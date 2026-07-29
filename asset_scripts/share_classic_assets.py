@@ -198,6 +198,77 @@ def validate_existing_section(
     return validated
 
 
+def recover_store_ownership(
+    campaigns: list[dict[str, Any]], store_root: Path
+) -> list[dict[str, Any]]:
+    store_path = store_root / "store.json"
+    if not store_path.is_file():
+        return []
+    store = read_json(store_path)
+    if (
+        store.get("format") != FORMAT
+        or store.get("formatVersion") != FORMAT_VERSION
+        or store.get("hashAlgorithm") != HASH_ALGORITHM
+        or not isinstance(store.get("files"), dict)
+    ):
+        raise ValueError(f"Shared asset store metadata is invalid: {store_path}")
+    campaigns_by_directory = {campaign["name"]: campaign for campaign in campaigns}
+    recovered: list[dict[str, Any]] = []
+    for digest_value, file_record in store["files"].items():
+        digest = str(digest_value).lower()
+        if not isinstance(file_record, dict):
+            raise ValueError(f"Shared asset store record is invalid: {digest}")
+        extension = str(file_record.get("extension", "")).lower()
+        expected_bytes = int(file_record.get("bytes", -1))
+        owners = file_record.get("owners")
+        payload = store_payload_path(store_root, digest, extension)
+        if (
+            len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or not extension
+            or expected_bytes < 0
+            or not isinstance(owners, list)
+            or not payload.is_file()
+            or payload.stat().st_size != expected_bytes
+            or sha256_file(payload) != digest
+        ):
+            raise ValueError(f"Shared asset store payload is invalid: {digest}")
+        for owner in owners:
+            if not isinstance(owner, dict):
+                raise ValueError(f"Shared asset store owner is invalid: {digest}")
+            campaign = campaigns_by_directory.get(
+                str(owner.get("campaignDirectory", ""))
+            )
+            if campaign is None:
+                continue
+            if str(owner.get("campaignId", "")) != campaign["id"]:
+                raise ValueError(
+                    f"{campaign['name']} shared asset owner has the wrong campaign ID"
+                )
+            logical_path = str(owner.get("logicalPath", "")).replace("\\", "/")
+            logical = Path(logical_path)
+            if (
+                not logical_path.startswith("Tilesets/")
+                or logical.is_absolute()
+                or ".." in logical.parts
+                or logical.suffix.lower().removeprefix(".") != extension
+            ):
+                raise ValueError(
+                    f"{campaign['name']} has an unsafe stored path: {logical_path}"
+                )
+            recovered.append(
+                {
+                    "campaign": campaign,
+                    "logicalPath": logical_path,
+                    "sha256": digest,
+                    "bytes": expected_bytes,
+                    "extension": extension,
+                    "sourcePath": None,
+                }
+            )
+    return recovered
+
+
 def inventory_local_tilesets(
     campaigns: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -248,6 +319,7 @@ def build_plan(root: Path, expected_campaigns: int) -> dict[str, Any]:
     if store_root.exists():
         for campaign in campaigns:
             existing.extend(validate_existing_section(campaign, store_root))
+        existing.extend(recover_store_ownership(campaigns, store_root))
     elif any(campaign["manifest"].get("sharedAssets") for campaign in campaigns):
         raise ValueError(f"Shared asset store does not exist: {store_root}")
 

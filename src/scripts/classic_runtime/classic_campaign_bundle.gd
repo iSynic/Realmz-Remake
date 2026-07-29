@@ -833,6 +833,22 @@ func _validate_runtime_document() -> bool:
 	)
 	if not bool(extension_validation.get("valid", false)):
 		return _fail(str(extension_validation.get("message", "Invalid extension requirements")))
+	var plugin_requirements: Variant = runtime.get("requiredPlugins", [])
+	if not (plugin_requirements is Array):
+		return _fail("runtime.requiredPlugins must be an array")
+	var plugin_ids: Dictionary = {}
+	for plugin_requirement_value: Variant in plugin_requirements:
+		if not (plugin_requirement_value is Dictionary):
+			return _fail("runtime.requiredPlugins contains an invalid requirement")
+		var plugin_requirement: Dictionary = plugin_requirement_value
+		var plugin_id := str(plugin_requirement.get("id", ""))
+		if not _is_namespaced_identifier(plugin_id) \
+				or int(plugin_requirement.get("apiVersion", 0)) <= 0 \
+				or plugin_ids.has(plugin_id):
+			return _fail(
+				"runtime.requiredPlugins needs unique namespaced IDs and API versions"
+			)
+		plugin_ids[plugin_id] = true
 	var bindings: Variant = runtime.get("bindings")
 	if not (bindings is Dictionary):
 		return _fail("runtime.bindings must be a JSON object")
@@ -842,6 +858,7 @@ func _validate_runtime_document() -> bool:
 		"encounters",
 		"monsterAi",
 		"lifecycle",
+		"ruleModifiers",
 	]:
 		if not (bindings.get(binding_name) is Dictionary):
 			return _fail("runtime.bindings.%s must be a JSON object" % binding_name)
@@ -851,11 +868,58 @@ func _validate_runtime_document() -> bool:
 		"encounters": "encounterResolvers",
 		"monsterAi": "monsterAiProviders",
 		"lifecycle": "lifecycleHooks",
+		"ruleModifiers": "gameplayRuleProviders",
+	}
+	var role_by_binding := {
+		"spells": "spell",
+		"items": "item",
+		"encounters": "encounter",
+		"monsterAi": "monster-ai",
+		"lifecycle": "lifecycle",
+		"ruleModifiers": "rule-modifier",
 	}
 	var required_extension_ids := _runtime_extension_ids()
+	var script_document: Dictionary = documents.get("remakeScripts", {})
+	var behavior_ids: Dictionary = {}
+	for behavior_value: Variant in script_document.get("behaviors", []):
+		if behavior_value is Dictionary:
+			behavior_ids[str(behavior_value.get("id", ""))] = str(
+				behavior_value.get("role", "")
+			)
 	for binding_name: String in capability_by_binding:
 		for binding_key: Variant in bindings[binding_name]:
-			var binding_id := str(bindings[binding_name][binding_key])
+			var binding_value: Variant = bindings[binding_name][binding_key]
+			if not (binding_value is Dictionary):
+				return _fail(
+					"runtime.bindings.%s.%s must select a script or extension"
+					% [binding_name, binding_key]
+				)
+			var binding: Dictionary = binding_value
+			if str(binding.get("kind", "")) == "script":
+				var behavior_id := str(binding.get("behaviorId", ""))
+				if not behavior_ids.has(behavior_id):
+					return _fail(
+						"runtime.bindings.%s.%s references missing behavior '%s'"
+						% [binding_name, binding_key, behavior_id]
+					)
+				if str(behavior_ids[behavior_id]) != str(role_by_binding[binding_name]):
+					return _fail(
+						"runtime.bindings.%s.%s behavior '%s' has role '%s', not '%s'"
+						% [
+							binding_name,
+							binding_key,
+							behavior_id,
+							behavior_ids[behavior_id],
+							role_by_binding[binding_name],
+						]
+					)
+				continue
+			if str(binding.get("kind", "")) != "extension":
+				return _fail(
+					"runtime.bindings.%s.%s has an unknown implementation kind"
+					% [binding_name, binding_key]
+				)
+			var binding_id := str(binding.get("providerId", ""))
 			var binding_validation := extension_registry.validate_binding_reference(
 				capability_by_binding[binding_name],
 				binding_id,
@@ -1332,6 +1396,10 @@ func get_random_rectangle(level_type: String, level_index: int, rect_index: int)
 func get_start() -> Dictionary:
 	var start: Variant = manifest.get("start", {})
 	return start if start is Dictionary else {}
+
+
+func start_location() -> Dictionary:
+	return get_start()
 
 
 func is_dispatcher_noop(trigger: Dictionary, action: Dictionary) -> bool:

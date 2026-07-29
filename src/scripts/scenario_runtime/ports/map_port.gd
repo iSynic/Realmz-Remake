@@ -2,6 +2,8 @@ class_name MapPort
 extends DelegatingScenarioPort
 
 const COMMANDS := [
+	"query_location",
+	"query_time",
 	"redraw_map",
 	"set_map_tile",
 	"set_trigger_percent",
@@ -19,6 +21,8 @@ const COMMANDS := [
 	"back_up_party",
 ]
 const OPERATIONS := {
+	"query_location": "_query_location",
+	"query_time": "_query_time",
 	"redraw_map": "_redraw_map",
 	"set_map_tile": "_set_map_tile",
 	"set_trigger_percent": "_set_trigger_percent",
@@ -47,3 +51,24 @@ func service_operation(command_id: String) -> String:
 
 func owned_command_ids() -> PackedStringArray:
 	return PackedStringArray(COMMANDS)
+
+
+func execute(command_id: String, request: Dictionary) -> Dictionary:
+	var routed_request := request.duplicate(true)
+	if command_id == "alter_game_time" and routed_request.has("seconds"):
+		var modifier_result := await apply_rule_modifiers(
+			"time-advance",
+			float(routed_request.get("seconds", 0)),
+			{
+				"minimum": 0.0,
+				"commandId": command_id,
+				"request": routed_request.duplicate(true),
+			}
+		)
+		if str(modifier_result.get("status", "")) != "ok":
+			return modifier_result
+		routed_request["seconds"] = maxi(
+			0,
+			roundi(float(modifier_result.get("value", 0)))
+		)
+	return await super.execute(command_id, routed_request)

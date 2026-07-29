@@ -489,11 +489,58 @@ func restore_execution_snapshot(saved: Variant) -> Dictionary:
 
 func execute_scenario_script(
 	script_id: String,
-	arguments: Variant
+	arguments: Variant,
+	invocation_context := {}
 ) -> ScenarioStepResult:
 	if scenario_script_runtime == null:
 		return ScenarioStepResult.failed("Scenario script runtime is unavailable")
-	return scenario_script_runtime.invoke(script_id, arguments)
+	return scenario_script_runtime.invoke(script_id, arguments, invocation_context)
+
+
+func resolve_scenario_behavior_arguments(
+	bindings: Variant,
+	invocation_context := {}
+) -> Dictionary:
+	if scenario_script_runtime == null:
+		return {
+			"status": "error",
+			"message": "Scenario script runtime is unavailable",
+		}
+	return scenario_script_runtime.resolve_argument_bindings(
+		bindings,
+		invocation_context
+	)
+
+
+func matching_scenario_behavior_bindings(
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_ids: Array,
+	slot := -1
+) -> Array:
+	if scenario_script_runtime == null:
+		return []
+	return scenario_script_runtime.matching_bindings(
+		role,
+		hook,
+		target_kind,
+		target_ids,
+		slot
+	)
+
+
+func current_trigger_identity() -> Dictionary:
+	return {
+		"triggerId": current_trigger_id,
+		"actionIndex": current_action_index,
+		"encounterOrigin": (
+			encounter_origins[-1].duplicate(true)
+			if not encounter_origins.is_empty()
+			else {}
+		),
+		"executionContext": execution_context.duplicate(true),
+	}
 
 
 func resume_scenario_script(response: Dictionary) -> ScenarioStepResult:

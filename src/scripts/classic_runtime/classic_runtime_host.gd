@@ -4,6 +4,9 @@ extends Node
 const DefaultScenarioPortsScript = preload(
 	"res://scripts/scenario_runtime/default_scenario_ports.gd"
 )
+const ScenarioRuleModifierPipelineScript = preload(
+	"res://scripts/scenario_runtime/scenario_rule_modifier_pipeline.gd"
+)
 
 signal command_started(command: String, payload: Dictionary)
 signal command_finished(command: String, response: Dictionary)
@@ -15,10 +18,12 @@ var runtime: ClassicRuntime
 var command_adapter: Object
 var command_router: ScenarioCommandRouter
 var gameplay_rule_set: GameplayRuleSet
+var rule_modifier_pipeline: ScenarioRuleModifierPipeline
 var active := false
 var command_context: Dictionary = {}
 var nested_trigger_active := false
 var restored_continuation_pending := false
+var _bound_behavior_active := false
 
 
 func _init() -> void:
@@ -81,47 +86,334 @@ func _configure_extensions(invoke_lifecycle := true) -> bool:
 	if command_router == null:
 		return false
 	var extension_registry := runtime.bundle.extension_registry
-	if extension_registry == null:
-		return true
-	if not extension_registry.register_command_ports(
-		command_router,
-		runtime.bundle.required_extension_ids()
-	):
-		push_error(extension_registry.last_error)
-		return false
-	var lifecycle_bindings: Variant = runtime.bundle.documents.get(
-		"runtime",
-		{}
-	).get("bindings", {}).get("lifecycle", {})
-	if invoke_lifecycle and lifecycle_bindings is Dictionary:
-		for binding_key: Variant in lifecycle_bindings:
-			var lifecycle_result := extension_registry.invoke_binding(
-				"lifecycleHooks",
-				str(lifecycle_bindings[binding_key]),
-				{
-					"event": "campaign-loaded",
-					"bindingKey": str(binding_key),
-					"campaignId": str(runtime.bundle.manifest.get("id", "")),
-				},
-				self
-			)
-			if str(lifecycle_result.get("status", "")) != "ok":
-				push_error(str(lifecycle_result.get(
-					"message",
-					"Scenario lifecycle hook failed"
-				)))
-				return false
+	if extension_registry != null:
+		if not extension_registry.register_command_ports(
+			command_router,
+			runtime.bundle.required_extension_ids()
+		):
+			push_error(extension_registry.last_error)
+			return false
 	command_router.configure({
 		"scenarioPortRuntime": command_adapter,
 		"commandRouter": command_router,
 		"gameplayRules": gameplay_rule_set,
 		"extensionRegistry": extension_registry,
+		"behaviorRunner": self,
 		"runtimeBindings": runtime.bundle.documents.get(
 			"runtime",
 			{}
 		).get("bindings", {}),
 	})
+	rule_modifier_pipeline = ScenarioRuleModifierPipelineScript.new()
+	rule_modifier_pipeline.configure(
+		self,
+		extension_registry,
+		runtime.bundle.documents.get("runtime", {}).get("bindings", {})
+	)
+	if invoke_lifecycle:
+		call_deferred("_run_campaign_loaded_behaviors")
 	return true
+
+
+func run_bound_behavior(
+	behavior_id: String,
+	arguments: Dictionary,
+	context := {}
+) -> Dictionary:
+	if _bound_behavior_active:
+		return {
+			"status": "error",
+			"message": "Scenario behavior dispatch cannot recursively invoke a provider",
+		}
+	if runtime == null or runtime.interpreter == null:
+		return {"status": "error", "message": "Scenario interpreter is unavailable"}
+	_bound_behavior_active = true
+	var step: ScenarioStepResult = runtime.interpreter.execute_scenario_script(
+		behavior_id,
+		arguments,
+		context
+	)
+	for _iteration: int in range(4096):
+		if step == null or not step.is_valid():
+			_bound_behavior_active = false
+			return {"status": "error", "message": "Scenario behavior returned an invalid step"}
+		match step.kind:
+			ScenarioStepResult.CONTINUE, ScenarioStepResult.RETURN:
+				_bound_behavior_active = false
+				return {"status": "ok", "value": step.data.get("value")}
+			ScenarioStepResult.HALT:
+				_bound_behavior_active = false
+				return {
+					"status": "ok",
+					"halted": true,
+					"value": step.data.get("value"),
+				}
+			ScenarioStepResult.ERROR:
+				_bound_behavior_active = false
+				return {
+					"status": "error",
+					"message": step.data.get("message", "Scenario behavior failed"),
+				}
+			ScenarioStepResult.YIELD:
+				var command_id := str(step.data.get("commandId", ""))
+				var request: Variant = step.data.get("request", {})
+				if command_router == null or not (request is Dictionary):
+					_bound_behavior_active = false
+					return {
+						"status": "error",
+						"message": "Scenario behavior yielded an invalid command",
+					}
+				command_started.emit(command_id, request)
+				var response: Dictionary = await command_router.route(
+					command_id,
+					request
+				)
+				command_finished.emit(command_id, response)
+				if str(response.get("status", "")) == "error":
+					_bound_behavior_active = false
+					return response
+				step = runtime.interpreter.resume_scenario_script(response)
+			_:
+				_bound_behavior_active = false
+				return {
+					"status": "error",
+					"message": "Scenario provider behavior cannot return '%s'"
+						% step.kind,
+				}
+	_bound_behavior_active = false
+	return {
+		"status": "error",
+		"message": "Scenario behavior exceeded its routed command limit",
+	}
+
+
+func run_behavior_attachments(
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_ids: Array,
+	request: Dictionary
+) -> Dictionary:
+	if runtime == null or runtime.interpreter == null:
+		return {"handled": false}
+	var bindings: Array = runtime.interpreter.matching_scenario_behavior_bindings(
+		role,
+		hook,
+		target_kind,
+		target_ids,
+		int(request.get("slot", -1))
+	)
+	if bindings.is_empty():
+		return {"handled": false}
+	var results: Array = []
+	for binding_value: Variant in bindings:
+		var binding: Dictionary = binding_value
+		var context := {
+			"role": role,
+			"hook": hook,
+			"targetKind": target_kind,
+			"targetId": str(binding.get("recordId", "")),
+			"request": request.duplicate(true),
+		}
+		var arguments_result: Dictionary = (
+			runtime.interpreter.resolve_scenario_behavior_arguments(
+				binding.get("arguments", {}),
+				context
+			)
+		)
+		if str(arguments_result.get("status", "")) != "ok":
+			return arguments_result
+		var result: Dictionary = await run_bound_behavior(
+			str(binding.get("behaviorId", "")),
+			arguments_result.get("arguments", {}),
+			context
+		)
+		if str(result.get("status", "")) == "error":
+			return result
+		results.append(result)
+	return {"status": "ok", "handled": true, "results": results}
+
+
+func has_behavior_attachments(
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_ids: Array,
+	slot := -1
+) -> bool:
+	if runtime == null or runtime.interpreter == null:
+		return false
+	return not runtime.interpreter.matching_scenario_behavior_bindings(
+		role,
+		hook,
+		target_kind,
+		target_ids,
+		slot
+	).is_empty()
+
+
+func has_item_behavior(instance: Object, hook_kind: String) -> bool:
+	if command_router == null:
+		return false
+	var port: Variant = command_router.port_for_command("query_party_wealth")
+	return (
+		port != null
+		and port.has_method("has_item_behavior")
+		and bool(port.call("has_item_behavior", instance, hook_kind))
+	)
+
+
+func run_item_behavior(
+	instance: Object,
+	hook_kind: String,
+	user: Object = null,
+	target: Object = null
+) -> Dictionary:
+	if command_router == null:
+		return {"handled": false}
+	var port: Variant = command_router.port_for_command("query_party_wealth")
+	if port == null or not port.has_method("run_item_behavior"):
+		return {"handled": false}
+	return await port.call(
+		"run_item_behavior",
+		instance,
+		hook_kind,
+		user,
+		target
+	)
+
+
+func has_monster_ai_behavior(monster: Object) -> bool:
+	if command_router == null:
+		return false
+	var port: Variant = command_router.port_for_command("query_combat")
+	return (
+		port != null
+		and port.has_method("has_monster_ai_behavior")
+		and bool(port.call("has_monster_ai_behavior", monster))
+	)
+
+
+func run_monster_ai_behavior(monster: Object) -> Dictionary:
+	if command_router == null:
+		return {"handled": false}
+	var port: Variant = command_router.port_for_command("query_combat")
+	if port == null or not port.has_method("run_monster_ai_behavior"):
+		return {"handled": false}
+	return await port.call("run_monster_ai_behavior", monster)
+
+
+func resolve_rule_modifiers(
+	event_id: String,
+	base_value: float,
+	context := {}
+) -> Dictionary:
+	if rule_modifier_pipeline == null:
+		return {"status": "ok", "value": base_value, "applied": []}
+	return await rule_modifier_pipeline.resolve(event_id, base_value, context)
+
+
+func resume_scenario_debugger(action: String) -> Dictionary:
+	if runtime == null \
+			or runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		return {
+			"status": "error",
+			"message": "Scenario debugger runtime is unavailable",
+		}
+	var runtime_result: Dictionary = (
+		runtime.interpreter.scenario_script_runtime.debugger_resume(action)
+	)
+	if str(runtime_result.get("status", "")) != "ok":
+		return runtime_result
+	if command_router == null:
+		return {
+			"status": "error",
+			"message": "Scenario debugger command router is unavailable",
+		}
+	var presentation_port: Variant = command_router.port_for_command(
+		"scenario_debug_pause"
+	)
+	if presentation_port == null \
+			or not presentation_port.has_method("resume_debugger"):
+		return {
+			"status": "error",
+			"message": "Scenario debugger presentation port is unavailable",
+		}
+	return presentation_port.resume_debugger(action)
+
+
+func _run_campaign_loaded_behaviors() -> void:
+	var request := {
+		"event": "campaign-loaded",
+		"campaignId": str(runtime.bundle.manifest.get("id", "")),
+	}
+	var lifecycle_result := await emit_lifecycle_event(
+		"campaign-start",
+		request
+	)
+	if str(lifecycle_result.get("status", "")) == "error":
+		push_error(str(lifecycle_result.get(
+			"message",
+			"Scenario campaign-start behavior failed"
+		)))
+
+
+func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
+	if runtime == null or runtime.bundle == null:
+		return {"status": "error", "message": "Scenario lifecycle runtime is unavailable"}
+	var event_request: Dictionary = (
+		request.duplicate(true) if request is Dictionary else {}
+	)
+	event_request["hook"] = hook
+	event_request["campaignId"] = str(runtime.bundle.manifest.get("id", ""))
+	var attachment_result: Dictionary = await run_behavior_attachments(
+		"lifecycle",
+		hook,
+		"lifecycle",
+		["campaign"],
+		event_request
+	)
+	if str(attachment_result.get("status", "")) == "error":
+		return attachment_result
+	var lifecycle_bindings: Variant = runtime.bundle.documents.get(
+		"runtime",
+		{}
+	).get("bindings", {}).get("lifecycle", {})
+	if not (lifecycle_bindings is Dictionary):
+		return {"status": "ok", "handled": bool(attachment_result.get("handled", false))}
+	var candidate_keys: Array = [hook, str(event_request.get("event", ""))]
+	for binding_key: Variant in candidate_keys:
+		if str(binding_key).is_empty() or not lifecycle_bindings.has(binding_key):
+			continue
+		var binding_value: Variant = lifecycle_bindings[binding_key]
+		if not (binding_value is Dictionary):
+			continue
+		var binding: Dictionary = binding_value
+		var provider_request := event_request.duplicate(true)
+		provider_request["bindingKey"] = str(binding_key)
+		var provider_result: Dictionary
+		if str(binding.get("kind", "")) == "script":
+			provider_result = await run_bound_behavior(
+				str(binding.get("behaviorId", "")),
+				provider_request,
+				{"role": "lifecycle", "hook": hook}
+			)
+		elif runtime.bundle.extension_registry != null:
+			provider_result = runtime.bundle.extension_registry.invoke_binding(
+				"lifecycleHooks",
+				str(binding.get("providerId", "")),
+				provider_request,
+				self
+			)
+		else:
+			provider_result = {
+				"status": "error",
+				"message": "Scenario lifecycle extension registry is unavailable",
+			}
+		if str(provider_result.get("status", "")) == "error":
+			return provider_result
+	return {"status": "ok", "handled": bool(attachment_result.get("handled", false))}
 
 
 func has_trigger(trigger_id: String) -> bool:

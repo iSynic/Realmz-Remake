@@ -25,11 +25,11 @@ const KnownDataCorrectionsScript = preload(
 const CustomSpellSupportScript = preload(
 	"res://scripts/classic_runtime/classic_custom_spell_support.gd"
 )
-const ScriptPolicyScript = preload(
-	"res://scripts/scenario_runtime/scenario_script_policy.gd"
-)
 const SandboxClientScript = preload(
 	"res://scripts/scenario_runtime/scenario_sandbox_client.gd"
+)
+const EnginePluginRegistryScript = preload(
+	"res://scripts/scenario_runtime/scenario_engine_plugin_registry.gd"
 )
 
 const SCHEMA_VERSION := 1
@@ -137,6 +137,7 @@ func inspect(bundle: ClassicCampaignBundle, native_context := {}) -> Dictionary:
 	_check_rule_table_selection(bundle)
 	_check_inactive_custom_spell_definitions(bundle)
 	_check_scenario_script_tiers(bundle)
+	_check_engine_plugins(bundle)
 	return _build_report(bundle, execution_report)
 
 
@@ -144,19 +145,12 @@ func _check_scenario_script_tiers(bundle: ClassicCampaignBundle) -> void:
 	var script_document: Variant = bundle.documents.get("remakeScripts", {})
 	if not (script_document is Dictionary):
 		return
-	var trusted_capabilities: Array = []
-	var requires_trusted := false
 	var requires_sandbox := false
-	for script_value: Variant in script_document.get("scripts", []):
-		if not (script_value is Dictionary):
+	for behavior_value: Variant in script_document.get("behaviors", []):
+		if not (behavior_value is Dictionary):
 			continue
-		var tier := str(script_value.get("tier", ""))
+		var tier := str(behavior_value.get("tier", ""))
 		requires_sandbox = requires_sandbox or tier == "sandboxed"
-		if tier == "trusted":
-			requires_trusted = true
-			for capability: Variant in script_value.get("requestedCapabilities", []):
-				if capability not in trusted_capabilities:
-					trusted_capabilities.append(capability)
 	if requires_sandbox:
 		var gate := SandboxClientScript.feasibility()
 		if not bool(gate.get("available", false)):
@@ -168,20 +162,36 @@ func _check_scenario_script_tiers(bundle: ClassicCampaignBundle) -> void:
 				"recordIndex": -1,
 				"message": gate.get("message", "Scenario sandbox is unavailable"),
 			})
-	if requires_trusted and not ScriptPolicyScript.new().is_trusted_package_approved(
-		bundle.package_hash(),
-		trusted_capabilities
-	):
+
+
+func _check_engine_plugins(bundle: ClassicCampaignBundle) -> void:
+	var runtime_document: Variant = bundle.documents.get("runtime", {})
+	if not (runtime_document is Dictionary):
+		return
+	var registry := EnginePluginRegistryScript.new()
+	if not registry.load_installed_catalog():
 		_add_diagnostic({
 			"severity": "error",
 			"classification": BLOCKER,
-			"code": "trusted-script-approval-required",
-			"source": "remake/scripts.json",
+			"code": "engine-plugin-catalog-invalid",
+			"source": "runtime.json",
 			"recordIndex": -1,
-			"message": (
-				"This campaign contains trusted GDScript. Enable Developer Scripting "
-				+ "and approve package %s with capabilities: %s"
-				% [bundle.package_hash(), ", ".join(trusted_capabilities)]
+			"message": registry.last_error,
+		})
+		return
+	var validation: Dictionary = registry.validate_requirements(
+		runtime_document.get("requiredPlugins", [])
+	)
+	if not bool(validation.get("valid", false)):
+		_add_diagnostic({
+			"severity": "error",
+			"classification": BLOCKER,
+			"code": "engine-plugin-unavailable",
+			"source": "runtime.json",
+			"recordIndex": -1,
+			"message": validation.get(
+				"message",
+				"A required scenario engine plug-in is unavailable"
 			),
 		})
 

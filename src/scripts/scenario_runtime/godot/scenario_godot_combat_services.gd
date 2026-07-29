@@ -7,6 +7,83 @@ var last_classic_spawn_presentation: Dictionary = {}
 var _forced_battle_resume_slot := -1
 
 
+func _query_combat(_payload: Dictionary = {}) -> Dictionary:
+	var context: Dictionary = service_owner.call("_combat_context")
+	if context.has("error"):
+		return {
+			"active": false,
+			"round": 0,
+			"combatants": [],
+		}
+	var snapshots: Array = []
+	var combatants: Array = context["combatants"]
+	for index: int in range(combatants.size()):
+		var creature: Variant = service_owner.call(
+			"_combatant_creature",
+			combatants[index]
+		)
+		if not (creature is Object):
+			continue
+		var stats: Variant = creature.get("stats")
+		if not (stats is Dictionary):
+			stats = {}
+		var current_health := int(stats.get("curHP", 0))
+		snapshots.append({
+			"id": "combat:%d" % index,
+			"name": str(creature.get("name")),
+			"level": int(creature.get("level")),
+			"health": current_health,
+			"maximumHealth": int(stats.get("maxHP", current_health)),
+			"spellPoints": int(stats.get("curSP", 0)),
+			"maximumSpellPoints": int(stats.get("maxSP", 0)),
+			"alive": current_health > 0 and int(creature.get("life_status")) < 3,
+		})
+	return {
+		"active": true,
+		"round": int(context["state"].get("cur_battle_round")),
+		"combatants": snapshots,
+	}
+
+
+func _apply_combat_damage(payload: Dictionary) -> Dictionary:
+	return _change_combat_health(payload, -absi(int(payload.get("amount", 0))))
+
+
+func _apply_combat_healing(payload: Dictionary) -> Dictionary:
+	return _change_combat_health(payload, absi(int(payload.get("amount", 0))))
+
+
+func _change_combat_health(payload: Dictionary, amount: int) -> Dictionary:
+	var context: Dictionary = service_owner.call("_combat_context")
+	if context.has("error"):
+		return _error(str(context["error"]))
+	var target_id := str(payload.get("targetId", ""))
+	if not target_id.begins_with("combat:") or not target_id.substr(7).is_valid_int():
+		return _error("Scenario combat target reference is invalid")
+	var target_index := int(target_id.substr(7))
+	var combatants: Array = context["combatants"]
+	if target_index < 0 or target_index >= combatants.size():
+		return _error("Scenario combat target is unavailable")
+	var creature: Variant = service_owner.call(
+		"_combatant_creature",
+		combatants[target_index]
+	)
+	if not (creature is Object) or not creature.has_method("change_cur_hp"):
+		return _error("Scenario combat target cannot change health")
+	var stats: Variant = creature.get("stats")
+	var previous := int(stats.get("curHP", 0)) if stats is Dictionary else 0
+	creature.call("change_cur_hp", amount)
+	var current_stats: Variant = creature.get("stats")
+	var current := int(current_stats.get("curHP", previous)) \
+		if current_stats is Dictionary else previous
+	return {
+		"targetId": target_id,
+		"amount": absi(current - previous),
+		"previousHealth": previous,
+		"health": current,
+	}
+
+
 func reset_campaign_state() -> void:
 	last_classic_spawn_presentation.clear()
 	_forced_battle_resume_slot = -1

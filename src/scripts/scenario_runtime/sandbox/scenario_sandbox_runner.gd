@@ -1,6 +1,7 @@
 extends SceneTree
 
-const API_VERSION := 1
+const PROTOCOL_VERSION := 1
+const SCRIPT_API_VERSION := 2
 const MAX_SOURCE_BYTES := 1048576
 const MAX_STATE_BYTES := 262144
 const MAX_MESSAGE_BYTES := 1048576
@@ -53,11 +54,11 @@ func _init() -> void:
 				_emit({
 					"status": (
 						"ok"
-						if int(request.get("protocolVersion", 0)) == API_VERSION
+						if int(request.get("protocolVersion", 0)) == PROTOCOL_VERSION
 							and str(request.get("nonce", "")) == nonce
 						else "error"
 					),
-					"protocolVersion": API_VERSION,
+					"protocolVersion": PROTOCOL_VERSION,
 					"packageHash": package_hash,
 				})
 			"step":
@@ -108,7 +109,7 @@ func _instance_for(script: Dictionary) -> Dictionary:
 	var script_id := str(script.get("id", ""))
 	if instances.has(script_id):
 		return {"status": "ok", "instance": instances[script_id]}
-	if int(script.get("apiVersion", 0)) != API_VERSION:
+	if int(script.get("apiVersion", 0)) != SCRIPT_API_VERSION:
 		return {"status": "error", "message": "Sandbox script API is unsupported"}
 	var source_path := str(script.get("sourcePath", "")).replace("\\", "/")
 	if not source_path.begins_with("remake/source/") \

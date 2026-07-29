@@ -182,7 +182,7 @@ func register_instruction_handlers(
 		if not (script_paths is Array):
 			return _fail("Scenario extension '%s' has invalid instruction handlers" % extension_id)
 		for script_path_value: Variant in script_paths:
-			var script_result := _trusted_script(
+			var script_result := _builtin_script(
 				str(script_path_value),
 				extension_id,
 				"instruction handler"
@@ -218,7 +218,7 @@ func register_command_ports(
 		if not (script_paths is Array):
 			return _fail("Scenario extension '%s' has invalid command ports" % extension_id)
 		for script_path_value: Variant in script_paths:
-			var script_result := _trusted_script(
+			var script_result := _builtin_script(
 				str(script_path_value),
 				extension_id,
 				"command port"
@@ -269,7 +269,7 @@ func activate_providers(
 		if not (script_paths is Array):
 			return _fail("Scenario extension '%s' has invalid providers" % extension_id)
 		for script_path_value: Variant in script_paths:
-			var script_result := _trusted_script(
+			var script_result := _builtin_script(
 				str(script_path_value),
 				extension_id,
 				"provider"
@@ -340,11 +340,11 @@ func invoke_binding(
 	return provider.invoke(capability, binding_id, payload, context)
 
 
-func _trusted_script(path: String, extension_id: String, role: String) -> Dictionary:
+func _builtin_script(path: String, extension_id: String, role: String) -> Dictionary:
 	if not path.begins_with("res://scripts/scenario_runtime/extensions/") \
 			or not path.ends_with(".gd"):
 		_fail(
-			"Scenario extension '%s' %s must be a trusted built-in script" % [
+			"Scenario extension '%s' %s must be a built-in Remake script" % [
 				extension_id,
 				role,
 			]

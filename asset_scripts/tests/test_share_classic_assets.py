@@ -98,6 +98,25 @@ class ShareClassicAssetsTests(unittest.TestCase):
                 )
             self.assertFalse((external / "sharedAssets").exists())
 
+            for campaign_name in ["First (Classic)", "Second (Classic)"]:
+                manifest_path = campaigns / campaign_name / "campaign.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest.pop("sharedAssets")
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            recovered = MODULE.build_plan(root, 2)
+            self.assertEqual(
+                recovered["summary"]["campaignReferences"],
+                plan["summary"]["campaignReferences"],
+            )
+            MODULE.apply_plan(recovered)
+            for campaign_name in ["First (Classic)", "Second (Classic)"]:
+                manifest = json.loads(
+                    (campaigns / campaign_name / "campaign.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertTrue(manifest["sharedAssets"]["files"])
+
     def test_dry_run_does_not_modify_campaigns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

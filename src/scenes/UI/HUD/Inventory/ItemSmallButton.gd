@@ -209,7 +209,17 @@ func _is_usable() -> bool:
 	var definition := _definition()
 	if definition == null:
 		return false
-	return definition.has_use("field") or definition.has_use("combat")
+	if definition.has_use("field") or definition.has_use("combat"):
+		return true
+	var host: Variant = GameGlobal.classic_runtime_host
+	return (
+		is_instance_valid(host)
+		and host.has_method("has_item_behavior")
+		and (
+			bool(host.call("has_item_behavior", item, "field_use"))
+			or bool(host.call("has_item_behavior", item, "combat_use"))
+		)
+	)
 
 
 func _valid_drag_data(data: Variant) -> bool:

@@ -1686,8 +1686,8 @@ func load_map_ressources( path : String , _name : String) -> void :
 	var newmapinfo : Dictionary = Utils.FileHandler.read_json_dictionary_from_txt(Utils.FileHandler.read_txt_from_file(path+"map_info.json"))
 	var newmapscriptareas : Dictionary = Utils.FileHandler.read_json_dictionary_from_txt(Utils.FileHandler.read_txt_from_file(path+"map_scriptareas.json"))
 
-	# Scenario map actions are data routed through ScenarioInterpreter. Full-tier
-	# scenario scripts are named reducers and never become native map scripts.
+	# Scenario map actions are data routed through ScenarioInterpreter. Sandboxed
+	# behavior is a named reducer and never becomes a native map script.
 	var newmapscripts: GDScript = null
 
 	var sizey : int = newmapdict[ "height"]

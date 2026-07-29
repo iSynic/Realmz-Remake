@@ -100,7 +100,28 @@ func _on_CancelButton_pressed() -> void:
 func _matches_filter(definition: ItemDefinition) -> bool:
 	match itemkind:
 		FIELD:
-			return definition.has_use("field")
+			return definition.has_use("field") \
+				or _scenario_has_use(definition, "field_use")
 		BATTLE:
-			return definition.has_use("combat")
+			return definition.has_use("combat") \
+				or _scenario_has_use(definition, "combat_use")
 	return true
+
+
+func _scenario_has_use(definition: ItemDefinition, hook_kind: String) -> bool:
+	var host: Variant = GameGlobal.classic_runtime_host
+	if not is_instance_valid(host) or not host.has_method("has_item_behavior"):
+		return false
+	for character_value: Variant in GameGlobal.player_characters:
+		if not (character_value is Object) \
+				or not character_value.has_method("inventory_instances"):
+			continue
+		for instance_value: Variant in character_value.call("inventory_instances"):
+			if instance_value is Object \
+					and str(instance_value.get("definition_id")) == definition.definition_id:
+				return bool(host.call(
+					"has_item_behavior",
+					instance_value,
+					hook_kind
+				))
+	return false
