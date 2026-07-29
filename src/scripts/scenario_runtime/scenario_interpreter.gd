@@ -13,6 +13,9 @@ const ClassicContinuationRouterScript = preload(
 const ClassicExecutionStateScript = preload(
 	"res://scripts/scenario_runtime/classic_execution_state.gd"
 )
+const ScenarioScriptRuntimeScript = preload(
+	"res://scripts/scenario_runtime/scenario_script_runtime.gd"
+)
 const SNAPSHOT_SCHEMA_VERSION := 2
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
@@ -32,6 +35,7 @@ var _classic_executor: Object
 var _classic_continuation_router: ClassicContinuationRouter
 var _classic_mode := false
 var classic_execution_state: RefCounted
+var scenario_script_runtime: ScenarioScriptRuntime
 
 var runtime_state: ClassicRuntimeState:
 	get:
@@ -140,6 +144,24 @@ func _configure_classic_compatibility(
 	_classic_executor = ClassicOpcodeRuntimeScript.new()
 	_classic_executor.bind_execution_state(classic_execution_state)
 	_classic_executor.configure(campaign_bundle, state)
+	scenario_script_runtime = ScenarioScriptRuntimeScript.new()
+	var script_document: Dictionary = campaign_bundle.documents.get(
+		"remakeScripts",
+		{}
+	)
+	if script_document.is_empty():
+		script_document = ScenarioScriptRuntimeScript.empty_document()
+	if not scenario_script_runtime.configure(
+		script_document,
+		state,
+		campaign_bundle
+	):
+		last_result = {
+			"status": "error",
+			"message": scenario_script_runtime.last_error,
+		}
+		halted = true
+		return
 	_classic_continuation_router = ClassicContinuationRouterScript.new()
 	_classic_continuation_router.configure(_classic_executor)
 	_classic_executor.set_scenario_run_delegate(
@@ -382,14 +404,14 @@ func resume_command(response: Dictionary) -> Dictionary:
 			"Pending scenario handler '%s' is unavailable" % saved_pending.handler_id
 		)
 	var step := handler.resume(saved_pending, response, self)
-	if not saved_pending.handler_id.begins_with("core."):
+	if str(saved_pending.action_identity.get("kind", "")) == "semantic":
 		var semantic_result := _classic_semantic_step(
 			step,
 			saved_pending.handler_id,
 			saved_pending.action_identity
 		)
 		if str(semantic_result.get("status", "")) == "continue":
-			return _classic_result(_classic_executor.run_until_yield())
+			return _classic_result(_run_classic_loop())
 		return _classic_result(semantic_result)
 	if step == null or not step.is_valid():
 		return _classic_error(
@@ -431,6 +453,19 @@ func make_execution_snapshot() -> Dictionary:
 		result["snapshot"]["scenarioPendingCommand"] = (
 			pending_command.to_dictionary() if pending_command != null else null
 		)
+		result["snapshot"]["scenarioScriptRuntime"] = (
+			scenario_script_runtime.snapshot()
+			if scenario_script_runtime != null
+			else {
+				"schemaVersion": 1,
+				"persistentValues": {},
+				"fullScriptStates": {},
+				"activeFullScriptId": "",
+				"frames": [],
+				"pendingOperation": {},
+				"rngState": 1,
+			}
+		)
 	return result
 
 
@@ -442,12 +477,52 @@ func restore_execution_snapshot(saved: Variant) -> Dictionary:
 		pending_command = ScenarioPendingCommand.from_dictionary(
 			saved.get("scenarioPendingCommand")
 		) if saved.get("scenarioPendingCommand") is Dictionary else null
+		if scenario_script_runtime != null:
+			var script_restore := scenario_script_runtime.restore(
+				saved.get("scenarioScriptRuntime", {})
+			)
+			if str(script_restore.get("status", "")) != "ok":
+				return script_restore
 	_sync_classic_observability()
 	return result
 
 
+func execute_scenario_script(
+	script_id: String,
+	arguments: Variant
+) -> ScenarioStepResult:
+	if scenario_script_runtime == null:
+		return ScenarioStepResult.failed("Scenario script runtime is unavailable")
+	return scenario_script_runtime.invoke(script_id, arguments)
+
+
+func resume_scenario_script(response: Dictionary) -> ScenarioStepResult:
+	if scenario_script_runtime == null:
+		return ScenarioStepResult.failed("Scenario script runtime is unavailable")
+	return scenario_script_runtime.resume(response)
+
+
 static func validate_execution_snapshot(saved: Variant) -> Dictionary:
-	return ClassicExecutionStateScript.validate_snapshot(saved)
+	var classic_validation := ClassicExecutionStateScript.validate_snapshot(saved)
+	if str(classic_validation.get("status", "")) != "ok":
+		return classic_validation
+	if not (saved is Dictionary) or not saved.has("scenarioScriptRuntime"):
+		return {
+			"status": "error",
+			"message": "Scenario execution snapshot has no script runtime state",
+		}
+	var script_validation := ScenarioScriptRuntimeScript.validate_snapshot(
+		saved["scenarioScriptRuntime"]
+	)
+	if not bool(script_validation.get("valid", false)):
+		return {
+			"status": "error",
+			"message": script_validation.get(
+				"message",
+				"Scenario execution snapshot has invalid script runtime state"
+			),
+		}
+	return {"status": "ok"}
 
 
 func _classic_result(value: Variant) -> Dictionary:

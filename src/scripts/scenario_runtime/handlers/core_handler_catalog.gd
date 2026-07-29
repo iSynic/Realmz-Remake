@@ -10,6 +10,7 @@ const HANDLER_SCRIPTS := [
 	preload("res://scripts/scenario_runtime/handlers/character_handler.gd"),
 	preload("res://scripts/scenario_runtime/handlers/rules_state_handler.gd"),
 	preload("res://scripts/scenario_runtime/handlers/presentation_handler.gd"),
+	preload("res://scripts/scenario_runtime/handlers/scenario_script_handler.gd"),
 ]
 
 

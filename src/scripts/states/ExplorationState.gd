@@ -29,7 +29,7 @@ func enter(_msg : Dictionary = {}) -> void:
 		var classic_campaign := GameGlobal.is_classic_campaign(campaign)
 		if not classic_campaign:
 			push_error(
-				"Campaign '%s' cannot start without a realmz-remake-scenario v2 manifest" % campaign
+				"Campaign '%s' cannot start without a valid realmz-remake-scenario manifest" % campaign
 			)
 			StateMachine.transition_to("Inactive", {})
 			return

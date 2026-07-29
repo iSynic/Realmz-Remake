@@ -192,7 +192,11 @@ func _load_launchable_package(directory: String) -> Dictionary:
 
 func _load_compiled_package(directory: String) -> Dictionary:
 	var install = CampaignInstallScript.new()
-	if not install.load_from_campaigns_directory(directory.get_base_dir(), directory.get_file()):
+	if not install.load_from_campaigns_directory(
+		directory.get_base_dir(),
+		directory.get_file(),
+		false
+	):
 		return {"valid": false, "error": install.last_error}
 	return {
 		"valid": true,

@@ -25,6 +25,12 @@ const KnownDataCorrectionsScript = preload(
 const CustomSpellSupportScript = preload(
 	"res://scripts/classic_runtime/classic_custom_spell_support.gd"
 )
+const ScriptPolicyScript = preload(
+	"res://scripts/scenario_runtime/scenario_script_policy.gd"
+)
+const SandboxClientScript = preload(
+	"res://scripts/scenario_runtime/scenario_sandbox_client.gd"
+)
 
 const SCHEMA_VERSION := 1
 const BLOCKER := "progression-blocker"
@@ -130,7 +136,54 @@ func inspect(bundle: ClassicCampaignBundle, native_context := {}) -> Dictionary:
 	_check_active_monster_spells(bundle, execution_report)
 	_check_rule_table_selection(bundle)
 	_check_inactive_custom_spell_definitions(bundle)
+	_check_scenario_script_tiers(bundle)
 	return _build_report(bundle, execution_report)
+
+
+func _check_scenario_script_tiers(bundle: ClassicCampaignBundle) -> void:
+	var script_document: Variant = bundle.documents.get("remakeScripts", {})
+	if not (script_document is Dictionary):
+		return
+	var trusted_capabilities: Array = []
+	var requires_trusted := false
+	var requires_sandbox := false
+	for script_value: Variant in script_document.get("scripts", []):
+		if not (script_value is Dictionary):
+			continue
+		var tier := str(script_value.get("tier", ""))
+		requires_sandbox = requires_sandbox or tier == "sandboxed"
+		if tier == "trusted":
+			requires_trusted = true
+			for capability: Variant in script_value.get("requestedCapabilities", []):
+				if capability not in trusted_capabilities:
+					trusted_capabilities.append(capability)
+	if requires_sandbox:
+		var gate := SandboxClientScript.feasibility()
+		if not bool(gate.get("available", false)):
+			_add_diagnostic({
+				"severity": "error",
+				"classification": BLOCKER,
+				"code": "sandbox-unavailable",
+				"source": "remake/scripts.json",
+				"recordIndex": -1,
+				"message": gate.get("message", "Scenario sandbox is unavailable"),
+			})
+	if requires_trusted and not ScriptPolicyScript.new().is_trusted_package_approved(
+		bundle.package_hash(),
+		trusted_capabilities
+	):
+		_add_diagnostic({
+			"severity": "error",
+			"classification": BLOCKER,
+			"code": "trusted-script-approval-required",
+			"source": "remake/scripts.json",
+			"recordIndex": -1,
+			"message": (
+				"This campaign contains trusted GDScript. Enable Developer Scripting "
+				+ "and approve package %s with capabilities: %s"
+				% [bundle.package_hash(), ", ".join(trusted_capabilities)]
+			),
+		})
 
 
 func _reset(native_context: Variant) -> void:
@@ -1037,7 +1090,7 @@ func _check_same_map_action_point(
 		if not (trigger_value is Dictionary):
 			continue
 		if (
-			int(trigger_value.get("recordIndex", -1)) == record_index
+			_stable_record_index(trigger_value) == record_index
 			and str(trigger_value.get("levelType", "")) == str(origin.get("levelType", ""))
 			and int(trigger_value.get("levelIndex", -1)) == int(origin.get("levelIndex", -1))
 		):
@@ -1048,6 +1101,17 @@ func _check_same_map_action_point(
 		"Action references missing same-map action point %d" % record_index,
 		{"referenceId": record_index}
 	)
+
+
+func _stable_record_index(record: Dictionary) -> int:
+	if record.has("recordIndex"):
+		return int(record["recordIndex"])
+	var stable_id := str(record.get("id", ""))
+	var separator := stable_id.rfind(":")
+	if separator < 0:
+		return -1
+	var suffix := stable_id.substr(separator + 1)
+	return int(suffix) if suffix.is_valid_int() else -1
 
 
 func _check_picture(

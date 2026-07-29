@@ -30,6 +30,12 @@ const FORBIDDEN_EXECUTABLE_EXTENSIONS := [
 	"exe",
 	"wasm",
 ]
+const MATERIALIZED_RUNTIME_DIRECTORIES := [
+	"Bestiary",
+	"Items",
+	"Maps",
+	"Tilesets",
+]
 
 var campaign_name := ""
 var campaign_directory := ""
@@ -129,7 +135,8 @@ static func preview_from_campaigns_directory(
 
 func load_from_campaigns_directory(
 	campaigns_directory: String,
-	candidate_name: String
+	candidate_name: String,
+	allow_materialized_runtime := true
 ) -> bool:
 	_reset()
 	if not is_safe_campaign_name(candidate_name):
@@ -143,16 +150,29 @@ func load_from_campaigns_directory(
 		return _fail("Installed campaign directory does not exist: %s" % candidate_name)
 	if not FileAccess.file_exists(campaign_directory.path_join("campaign.json")):
 		return _fail("Installed Classic campaign is missing campaign.json")
-	var executable_payload := _find_executable_payload(campaign_directory)
-	if not executable_payload.is_empty():
-		return _fail(
-			"Imported scenarios are data-only; executable payload '%s' is not allowed"
-			% executable_payload
-		)
-
 	bundle = BundleScript.new()
 	if not bundle.load_from_directory(campaign_directory):
 		return _fail(bundle.last_error)
+	var executable_payload := _find_executable_payload(
+		campaign_directory,
+		"",
+		bundle.declared_script_sources()
+	)
+	if not executable_payload.is_empty():
+		return _fail(
+			"Campaign executable payload '%s' is undeclared or unsupported"
+			% executable_payload
+		)
+	var unlisted_payload := _find_unlisted_payload(
+		campaign_directory,
+		"",
+		allow_materialized_runtime
+	)
+	if not unlisted_payload.is_empty():
+		return _fail(
+			"Campaign payload '%s' is not declared by the integrity manifest"
+			% unlisted_payload
+		)
 	shared_asset_store = SharedAssetStoreScript.new()
 	if not shared_asset_store.load_for_campaign(campaign_directory, bundle.manifest):
 		return _fail(shared_asset_store.last_error)
@@ -174,7 +194,11 @@ func load_from_campaigns_directory(
 	return true
 
 
-func _find_executable_payload(directory_path: String, relative_path := "") -> String:
+func _find_executable_payload(
+	directory_path: String,
+	relative_path := "",
+	allowed_gdscript := {}
+) -> String:
 	var directory := DirAccess.open(directory_path)
 	if directory == null:
 		return relative_path
@@ -188,13 +212,72 @@ func _find_executable_payload(directory_path: String, relative_path := "") -> St
 			directory.list_dir_end()
 			return child_relative
 		if directory.current_is_dir():
-			var nested := _find_executable_payload(child_path, child_relative)
+			var nested := _find_executable_payload(
+				child_path,
+				child_relative,
+				allowed_gdscript
+			)
 			if not nested.is_empty():
 				directory.list_dir_end()
 				return nested
 		elif entry.get_extension().to_lower() in FORBIDDEN_EXECUTABLE_EXTENSIONS:
+			var normalized_relative := child_relative.replace("\\", "/")
+			if entry.get_extension().to_lower() == "gd" \
+					and allowed_gdscript.has(normalized_relative):
+				entry = directory.get_next()
+				continue
 			directory.list_dir_end()
 			return child_relative
+		entry = directory.get_next()
+	directory.list_dir_end()
+	return ""
+
+
+func _find_unlisted_payload(
+	directory_path: String,
+	relative_path := "",
+	allow_materialized_runtime := true
+) -> String:
+	var directory := DirAccess.open(directory_path)
+	if directory == null:
+		return relative_path
+	var integrity: Variant = bundle.manifest.get("integrity", {})
+	var declared: Variant = integrity.get("files", {}) if integrity is Dictionary else {}
+	directory.list_dir_begin()
+	var entry := directory.get_next()
+	while not entry.is_empty():
+		var child_path := directory_path.path_join(entry)
+		var child_relative := entry if relative_path.is_empty() \
+			else relative_path.path_join(entry)
+		if directory.is_link(entry):
+			directory.list_dir_end()
+			return child_relative
+		if directory.current_is_dir():
+			if (
+				allow_materialized_runtime
+				and relative_path.is_empty()
+				and entry in MATERIALIZED_RUNTIME_DIRECTORIES
+			):
+				entry = directory.get_next()
+				continue
+			var nested := _find_unlisted_payload(
+				child_path,
+				child_relative,
+				allow_materialized_runtime
+			)
+			if not nested.is_empty():
+				directory.list_dir_end()
+				return nested
+		else:
+			var normalized_relative := child_relative.replace("\\", "/")
+			if normalized_relative.get_file() == ".gdignore":
+				entry = directory.get_next()
+				continue
+			if normalized_relative != "campaign.json" and (
+				not (declared is Dictionary) or not declared.has(normalized_relative)
+			):
+				directory.list_dir_end()
+				return child_relative
 		entry = directory.get_next()
 	directory.list_dir_end()
 	return ""

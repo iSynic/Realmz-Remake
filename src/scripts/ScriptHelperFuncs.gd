@@ -446,7 +446,7 @@ static func get_extra_ap_name(ap_id: int) -> String:
 
 
 static func get_current_map_scripts_Divinity() -> Variant:
-	# Campaign-folder GDScript execution ended with scenario format v2.
+	# Campaign-folder GDScript is never discovered or executed implicitly.
 	return null
 
 ## Divinity Code 29: Give/Display Map  id:int , if negative, give |id| and also display

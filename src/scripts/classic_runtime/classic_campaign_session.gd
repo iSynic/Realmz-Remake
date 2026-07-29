@@ -18,7 +18,7 @@ const GameplayRuleRegistryScript = preload(
 const GameplayRuleSetScript = preload(
 	"res://scripts/scenario_runtime/gameplay_rule_set.gd"
 )
-const SAVE_SCHEMA_VERSION := 3
+const SAVE_SCHEMA_VERSION := 4
 
 var install: Object
 var host: Object
@@ -294,6 +294,9 @@ func make_save_result() -> Dictionary:
 		"payload": {
 			"schemaVersion": SAVE_SCHEMA_VERSION,
 			"campaignId": _campaign_id(),
+			"campaignPackageHash": _campaign_package_hash(),
+			"scriptApiVersions": {"scenarioScripts": 1},
+			"scenarioScriptContract": _scenario_script_contract(),
 			"runtimeState": runtime_state.call("snapshot"),
 			"portState": port_state,
 			"continuationState": continuation_result["snapshot"],
@@ -303,7 +306,12 @@ func make_save_result() -> Dictionary:
 
 
 func restore_save_payload(payload: Dictionary) -> Dictionary:
-	var validation := validate_save_payload(payload, _campaign_id())
+	var validation := validate_save_payload(
+		payload,
+		_campaign_id(),
+		_campaign_package_hash(),
+		_scenario_script_contract()
+	)
 	if str(validation.get("status", "")) != "ok":
 		return validation
 	if not is_instance_valid(host) or host.runtime == null:
@@ -367,10 +375,8 @@ func resume_saved_continuation() -> Dictionary:
 
 func restore_legacy_native_location(location: Dictionary) -> Dictionary:
 	return _error(
-		(
-			"This save predates scenario runtime v2 and cannot be upgraded; "
-			+ "start a new playthrough"
-		)
+		"This save predates the current scenario runtime and cannot be upgraded; "
+		+ "start a new playthrough"
 	)
 
 
@@ -435,10 +441,16 @@ func acquired_player_map_entries() -> Array:
 	return entries
 
 
-static func validate_save_payload(payload: Variant, expected_campaign_id := "") -> Dictionary:
+static func validate_save_payload(
+	payload: Variant,
+	expected_campaign_id := "",
+	expected_package_hash := "",
+	expected_script_contract := {}
+) -> Dictionary:
 	if payload is Dictionary and payload.is_empty():
 		return _error(
-			"This save predates scenario runtime v2 and cannot be upgraded; start a new playthrough"
+			"This save predates the current scenario runtime and cannot be upgraded; "
+			+ "start a new playthrough"
 		)
 	if not (payload is Dictionary):
 		return _error("Classic save data is not a dictionary")
@@ -448,7 +460,7 @@ static func validate_save_payload(payload: Variant, expected_campaign_id := "") 
 	if version != SAVE_SCHEMA_VERSION:
 		return _error(
 			(
-				"Save schema %d is incompatible with scenario runtime v2 schema %d; "
+				"Save schema %d is incompatible with scenario runtime schema %d; "
 				+ "start a new playthrough"
 			) % [
 				version,
@@ -464,6 +476,24 @@ static func validate_save_payload(payload: Variant, expected_campaign_id := "") 
 					expected_campaign_id,
 				]
 			)
+	if not expected_package_hash.is_empty():
+		var saved_package_hash := str(payload.get("campaignPackageHash", ""))
+		if saved_package_hash != expected_package_hash:
+			return _error(
+				"Classic save belongs to a different build of this campaign"
+			)
+	var script_versions: Variant = payload.get("scriptApiVersions")
+	if not (script_versions is Dictionary) \
+			or int(script_versions.get("scenarioScripts", 0)) != 1:
+		return _error("Scenario script save API is unavailable or incompatible")
+	var saved_script_contract: Variant = payload.get("scenarioScriptContract")
+	if not (saved_script_contract is Dictionary):
+		return _error("Scenario script save contract is missing")
+	if not (expected_script_contract as Dictionary).is_empty() \
+			and saved_script_contract != expected_script_contract:
+		return _error(
+			"Scenario scripts or their state schemas changed; start a new playthrough"
+		)
 	if not (payload.get("runtimeState") is Dictionary):
 		return _error("Classic save data has no runtime state")
 	if not (payload.get("portState") is Dictionary):
@@ -492,6 +522,38 @@ func _campaign_id() -> String:
 	if install == null or install.bundle == null:
 		return ""
 	return str(install.bundle.manifest.get("id", ""))
+
+
+func _campaign_package_hash() -> String:
+	if install == null or install.bundle == null:
+		return ""
+	return install.bundle.package_hash()
+
+
+func _scenario_script_contract() -> Dictionary:
+	if install == null or install.bundle == null:
+		return {}
+	var document: Variant = install.bundle.documents.get("remakeScripts", {})
+	if not (document is Dictionary):
+		return {}
+	var scripts: Array[Dictionary] = []
+	for script_value: Variant in document.get("scripts", []):
+		if not (script_value is Dictionary):
+			continue
+		scripts.append({
+			"id": str(script_value.get("id", "")),
+			"tier": str(script_value.get("tier", "")),
+			"apiVersion": int(script_value.get("apiVersion", 0)),
+			"contentHash": str(script_value.get("contentHash", "")),
+			"stateSchemaHash": str(script_value.get("stateSchemaHash", "")),
+		})
+	scripts.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		return left["id"] < right["id"]
+	)
+	return {
+		"capabilityCatalogHash": str(document.get("capabilityCatalogHash", "")),
+		"scripts": scripts,
+	}
 
 
 static func _error(message: String) -> Dictionary:

@@ -1126,7 +1126,7 @@ func start_current_classic_campaign(
 		restore_result = {
 			"status": "error",
 			"message": (
-				"This save predates scenario runtime v2 and cannot be upgraded; "
+				"This save predates the current scenario runtime and cannot be upgraded; "
 				+ "start a new playthrough"
 			),
 		}
@@ -1218,7 +1218,7 @@ func set_current_campaign(
 ) :
 	if not is_classic_campaign(campname):
 		push_error(
-			"Campaign '%s' does not use the scenario v2 contract and cannot be started" % campname
+			"Campaign '%s' does not use the current scenario contract and cannot be started" % campname
 		)
 		currentcampaign = ""
 		currentcampaign_onload_script = null
@@ -1257,7 +1257,7 @@ func get_campaign_selection_rules(campaign_name: String) -> Variant:
 		"readinessState": "Unsupported",
 		"readinessSummary": (
 			"Legacy native campaign scripts are no longer executable. "
-			+ "Export this campaign as a realmz-remake-scenario v2 package."
+			+ "Export this campaign as a realmz-remake-scenario v3 package."
 		),
 	}
 

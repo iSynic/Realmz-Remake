@@ -7,13 +7,16 @@ const SharedAssetStoreScript = preload(
 const ExtensionRegistryScript = preload(
 	"res://scripts/scenario_runtime/scenario_extension_registry.gd"
 )
+const ScenarioScriptRuntimeScript = preload(
+	"res://scripts/scenario_runtime/scenario_script_runtime.gd"
+)
 
 const FORMAT := "realmz-remake-scenario"
-const FORMAT_VERSION := 2
+const FORMAT_VERSION := 3
 const CAMPAIGN_KIND := "classic-compiled"
 const COMPATIBILITY_PROFILE := "realmz-7.1"
-const DOCUMENT_SCHEMA_VERSION := 1
-const RUNTIME_DOCUMENT_SCHEMA_VERSION := 1
+const DOCUMENT_SCHEMA_VERSION := 2
+const RUNTIME_DOCUMENT_SCHEMA_VERSION := 2
 const RULE_TABLE_SOURCES := ["shared", "scenario-local", "unresolved"]
 const REQUIRED_DOCUMENTS := [
 	"scenario",
@@ -23,9 +26,10 @@ const REQUIRED_DOCUMENTS := [
 	"content",
 	"rules",
 	"assets",
-	"evidence",
 	"runtime",
+	"remakeScripts",
 ]
+const REQUIRED_MANIFEST_FILES := REQUIRED_DOCUMENTS + ["evidence"]
 
 var root_directory := ""
 var manifest: Dictionary = {}
@@ -59,6 +63,8 @@ var pictures_by_id: Dictionary = {}
 var sounds_by_id: Dictionary = {}
 var dispatcher_noop_keys: Dictionary = {}
 var extension_registry: ScenarioExtensionRegistry
+var _evidence_records_by_key: Dictionary = {}
+var _evidence_loaded := false
 
 
 func load_from_directory(directory: String) -> bool:
@@ -69,6 +75,8 @@ func load_from_directory(directory: String) -> bool:
 		return _fail("campaign.json must contain a JSON object")
 	manifest = manifest_value
 	if not _validate_manifest_contract():
+		return false
+	if not _validate_integrity():
 		return false
 	extension_registry = ExtensionRegistryScript.new()
 	if not extension_registry.load_builtin_catalog():
@@ -90,12 +98,6 @@ func load_from_directory(directory: String) -> bool:
 
 
 func _validate_manifest_contract() -> bool:
-	if str(manifest.get("format", "")) == "realmz-remake-classic-campaign" \
-			or int(manifest.get("formatVersion", 0)) == 1:
-		return _fail(
-			"This is a bundle v1 campaign. Re-export it with Providence for "
-			+ "Realmz Remake scenario format v2."
-		)
 	if str(manifest.get("format", "")) != FORMAT:
 		return _fail(
 			"Unsupported scenario campaign format: %s" % manifest.get("format", "<missing>")
@@ -131,7 +133,7 @@ func _validate_manifest_contract() -> bool:
 	if not (file_map is Dictionary):
 		return _fail("campaign.json files must be a JSON object")
 	var seen_paths: Dictionary = {}
-	for document_name: String in REQUIRED_DOCUMENTS:
+	for document_name: String in REQUIRED_MANIFEST_FILES:
 		if not file_map.has(document_name):
 			return _fail("campaign.json is missing the '%s' document path" % document_name)
 		var path_value: Variant = file_map[document_name]
@@ -156,6 +158,143 @@ func _validate_manifest_contract() -> bool:
 	if not shared_asset_error.is_empty():
 		return _fail(shared_asset_error)
 	return true
+
+
+func _validate_integrity() -> bool:
+	var integrity: Variant = manifest.get("integrity")
+	if not (integrity is Dictionary):
+		return _fail("campaign.json integrity must be a JSON object")
+	if str(integrity.get("algorithm", "")) != "sha256":
+		return _fail("campaign.json integrity.algorithm must be sha256")
+	var entries: Variant = integrity.get("files")
+	if not (entries is Dictionary) or entries.is_empty():
+		return _fail("campaign.json integrity.files must describe the package payload")
+	for required_name: String in REQUIRED_MANIFEST_FILES:
+		var required_path := str(manifest["files"].get(required_name, ""))
+		if not entries.has(required_path):
+			return _fail(
+				"campaign.json integrity.files is missing '%s'" % required_path
+			)
+	var paths: Array = entries.keys()
+	paths.sort()
+	for path_value: Variant in paths:
+		var relative_path := str(path_value)
+		if not _is_safe_campaign_path(relative_path):
+			return _fail("Bundle integrity path is unsafe: %s" % relative_path)
+		var descriptor: Variant = entries[relative_path]
+		if not (descriptor is Dictionary):
+			return _fail("Bundle integrity entry '%s' must be an object" % relative_path)
+		var expected_bytes: Variant = descriptor.get("bytes")
+		var expected_sha := str(descriptor.get("sha256", "")).to_lower()
+		if not _is_nonnegative_integer(expected_bytes) or expected_sha.length() != 64:
+			return _fail("Bundle integrity entry '%s' is invalid" % relative_path)
+		var absolute_path := root_directory.path_join(relative_path)
+		if not FileAccess.file_exists(absolute_path):
+			return _fail("Missing campaign payload: %s" % relative_path)
+		var payload := FileAccess.get_file_as_bytes(absolute_path)
+		if payload.size() != int(expected_bytes):
+			return _fail("Campaign payload size mismatch: %s" % relative_path)
+		var actual_sha := _sha256_hex(payload)
+		if actual_sha != expected_sha:
+			return _fail("Campaign payload hash mismatch: %s" % relative_path)
+	var manifest_without_hash: Dictionary = manifest.duplicate(true)
+	manifest_without_hash["integrity"].erase("packageHash")
+	var canonical_manifest := JSON.stringify(_canonical_value(manifest_without_hash))
+	var actual_package_hash := _sha256_hex(canonical_manifest.to_utf8_buffer())
+	if actual_package_hash != str(integrity.get("packageHash", "")).to_lower():
+		return _fail(
+			"Campaign package hash does not match its canonical manifest "
+			+ "(expected %s, calculated %s)" % [
+				str(integrity.get("packageHash", "")).to_lower(),
+				actual_package_hash,
+			]
+		)
+	return true
+
+
+func package_hash() -> String:
+	var integrity: Variant = manifest.get("integrity", {})
+	return str(integrity.get("packageHash", "")) if integrity is Dictionary else ""
+
+
+static func _canonical_value(value: Variant) -> Variant:
+	if value is float and value == floor(value):
+		return int(value)
+	if value is Array:
+		var array: Array = []
+		for child: Variant in value:
+			array.append(_canonical_value(child))
+		return array
+	if value is Dictionary:
+		var result: Dictionary = {}
+		var keys: Array = value.keys()
+		keys.sort()
+		for key: Variant in keys:
+			result[str(key)] = _canonical_value(value[key])
+		return result
+	return value
+
+
+func declared_script_sources() -> Dictionary:
+	var result: Dictionary = {}
+	var script_document: Variant = documents.get("remakeScripts", {})
+	if not (script_document is Dictionary):
+		return result
+	for script_value: Variant in script_document.get("scripts", []):
+		if not (script_value is Dictionary):
+			continue
+		var source_path := str(script_value.get("sourcePath", ""))
+		if not source_path.is_empty():
+			result[source_path] = str(script_value.get("tier", ""))
+	return result
+
+
+func evidence_record(record_kind: String, stable_id: Variant) -> Dictionary:
+	_load_evidence_for_debug()
+	var record: Variant = _evidence_records_by_key.get(
+		_evidence_record_key(record_kind, stable_id),
+		{}
+	)
+	return record if record is Dictionary else {}
+
+
+func _load_evidence_for_debug() -> void:
+	if _evidence_loaded:
+		return
+	_evidence_loaded = true
+	if root_directory.is_empty():
+		return
+	var file_map: Variant = manifest.get("files", {})
+	if not (file_map is Dictionary):
+		return
+	var evidence_path := root_directory.path_join(str(file_map.get("evidence", "")))
+	if not FileAccess.file_exists(evidence_path):
+		return
+	var evidence_value: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(evidence_path)
+	)
+	if not (evidence_value is Dictionary):
+		return
+	var catalog: Variant = evidence_value.get("recordCatalog", {})
+	if not (catalog is Dictionary) or not (catalog.get("records") is Array):
+		return
+	for record_value: Variant in catalog["records"]:
+		if not (record_value is Dictionary):
+			continue
+		var record_kind := str(record_value.get("kind", ""))
+		var stable_id: Variant = record_value.get("id")
+		if record_kind.is_empty() or stable_id == null:
+			continue
+		_evidence_records_by_key[
+			_evidence_record_key(record_kind, stable_id)
+		] = record_value
+
+
+func _evidence_record_key(record_kind: String, stable_id: Variant) -> String:
+	var canonical_id := str(stable_id)
+	if stable_id is float and is_equal_approx(stable_id, float(int(stable_id))):
+		canonical_id = str(int(stable_id))
+	return "%s:%s" % [record_kind, canonical_id]
 
 
 func _validate_document_contract() -> bool:
@@ -183,6 +322,15 @@ func _validate_document_contract() -> bool:
 		return false
 	if not _validate_runtime_document():
 		return false
+	var script_validation: Dictionary = ScenarioScriptRuntimeScript.validate_document(
+		documents.get("remakeScripts"),
+		self
+	)
+	if not bool(script_validation.get("valid", false)):
+		return _fail(str(script_validation.get(
+			"message",
+			"Remake scenario scripts are invalid"
+		)))
 	if not _validate_rule_table_selection():
 		return false
 	for specification: Array in [
@@ -284,10 +432,9 @@ func _validate_document_contract() -> bool:
 	):
 		return false
 
-	var semantic_decoding: Variant = documents["evidence"].get("semanticDecoding", {})
-	if semantic_decoding is Dictionary and semantic_decoding.has("dispatcherNoops"):
-		if not _validate_dispatcher_noops(semantic_decoding):
-			return false
+	var dispatcher_noops: Variant = documents["scripts"].get("dispatcherNoops", [])
+	if not _validate_dispatcher_noops({"dispatcherNoops": dispatcher_noops}):
+		return false
 	return true
 
 
@@ -559,10 +706,8 @@ func _validate_trigger_actions() -> bool:
 	for trigger_index: int in range(triggers.size()):
 		var trigger: Dictionary = triggers[trigger_index]
 		var trigger_context := "scripts.triggers[%d]" % trigger_index
-		if str(trigger.get("source", "")).strip_edges().is_empty():
-			return _fail("%s is missing source record context" % trigger_context)
-		if not _is_nonnegative_integer(trigger.get("recordIndex")):
-			return _fail("%s.recordIndex must be a non-negative integer" % trigger_context)
+		if str(trigger.get("id", "")).strip_edges().is_empty():
+			return _fail("%s is missing stable record identity" % trigger_context)
 		if trigger.has("callable") and not (trigger["callable"] is bool):
 			return _fail("%s.callable must be a boolean" % trigger_context)
 		if not _validate_action_array(trigger.get("actions"), trigger_context, 7):
@@ -848,17 +993,16 @@ func _validate_nested_record_collection(
 func _validate_dispatcher_noops(semantic_decoding: Dictionary) -> bool:
 	var rows: Variant = semantic_decoding.get("dispatcherNoops")
 	if not (rows is Array):
-		return _fail("evidence.semanticDecoding.dispatcherNoops must be a JSON array")
+		return _fail("scripts.dispatcherNoops must be a JSON array")
 	for index: int in range(rows.size()):
 		var row: Variant = rows[index]
-		var context := "evidence.semanticDecoding.dispatcherNoops[%d]" % index
+		var context := "scripts.dispatcherNoops[%d]" % index
 		if not (row is Dictionary):
 			return _fail("%s must be a JSON object" % context)
-		if str(row.get("source", "")).strip_edges().is_empty():
-			return _fail("%s is missing source record context" % context)
-		for field_name: String in ["recordIndex", "slot"]:
-			if not _is_nonnegative_integer(row.get(field_name)):
-				return _fail("%s.%s must be a non-negative integer" % [context, field_name])
+		if str(row.get("triggerId", "")).strip_edges().is_empty():
+			return _fail("%s is missing trigger identity" % context)
+		if not _is_nonnegative_integer(row.get("slot")):
+			return _fail("%s.slot must be a non-negative integer" % context)
 		if not _is_integer(row.get("rawCode")):
 			return _fail("%s.rawCode must be an integer" % context)
 	return true
@@ -1192,8 +1336,7 @@ func get_start() -> Dictionary:
 
 func is_dispatcher_noop(trigger: Dictionary, action: Dictionary) -> bool:
 	return dispatcher_noop_keys.has(_dispatcher_noop_key(
-		str(trigger.get("source", "")),
-		int(trigger.get("recordIndex", -1)),
+		str(trigger.get("id", "")),
 		int(action.get("slot", -1)),
 		int(action.get("rawCode", 0))
 	))
@@ -1230,6 +1373,8 @@ func _reset() -> void:
 	pictures_by_id.clear()
 	sounds_by_id.clear()
 	dispatcher_noop_keys.clear()
+	_evidence_records_by_key.clear()
+	_evidence_loaded = false
 
 
 func _build_indexes() -> void:
@@ -1237,11 +1382,12 @@ func _build_indexes() -> void:
 	for trigger: Variant in _array_value(script_document, "triggers"):
 		if not (trigger is Dictionary):
 			continue
+		_hydrate_trigger_identity(trigger)
 		var trigger_id := str(trigger.get("id", ""))
 		if not trigger_id.is_empty():
 			triggers_by_id[trigger_id] = trigger
-		if str(trigger.get("source", "")) == "Data ED3":
-			extra_action_points_by_id[int(trigger.get("recordIndex", -1))] = trigger
+		if trigger.has("macroId"):
+			extra_action_points_by_id[int(trigger.get("macroId", -1))] = trigger
 		if not bool(trigger.get("active", false)):
 			continue
 		var coordinate: Variant = trigger.get("coordinate")
@@ -1352,17 +1498,41 @@ func _build_indexes() -> void:
 			if sound is Dictionary:
 				sounds_by_id[int(sound.get("resourceId", -1))] = sound
 
-	var evidence_document: Dictionary = documents["evidence"]
-	var semantic_decoding: Variant = evidence_document.get("semanticDecoding", {})
-	if semantic_decoding is Dictionary:
-		for row: Variant in _array_value(semantic_decoding, "dispatcherNoops"):
-			if row is Dictionary:
-				dispatcher_noop_keys[_dispatcher_noop_key(
-					str(row.get("source", "")),
-					int(row.get("recordIndex", -1)),
-					int(row.get("slot", -1)),
-					int(row.get("rawCode", 0))
-				)] = true
+	for row: Variant in _array_value(script_document, "dispatcherNoops"):
+		if row is Dictionary:
+			dispatcher_noop_keys[_dispatcher_noop_key(
+				str(row.get("triggerId", "")),
+				int(row.get("slot", -1)),
+				int(row.get("rawCode", 0))
+			)] = true
+
+
+func _hydrate_trigger_identity(trigger: Dictionary) -> void:
+	if trigger.has("source") and trigger.has("recordIndex"):
+		return
+	var trigger_id := str(trigger.get("id", ""))
+	var parts := trigger_id.split(":")
+	if parts.size() < 3:
+		return
+	if parts[0] == "Data ED3" and parts.size() == 3 and parts[1] == "macro":
+		if parts[2].is_valid_int():
+			trigger["source"] = "Data ED3"
+			trigger["recordIndex"] = int(parts[2])
+			if not trigger.has("macroId"):
+				trigger["macroId"] = int(parts[2])
+		return
+	if parts.size() == 4 \
+			and parts[0] in ["land", "dungeon"] \
+			and parts[1].is_valid_int() \
+			and parts[2] == "ap" \
+			and parts[3].is_valid_int():
+		trigger["source"] = "Data DD" if parts[0] == "land" else "Data DDD"
+		trigger["recordIndex"] = int(parts[3])
+		return
+	if parts[0] not in ["Data DD", "Data DDD"] or not parts[-1].is_valid_int():
+		return
+	trigger["source"] = parts[0]
+	trigger["recordIndex"] = int(parts[-1])
 
 
 func _read_json(path: String) -> Variant:
@@ -1381,6 +1551,15 @@ func _read_json(path: String) -> Variant:
 	return parser.data
 
 
+func _sha256_hex(bytes: PackedByteArray) -> String:
+	var context := HashingContext.new()
+	if context.start(HashingContext.HASH_SHA256) != OK:
+		return ""
+	if context.update(bytes) != OK:
+		return ""
+	return context.finish().hex_encode()
+
+
 func _array_value(document: Dictionary, key: String) -> Array:
 	var value: Variant = document.get(key, [])
 	return value if value is Array else []
@@ -1390,8 +1569,8 @@ func _coordinate_key(level_type: String, level_index: int, x: int, y: int) -> St
 	return "%s:%d:%d:%d" % [level_type, level_index, x, y]
 
 
-func _dispatcher_noop_key(source: String, record_index: int, slot: int, raw_code: int) -> String:
-	return "%s:%d:%d:%d" % [source, record_index, slot, raw_code]
+func _dispatcher_noop_key(trigger_id: String, slot: int, raw_code: int) -> String:
+	return "%s:%d:%d" % [trigger_id, slot, raw_code]
 
 
 func _fail(message: String) -> bool:
