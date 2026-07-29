@@ -1,17 +1,1 @@
-{
-  "schemaVersion": 1,
-  "recommendedGameplayProfile": "core.classic",
-  "requiredExtensions": [],
-  "bindings": {
-    "spells": {},
-    "items": {},
-    "encounters": {},
-    "monsterAi": {},
-    "lifecycle": {}
-  },
-  "targetSupport": {
-    "realmzRemake": true,
-    "nativeRealmz": true,
-    "remakeOnlyReasons": []
-  }
-}
+{"authoringTarget":"classic-compatible","bindings":{"encounters":{},"items":{},"lifecycle":{},"monsterAi":{},"spells":{}},"recommendedGameplayProfile":"core.classic","requiredExtensions":[],"schemaVersion":2,"scriptExecution":{"apiVersion":1,"requiresApproval":false,"requiresSandbox":false,"scriptCount":0,"tiers":[]},"targetSupport":{"nativeRealmz":true,"realmzRemake":true,"remakeOnlyReasons":[]}}
