@@ -32,6 +32,11 @@ runs:
           -LiteralPath "tools/scenario-sandbox-host/target/release/scenario-sandbox-host.exe" `
           -Destination "${{ inputs.project-dir }}/${{ inputs.build-dir }}/${{ inputs.platform-name }}/scenario-sandbox-host.exe"
 
+    - name: Verify Windows scenario sandbox isolation
+      shell: pwsh
+      run: |
+        & tools/scenario-sandbox-host/run-security-acceptance.ps1
+
     - name: Compress Build Output
       id: compress
       shell: pwsh

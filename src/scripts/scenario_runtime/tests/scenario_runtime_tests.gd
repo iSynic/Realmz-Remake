@@ -60,6 +60,9 @@ const RuleModifierPipelineScript = preload(
 const PreviewHostScript = preload(
 	"res://scripts/scenario_runtime/preview/scenario_preview_host.gd"
 )
+const SandboxClientScript = preload(
+	"res://scripts/scenario_runtime/scenario_sandbox_client.gd"
+)
 const EnginePluginRegistryScript = preload(
 	"res://scripts/scenario_runtime/scenario_engine_plugin_registry.gd"
 )
@@ -93,6 +96,7 @@ func _ready() -> void:
 	_test_engine_plugin_store()
 	_test_engine_plugin_settings_ui()
 	_test_preview_wire_json()
+	_test_sandbox_helper_discovery()
 	await _test_gameplay_rules()
 	_test_handler_registry()
 	_test_command_ports()
@@ -133,6 +137,35 @@ func _test_preview_wire_json() -> void:
 		decoded is Dictionary
 			and decoded.get("persistentValues", {}).get(state_key) == 7,
 		"preview wire JSON preserves internal state keys"
+	)
+
+
+func _test_sandbox_helper_discovery() -> void:
+	var packaged := SandboxClientScript.helper_candidates(
+		"C:/Realmz/Realmz.exe",
+		"F:/realmz-remake/src",
+		false
+	)
+	_expect(
+		packaged == PackedStringArray([
+			"C:/Realmz/scenario-sandbox-host.exe",
+		]),
+		"packaged sandbox helper stays beside the game executable"
+	)
+	var checkout := SandboxClientScript.helper_candidates(
+		"C:/Godot/Godot.exe",
+		"F:/realmz-remake/src/",
+		true
+	)
+	_expect(
+		checkout == PackedStringArray([
+			"C:/Godot/scenario-sandbox-host.exe",
+			"F:/realmz-remake/tools/scenario-sandbox-host/target/debug/"
+				+ "scenario-sandbox-host.exe",
+			"F:/realmz-remake/tools/scenario-sandbox-host/target/release/"
+				+ "scenario-sandbox-host.exe",
+		]),
+		"debug previews discover checkout-built sandbox helpers"
 	)
 
 

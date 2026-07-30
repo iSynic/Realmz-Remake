@@ -145,6 +145,11 @@ load native libraries or PCKs, cannot access the main process, and sees only
 its declared source plus a private scratch directory. Memory, CPU, process
 count, wall time, state depth, message size, and request rate are limited.
 
+Packaged Windows builds place `scenario-sandbox-host.exe` beside the game
+executable. Debug runs from a Remake checkout also discover a host built under
+`tools/scenario-sandbox-host/target/debug` or `target/release`, which keeps
+managed Providence preview on the same isolation path as ordinary play.
+
 Every yielded operation is checked against the source manifest and capability
 catalog before it reaches a port. If isolation is unavailable, readiness
 fails. Sandboxed source never falls back to in-process execution.

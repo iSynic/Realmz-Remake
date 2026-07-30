@@ -11,9 +11,32 @@ var last_error := ""
 
 
 static func helper_path() -> String:
-	return OS.get_executable_path().get_base_dir().path_join(
-		"scenario-sandbox-host.exe"
+	var candidates := helper_candidates(
+		OS.get_executable_path(),
+		ProjectSettings.globalize_path("res://"),
+		OS.is_debug_build()
 	)
+	for candidate: String in candidates:
+		if FileAccess.file_exists(candidate):
+			return candidate
+	return candidates[0] if not candidates.is_empty() else ""
+
+
+static func helper_candidates(
+	executable_path: String,
+	project_root: String,
+	include_checkout_builds: bool
+) -> PackedStringArray:
+	var result := PackedStringArray([
+		executable_path.get_base_dir().path_join("scenario-sandbox-host.exe"),
+	])
+	if include_checkout_builds and not project_root.is_empty():
+		var host_root := project_root.path_join(
+			"../tools/scenario-sandbox-host/target"
+		).simplify_path()
+		result.append(host_root.path_join("debug/scenario-sandbox-host.exe"))
+		result.append(host_root.path_join("release/scenario-sandbox-host.exe"))
+	return result
 
 
 static func feasibility() -> Dictionary:
