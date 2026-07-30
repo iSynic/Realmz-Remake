@@ -36,6 +36,11 @@ var _classic_continuation_router: ClassicContinuationRouter
 var _classic_mode := false
 var classic_execution_state: RefCounted
 var scenario_script_runtime: ScenarioScriptRuntime
+var _classic_attachment_queue: Array = []
+var _classic_deferred_instruction: Dictionary = {}
+var _classic_deferred_result: Dictionary = {}
+var _classic_executing_anchor: Dictionary = {}
+var _classic_pending_after_anchor: Dictionary = {}
 
 var runtime_state: ClassicRuntimeState:
 	get:
@@ -165,8 +170,9 @@ func _configure_classic_compatibility(
 	_classic_continuation_router = ClassicContinuationRouterScript.new()
 	_classic_continuation_router.configure(_classic_executor)
 	_classic_executor.set_scenario_run_delegate(
-		Callable(self, "_run_classic_loop")
+		Callable(self, "_resume_classic_run_loop")
 	)
+	_reset_classic_attachment_plan()
 	_sync_classic_observability()
 
 
@@ -178,6 +184,7 @@ func set_percent_roll_provider(provider: Callable) -> void:
 func reset_execution() -> void:
 	if _classic_executor != null:
 		_classic_executor.reset_execution()
+		_reset_classic_attachment_plan()
 		_sync_classic_observability()
 		return
 	reset()
@@ -188,6 +195,7 @@ func begin_trigger(trigger_id: String, start_slot := 0, context := {}) -> bool:
 		var started := start(trigger_id, start_slot, context)
 		return str(started.get("status", "")) == "ok"
 	var result: bool = _classic_executor.begin_trigger(trigger_id, start_slot, context)
+	_reset_classic_attachment_plan()
 	_sync_classic_observability()
 	return result
 
@@ -218,7 +226,7 @@ func _run_classic_loop() -> Dictionary:
 			"Scenario VM is waiting for command '%s'" % pending_command.command_id
 		)
 	for _step: int in range(MAX_INTERNAL_STEPS):
-		var prepared: Dictionary = _classic_executor.take_next_instruction()
+		var prepared: Dictionary = _take_next_classic_plan_instruction()
 		if str(prepared.get("status", "")) != "instruction":
 			return prepared
 		var instruction_value: Variant = prepared.get("instruction")
@@ -236,15 +244,12 @@ func _run_classic_loop() -> Dictionary:
 			return _classic_executor.unsupported_instruction_result(
 				instruction_value
 			)
-		var action_identity := _classic_action_identity()
+		var action_identity := _classic_action_identity(instruction)
 		if str(instruction.get("kind", "classic")) == "semantic":
-			action_identity["kind"] = "semantic"
-			action_identity["operation"] = str(
-				instruction.get("operation", "")
+			action_identity = _classic_semantic_action_identity(
+				instruction,
+				action_identity
 			)
-			action_identity.erase("rawCode")
-			action_identity.erase("code")
-			action_identity.erase("id")
 		var step_result: ScenarioStepResult
 		if str(instruction.get("kind", "classic")) == "semantic":
 			step_result = handler.execute(instruction, self)
@@ -269,13 +274,26 @@ func _run_classic_loop() -> Dictionary:
 				% handler.handler_id()
 			)
 		if str(classic_result.get("status", "")) == "continue":
+			_queue_classic_attachments("after-slot", _classic_executing_anchor)
+			_classic_executing_anchor.clear()
 			continue
+		if str(classic_result.get("status", "")) == "yield":
+			_classic_pending_after_anchor = \
+				_classic_executing_anchor.duplicate(true)
+		else:
+			_classic_pending_after_anchor.clear()
+		_classic_executing_anchor.clear()
 		classic_result["_scenarioHandlerId"] = handler.handler_id()
 		classic_result["_scenarioActionIdentity"] = action_identity
 		return classic_result
 	return _classic_error(
 		"Scenario VM exceeded %d internal Classic steps" % MAX_INTERNAL_STEPS
 	)
+
+
+func _resume_classic_run_loop() -> Dictionary:
+	_activate_pending_after_attachments()
+	return _run_classic_loop()
 
 
 func execute_classic_instruction(
@@ -424,6 +442,15 @@ func resume_command(response: Dictionary) -> Dictionary:
 			"Classic scenario handler '%s' did not return continuation state"
 			% saved_pending.handler_id
 		)
+	if str(classic_result.get("status", "")) == "continue":
+		_activate_pending_after_attachments()
+		return _classic_result(_run_classic_loop())
+	if str(classic_result.get("status", "")) == "completed" \
+			and not _classic_pending_after_anchor.is_empty():
+		_activate_pending_after_attachments()
+		_classic_deferred_result = classic_result.duplicate(true)
+		return _classic_result(_run_classic_loop())
+	_classic_pending_after_anchor.clear()
 	return _classic_result(classic_result)
 
 
@@ -453,6 +480,13 @@ func make_execution_snapshot() -> Dictionary:
 		result["snapshot"]["scenarioPendingCommand"] = (
 			pending_command.to_dictionary() if pending_command != null else null
 		)
+		result["snapshot"]["classicAttachmentState"] = {
+			"queue": _classic_attachment_queue.duplicate(true),
+			"deferredInstruction": _classic_deferred_instruction.duplicate(true),
+			"deferredResult": _classic_deferred_result.duplicate(true),
+			"executingAnchor": _classic_executing_anchor.duplicate(true),
+			"pendingAfterAnchor": _classic_pending_after_anchor.duplicate(true),
+		}
 		result["snapshot"]["scenarioScriptRuntime"] = (
 			scenario_script_runtime.snapshot()
 			if scenario_script_runtime != null
@@ -477,6 +511,30 @@ func restore_execution_snapshot(saved: Variant) -> Dictionary:
 		pending_command = ScenarioPendingCommand.from_dictionary(
 			saved.get("scenarioPendingCommand")
 		) if saved.get("scenarioPendingCommand") is Dictionary else null
+		var attachment_state: Dictionary = saved.get(
+			"classicAttachmentState",
+			{}
+		)
+		_classic_attachment_queue = attachment_state.get(
+			"queue",
+			[]
+		).duplicate(true)
+		_classic_deferred_instruction = attachment_state.get(
+			"deferredInstruction",
+			{}
+		).duplicate(true)
+		_classic_deferred_result = attachment_state.get(
+			"deferredResult",
+			{}
+		).duplicate(true)
+		_classic_executing_anchor = attachment_state.get(
+			"executingAnchor",
+			{}
+		).duplicate(true)
+		_classic_pending_after_anchor = attachment_state.get(
+			"pendingAfterAnchor",
+			{}
+		).duplicate(true)
 		if scenario_script_runtime != null:
 			var script_restore := scenario_script_runtime.restore(
 				saved.get("scenarioScriptRuntime", {})
@@ -554,6 +612,30 @@ func matching_scenario_behavior_bindings(
 
 
 func current_trigger_identity() -> Dictionary:
+	if _classic_executor != null:
+		var anchor := _classic_executing_anchor.duplicate(true)
+		if anchor.is_empty():
+			anchor = _classic_pending_after_anchor.duplicate(true)
+		if anchor.is_empty():
+			anchor = {
+				"triggerId": str(_classic_executor.current_trigger.get("id", "")),
+				"actionIndex": maxi(
+					0,
+					int(_classic_executor.current_action_index) - 1
+				),
+				"slot": -1,
+			}
+		return {
+			"triggerId": str(anchor.get("triggerId", "")),
+			"actionIndex": int(anchor.get("actionIndex", 0)),
+			"slot": int(anchor.get("slot", -1)),
+			"encounterOrigin": (
+				_classic_executor.encounter_origins[-1].duplicate(true)
+				if not _classic_executor.encounter_origins.is_empty()
+				else {}
+			),
+			"executionContext": _classic_executor.execution_context.duplicate(true),
+		}
 	return {
 		"triggerId": current_trigger_id,
 		"actionIndex": current_action_index,
@@ -581,6 +663,17 @@ static func validate_execution_snapshot(saved: Variant) -> Dictionary:
 			"status": "error",
 			"message": "Scenario execution snapshot has no script runtime state",
 		}
+	var attachment_validation := _validate_classic_attachment_snapshot(
+		saved.get("classicAttachmentState")
+	)
+	if not bool(attachment_validation.get("valid", false)):
+		return {
+			"status": "error",
+			"message": attachment_validation.get(
+				"message",
+				"Scenario execution snapshot has invalid attachment state"
+			),
+		}
 	var script_validation := ScenarioScriptRuntimeScript.validate_snapshot(
 		saved["scenarioScriptRuntime"]
 	)
@@ -593,6 +686,208 @@ static func validate_execution_snapshot(saved: Variant) -> Dictionary:
 			),
 		}
 	return {"status": "ok"}
+
+
+func _take_next_classic_plan_instruction() -> Dictionary:
+	if not _classic_attachment_queue.is_empty():
+		var injected: Dictionary = _classic_attachment_queue.pop_front()
+		var attachment: Dictionary = injected.get(
+			"parameters",
+			{}
+		).get("attachment", {})
+		_classic_executor.trace.append({
+			"event": "behavior-attachment",
+			"triggerId": str(attachment.get("recordId", "")),
+			"slot": int(attachment.get("slot", -1)),
+			"hook": str(attachment.get("hook", "")),
+			"attachmentId": str(attachment.get("id", "")),
+			"behaviorId": str(injected.get(
+				"parameters",
+				{}
+			).get("behaviorId", "")),
+		})
+		return {
+			"status": "instruction",
+			"instruction": injected,
+		}
+	if not _classic_deferred_instruction.is_empty():
+		var deferred := _classic_deferred_instruction.duplicate(true)
+		_classic_deferred_instruction.clear()
+		_classic_executing_anchor = deferred.get(
+			"anchor",
+			{}
+		).duplicate(true)
+		var trace_entry: Variant = deferred.get("traceEntry")
+		if trace_entry is Dictionary:
+			_classic_executor.trace.append(trace_entry.duplicate(true))
+		return {
+			"status": "instruction",
+			"instruction": deferred.get("instruction", {}).duplicate(true),
+		}
+	if not _classic_deferred_result.is_empty():
+		var deferred_result := _classic_deferred_result.duplicate(true)
+		_classic_deferred_result.clear()
+		return deferred_result
+	var prepared: Dictionary = _classic_executor.take_next_instruction()
+	if str(prepared.get("status", "")) != "instruction":
+		return prepared
+	var instruction_value: Variant = prepared.get("instruction")
+	if not (instruction_value is Dictionary):
+		return prepared
+	var instruction: Dictionary = instruction_value
+	var anchor := _classic_instruction_anchor(instruction)
+	var before := _classic_attachment_instructions("before-slot", anchor)
+	if not before.is_empty():
+		var trace_entry: Dictionary = {}
+		if not _classic_executor.trace.is_empty() \
+				and _classic_executor.trace[-1] is Dictionary:
+			trace_entry = _classic_executor.trace.pop_back()
+		_classic_deferred_instruction = {
+			"instruction": instruction.duplicate(true),
+			"anchor": anchor,
+			"traceEntry": trace_entry,
+		}
+		_classic_attachment_queue.append_array(before)
+		return _take_next_classic_plan_instruction()
+	_classic_executing_anchor = anchor
+	return prepared
+
+
+func _classic_instruction_anchor(instruction: Dictionary) -> Dictionary:
+	return {
+		"triggerId": str(_classic_executor.current_trigger.get("id", "")),
+		"actionIndex": maxi(
+			0,
+			int(_classic_executor.current_action_index) - 1
+		),
+		"slot": int(instruction.get("slot", -1)),
+	}
+
+
+func _queue_classic_attachments(hook: String, anchor: Dictionary) -> void:
+	if anchor.is_empty():
+		return
+	_classic_attachment_queue.append_array(
+		_classic_attachment_instructions(hook, anchor)
+	)
+
+
+func _activate_pending_after_attachments() -> void:
+	if _classic_pending_after_anchor.is_empty():
+		return
+	_queue_classic_attachments(
+		"after-slot",
+		_classic_pending_after_anchor
+	)
+	_classic_pending_after_anchor.clear()
+
+
+func _classic_attachment_instructions(
+	hook: String,
+	anchor: Dictionary
+) -> Array:
+	if scenario_script_runtime == null:
+		return []
+	var trigger_id := str(anchor.get("triggerId", ""))
+	var slot := int(anchor.get("slot", -1))
+	if trigger_id.is_empty() or slot < 0:
+		return []
+	var bindings := scenario_script_runtime.matching_bindings(
+		"action",
+		hook,
+		"trigger",
+		[trigger_id],
+		slot
+	)
+	var instructions: Array = []
+	for binding_value: Variant in bindings:
+		if not (binding_value is Dictionary):
+			continue
+		var binding: Dictionary = binding_value
+		instructions.append({
+			"kind": "semantic",
+			"slot": slot,
+			"operation": "core.script.call",
+			"parameters": {
+				"behaviorId": str(binding.get("behaviorId", "")),
+				"argumentBindings": binding.get(
+					"arguments",
+					{}
+				).duplicate(true),
+				"attachment": {
+					"id": str(binding.get("id", "")),
+					"role": "action",
+					"hook": hook,
+					"targetKind": "trigger",
+					"recordId": trigger_id,
+					"slot": slot,
+					"priority": int(binding.get("priority", 0)),
+				},
+			},
+		})
+	return instructions
+
+
+func _classic_semantic_action_identity(
+	instruction: Dictionary,
+	fallback: Dictionary
+) -> Dictionary:
+	var identity := fallback.duplicate(true)
+	identity["kind"] = "semantic"
+	identity["operation"] = str(instruction.get("operation", ""))
+	identity.erase("rawCode")
+	identity.erase("code")
+	identity.erase("id")
+	var attachment: Variant = instruction.get(
+		"parameters",
+		{}
+	).get("attachment")
+	if attachment is Dictionary:
+		identity["triggerId"] = str(attachment.get(
+			"recordId",
+			identity.get("triggerId", "")
+		))
+		identity["slot"] = int(attachment.get(
+			"slot",
+			identity.get("slot", -1)
+		))
+		identity["attachmentId"] = str(attachment.get("id", ""))
+		identity["anchorHook"] = str(attachment.get("hook", ""))
+	return identity
+
+
+func _reset_classic_attachment_plan() -> void:
+	_classic_attachment_queue.clear()
+	_classic_deferred_instruction.clear()
+	_classic_deferred_result.clear()
+	_classic_executing_anchor.clear()
+	_classic_pending_after_anchor.clear()
+
+
+static func _validate_classic_attachment_snapshot(value: Variant) -> Dictionary:
+	if not (value is Dictionary):
+		return {
+			"valid": false,
+			"message": "Scenario execution snapshot has no Classic attachment state",
+		}
+	for field_name: String in [
+		"deferredInstruction",
+		"deferredResult",
+		"executingAnchor",
+		"pendingAfterAnchor",
+	]:
+		if not (value.get(field_name) is Dictionary):
+			return {
+				"valid": false,
+				"message": "Classic attachment snapshot has invalid %s"
+					% field_name,
+			}
+	if not (value.get("queue") is Array):
+		return {
+			"valid": false,
+			"message": "Classic attachment snapshot has an invalid queue",
+		}
+	return {"valid": true}
 
 
 func _classic_result(value: Variant) -> Dictionary:
@@ -705,19 +1000,31 @@ func _classic_semantic_step(
 	)
 
 
-func _classic_action_identity() -> Dictionary:
+func _classic_action_identity(instruction := {}) -> Dictionary:
 	if _classic_executor == null:
 		return {}
+	var anchor := _classic_executing_anchor.duplicate(true)
+	if anchor.is_empty():
+		anchor = _classic_pending_after_anchor.duplicate(true)
 	var executor_trace: Array = _classic_executor.trace
 	var latest: Dictionary = (
 		executor_trace[-1] if not executor_trace.is_empty() else {}
 	)
 	return {
-		"triggerId": str(latest.get("triggerId", "")),
-		"actionIndex": max(0, int(_classic_executor.current_action_index) - 1),
-		"slot": int(latest.get("slot", -1)),
+		"triggerId": str(anchor.get(
+			"triggerId",
+			latest.get("triggerId", "")
+		)),
+		"actionIndex": int(anchor.get(
+			"actionIndex",
+			max(0, int(_classic_executor.current_action_index) - 1)
+		)),
+		"slot": int(anchor.get(
+			"slot",
+			instruction.get("slot", latest.get("slot", -1))
+		)),
 		"kind": "classic",
-		"code": int(latest.get("code", 0)),
+		"code": int(instruction.get("code", latest.get("code", 0))),
 	}
 
 
@@ -750,6 +1057,7 @@ func reset() -> void:
 	trace.clear()
 	halted = true
 	last_result = {}
+	_reset_classic_attachment_plan()
 
 
 func start(trigger_id: String, action_index := 0, context := {}) -> Dictionary:

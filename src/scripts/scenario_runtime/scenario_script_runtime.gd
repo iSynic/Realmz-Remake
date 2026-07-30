@@ -349,9 +349,11 @@ func matching_bindings(
 				or str(binding.get("targetKind", "")) != target_kind \
 				or str(binding.get("recordId", "")) not in normalized_target_ids:
 			continue
-		if int(slot) >= 0 \
-				and binding.get("slot") != null \
-				and int(binding.get("slot", -1)) != int(slot):
+		if int(slot) >= 0:
+			if binding.get("slot") == null \
+					or int(binding.get("slot", -1)) != int(slot):
+				continue
+		elif binding.get("slot") != null:
 			continue
 		matches.append(binding.duplicate(true))
 	matches.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:

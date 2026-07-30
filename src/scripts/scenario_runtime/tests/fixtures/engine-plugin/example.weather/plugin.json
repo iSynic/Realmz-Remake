@@ -8,11 +8,11 @@
   "files": [
     {
       "path": "plugin.gd",
-      "size": 242,
-      "sha256": "0ddcb18a58424ff691f4915e4c472837a3fb3b9c682ebc15136cfc6aff49da65"
+      "size": 258,
+      "sha256": "ca475110314ad92b685f4d51624fcb064451d194d8dd8a05e8842d7d1c17c49d"
     }
   ],
-  "contentHash": "8a573e475203ba6b378c3bf5059e9b4ce0da01cff0d2dad53f10fe728aa8dd5f",
+  "contentHash": "3fb0283b7946f9c51eb07a4b84ec8524ca0cbcc5ba6ede3a8f638192a000a693",
   "providers": [
     {
       "id": "example.weather.forecast-provider",

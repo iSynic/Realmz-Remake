@@ -14,14 +14,22 @@
       "contextType": "ActionContext",
       "resultType": "ActionOutcome",
       "hooks": [
-        "run"
+        "run",
+        "before-ap",
+        "before-slot",
+        "after-slot",
+        "after-ap"
       ],
       "runtimeHooks": [
-        "run"
+        "run",
+        "before-ap",
+        "before-slot",
+        "after-slot",
+        "after-ap"
       ],
       "allowsYield": true,
       "summary": "Runs from an AP or XAP action position.",
-      "reference": "Action behavior may continue, halt, call, replace, or return through the central interpreter.",
+      "reference": "Action behavior may run as semantic logic or attach before or after preserved Classic AP and XAP instructions. It may continue, halt, call, replace, or return through the central interpreter.",
       "example": "func gate() -> ActionOutcome:\n    return {\"kind\": \"continue\"}"
     },
     {

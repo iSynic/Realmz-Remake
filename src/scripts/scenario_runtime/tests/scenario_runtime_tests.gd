@@ -76,6 +76,8 @@ const V1_FIXTURE := \
 	"res://scripts/scenario_runtime/tests/fixtures/v1_rejected"
 const PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE := \
 	"res://scripts/scenario_runtime/tests/fixtures/providence-scripting-acceptance"
+const CITY_OF_BYWATER_CAMPAIGN := \
+	"res://Campaigns/City of Bywater (Classic)"
 
 var failures := 0
 
@@ -105,6 +107,7 @@ func _ready() -> void:
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
 	await _test_providence_scripting_acceptance_bundle()
+	await _test_city_of_bywater_enhanced_ap()
 	_test_safe_script_quest_slice()
 	_test_guided_source_node_assignment()
 	_test_nested_safe_behavior_execution()
@@ -234,6 +237,25 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 			and scripts.get("migrations", []).size() == 1,
 		"Remake consumes the complete Providence-authored scripting contract"
 	)
+	var exported_actions: Array = bundle.documents.get(
+		"scripts",
+		{}
+	).get("triggers", [])[0].get("actions", [])
+	var exported_bindings: Array = scripts.get("bindings", [])
+	_expect(
+		exported_actions.size() >= 2
+			and exported_actions[0].get("kind") == "classic"
+			and exported_actions[0].get("code") == 1
+			and exported_actions[1].get("kind") == "classic"
+			and exported_actions[1].get("code") == 47,
+		"Providence preserves Classic source slots in an enhanced package"
+	)
+	_expect(
+		not exported_bindings.is_empty()
+			and exported_bindings[0].get("hook") == "after-slot"
+			and exported_bindings[0].get("slot") == 0,
+		"Providence exports the guided Behavior as a separate after-slot attachment"
+	)
 	var state := ClassicRuntimeStateScript.new()
 	state.configure_from_bundle(bundle)
 	var interpreter := InterpreterScript.new()
@@ -343,8 +365,43 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 	var result := interpreter.run_until_yield()
 	_expect(
 		result.get("status") == "yield"
+			and result.get("command") == "show_text",
+		"Providence-authored AP preserves and executes its Classic first slot: %s"
+			% str(result)
+	)
+	var classic_text_snapshot := interpreter.make_execution_snapshot()
+	_expect(
+		classic_text_snapshot.get("status") == "ok",
+		"Classic text before an after-slot Behavior is a save boundary"
+	)
+	var classic_restore_state := ClassicRuntimeStateScript.new()
+	classic_restore_state.configure_from_bundle(bundle)
+	var classic_restored_interpreter := InterpreterScript.new()
+	classic_restored_interpreter.configure(bundle, classic_restore_state)
+	var classic_restore_result := (
+		classic_restored_interpreter.restore_execution_snapshot(
+			classic_text_snapshot.get("snapshot", {})
+		)
+	)
+	_expect(
+		classic_restore_result.get("status") == "ok",
+		"Remake restores a Classic yield with its pending after-slot attachment"
+	)
+	interpreter = classic_restored_interpreter
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
 			and result.get("command") == "query_party_wealth",
-		"Providence-authored AP queries party wealth"
+		"Successful Classic resume enters the attached Safe Behavior: %s"
+			% str(result)
+	)
+	_expect(
+		not interpreter.trace.is_empty()
+			and interpreter.trace[0].get("event") == "behavior-attachment"
+			and interpreter.trace[0].get("attachmentId")
+				== "binding.providence.acceptance.action",
+		"The pending attachment is injected only after Classic slot 0 resumes: %s"
+			% str(interpreter.trace)
 	)
 	result = interpreter.resume_command({
 		"gold": 500,
@@ -531,6 +588,135 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 			"campaign\u001f\u001fquest_stage"
 		) == 2,
 		"Providence-authored multi-stage quest state survives every yield"
+	)
+	_expect(
+		restored_state.get_quest_value(1) == 1,
+		"Classic execution resumes at the original slot after the Behavior returns"
+	)
+	_expect(
+		not restored_interpreter.trace.is_empty()
+			and restored_interpreter.trace[0].get("triggerId")
+				== "land:0:ap:0"
+			and restored_interpreter.trace[0].get("slot") == 1,
+		"The first Classic instruction after the Behavior is original slot 1: %s"
+			% str(restored_interpreter.trace)
+	)
+
+
+func _test_city_of_bywater_enhanced_ap() -> void:
+	var city_bundle := BundleScript.new()
+	_expect(
+		city_bundle.load_from_directory(CITY_OF_BYWATER_CAMPAIGN),
+		"City of Bywater loads for the Classic Enhanced AP proof"
+	)
+	var behavior_bundle := BundleScript.new()
+	_expect(
+		behavior_bundle.load_from_directory(
+			PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE
+		),
+		"Providence behavior fixture loads for the City of Bywater proof"
+	)
+	if not city_bundle.last_error.is_empty() \
+			or not behavior_bundle.last_error.is_empty():
+		return
+	var behavior_document: Dictionary = behavior_bundle.documents.get(
+		"remakeScripts",
+		{}
+	).duplicate(true)
+	for binding_value: Variant in behavior_document.get("bindings", []):
+		if binding_value is Dictionary \
+				and binding_value.get("id") \
+					== "binding.providence.acceptance.action":
+			binding_value["recordId"] = "Data DD:0:0"
+	city_bundle.documents["remakeScripts"] = behavior_document
+	var city_state := ClassicRuntimeStateScript.new()
+	city_state.configure_from_bundle(city_bundle)
+	var city_interpreter := InterpreterScript.new()
+	city_interpreter.configure(city_bundle, city_state)
+	_expect(
+		city_interpreter.begin_trigger("Data DD:0:0"),
+		"City of Bywater AP 0 starts through the central interpreter"
+	)
+	var result := city_interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text"
+			and result.get("payload", {}).get("messageId") == 50,
+		"City of Bywater executes its original Classic text slot first: %s"
+			% str(result)
+	)
+	result = city_interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "query_party_wealth",
+		"City of Bywater enters the attached Behavior after Classic text: %s"
+			% str(result)
+	)
+	result = city_interpreter.resume_command({
+		"gold": 500,
+		"gems": 0,
+		"jewelry": 0,
+		"pooledGold": 500,
+	})
+	result = city_interpreter.resume_command({
+		"day": 3,
+		"hour": 12,
+		"minute": 0,
+		"second": 0,
+		"totalSeconds": 216000,
+	})
+	result = city_interpreter.resume_command({
+		"value": [{
+			"id": "party:0",
+			"name": "Bywater Hero",
+			"level": 1,
+			"raceId": 1,
+			"raceName": "Human",
+			"casteId": 1,
+			"casteName": "Warrior",
+			"gender": 0,
+			"health": 10,
+			"maximumHealth": 10,
+			"spellPoints": 0,
+			"maximumSpellPoints": 0,
+			"strength": 10,
+			"intellect": 10,
+			"wisdom": 10,
+			"dexterity": 10,
+			"vitality": 10,
+			"luck": 10,
+			"movement": 12,
+			"conditions": [],
+			"itemIds": [],
+			"alive": true,
+		}],
+	})
+	result = city_interpreter.resume_command({"paid": true})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text",
+		"City of Bywater enhanced Behavior reaches its guided presentation"
+	)
+	result = city_interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "choice",
+		"City of Bywater enhanced Behavior reaches its guided choice"
+	)
+	result = city_interpreter.resume_command({"choice": 1})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text",
+		"City of Bywater enhanced Behavior follows the declined branch"
+	)
+	result = city_interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "start_encounter"
+			and result.get("payload", {}).get("encounterKind") == "simple"
+			and result.get("payload", {}).get("encounterId") == 0,
+		"City of Bywater resumes into original Classic encounter slot 2: %s"
+			% str(result)
 	)
 
 

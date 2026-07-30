@@ -16,13 +16,20 @@ func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
 	var parameters: Variant = instruction.get("parameters", {})
 	if not (parameters is Dictionary):
 		return ScenarioStepResult.failed("core.script.call parameters must be an object")
+	var attachment: Dictionary = (
+		parameters.get("attachment", {}).duplicate(true)
+		if parameters.get("attachment") is Dictionary
+		else {}
+	)
 	var invocation_context := {
-		"role": "action",
-		"hook": "run",
+		"role": str(attachment.get("role", "action")),
+		"hook": str(attachment.get("hook", "run")),
 		"trigger": context.current_trigger_identity()
 			if context.has_method("current_trigger_identity") else {},
 		"action": instruction.duplicate(true),
 	}
+	if not attachment.is_empty():
+		invocation_context["attachment"] = attachment
 	var arguments: Variant = parameters.get("arguments", {})
 	if parameters.has("argumentBindings"):
 		if not context.has_method("resolve_scenario_behavior_arguments"):
