@@ -92,6 +92,7 @@ func _ready() -> void:
 	await _test_engine_plugin_registry()
 	_test_engine_plugin_store()
 	_test_engine_plugin_settings_ui()
+	_test_preview_wire_json()
 	await _test_gameplay_rules()
 	_test_handler_registry()
 	_test_command_ports()
@@ -116,6 +117,23 @@ func _ready() -> void:
 	else:
 		push_error("Scenario runtime tests failed: %d" % failures)
 		get_tree().quit(1)
+
+
+func _test_preview_wire_json() -> void:
+	var state_key := "campaign\u001f\u001fstory_phase"
+	var encoded := PreviewHostScript._json_wire_text({
+		"persistentValues": {state_key: 7},
+	})
+	_expect(
+		not encoded.contains(String.chr(31)),
+		"preview wire JSON escapes control characters"
+	)
+	var decoded: Variant = JSON.parse_string(encoded)
+	_expect(
+		decoded is Dictionary
+			and decoded.get("persistentValues", {}).get(state_key) == 7,
+		"preview wire JSON preserves internal state keys"
+	)
 
 
 func _test_guided_source_node_assignment() -> void:

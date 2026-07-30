@@ -281,7 +281,7 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 				"message": "Preview action point is unavailable",
 			})
 			return
-		call_deferred("_run_preview_trigger", trigger_id, int(entry.get("slot", 0)))
+		await _run_preview_trigger(trigger_id, int(entry.get("slot", 0)))
 	elif kind == "battle":
 		var battle_id := int(entry.get("battleId", -1))
 		if not install.bundle.battles_by_id.has(battle_id):
@@ -323,8 +323,7 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 				"message": "Preview behavior ID is unavailable",
 			})
 			return
-		call_deferred(
-			"_run_preview_behavior",
+		await _run_preview_behavior(
 			behavior_id,
 			entry.get("arguments", {}),
 			entry.get("context", {})
@@ -342,7 +341,7 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 			_launching = false
 			_respond(request_id, normalized_entry)
 			return
-		call_deferred("_run_preview_role", normalized_entry)
+		await _run_preview_role(normalized_entry)
 	else:
 		_launching = false
 		_respond(request_id, {
@@ -1283,4 +1282,11 @@ func _respond(request_id: String, value: Dictionary) -> void:
 
 func _send(value: Dictionary) -> void:
 	if socket.get_ready_state() == WebSocketPeer.STATE_OPEN:
-		socket.send_text(JSON.stringify(value))
+		socket.send_text(_json_wire_text(value))
+
+
+static func _json_wire_text(value: Variant) -> String:
+	var encoded := JSON.stringify(value)
+	for code: int in range(1, 32):
+		encoded = encoded.replace(String.chr(code), "\\u%04x" % code)
+	return encoded
