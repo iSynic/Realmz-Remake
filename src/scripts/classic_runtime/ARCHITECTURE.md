@@ -257,6 +257,16 @@ Bindings may include an action/result slot. Matching filters that slot before
 priority ordering so one encounter result cannot fire another result's
 behavior.
 
+`ScenarioInterpreter` owns the complete Classic Enhanced encounter sequence:
+Encounter Entry (`enter`), native encounter presentation, After Choice
+(`option`), Before Result (`result`), preserved Classic result actions, and
+After Result (`complete`). Each behavior is injected as `core.script.call`.
+The selected option, result, pending Classic continuation, and current phase
+are serialized in the interpreter snapshot, so a yielding behavior or the
+native encounter prompt can be saved and restored without replaying an earlier
+phase. `PresentationPort` only presents the encounter (or delegates to a
+built-in encounter resolver); it does not run a nested behavior loop.
+
 ## Rules and modifiers
 
 Gameplay profiles still select independently versioned Map/Time, Combat,

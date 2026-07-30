@@ -273,15 +273,6 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 	host.use_campaign(bundle)
 	for role_case: Dictionary in [
 		{
-			"behaviorId": "scenario.providence.encounter-result",
-			"role": "encounter",
-			"hook": "result",
-			"targetKind": "simpleEncounter",
-			"recordId": "0",
-			"slot": 0,
-			"expectedKind": "continue",
-		},
-		{
 			"behaviorId": "scenario.providence.spell-effect",
 			"role": "spell",
 			"hook": "effect",
@@ -701,100 +692,256 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 
 
 func _test_classic_enhanced_encounter_completion() -> void:
-	var bundle := BundleScript.new()
-	_expect(
-		bundle.load_from_directory(
-			PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE
-		),
-		"Providence encounter boundary fixture loads"
-	)
-	if not bundle.last_error.is_empty():
+	var bundle = _classic_enhanced_city_encounter_bundle()
+	if bundle == null:
 		return
-	bundle.triggers_by_id["fixture:enhanced-encounter-completion"] = {
-		"id": "fixture:enhanced-encounter-completion",
-		"source": "fixture",
-		"recordIndex": 0,
-		"actions": [{
-			"kind": "classic",
-			"slot": 0,
-			"rawCode": 4,
-			"code": 4,
-			"id": 0,
-			"gosub": false,
-		}],
-	}
 	var state := ClassicRuntimeStateScript.new()
 	state.configure_from_bundle(bundle)
 	var interpreter := InterpreterScript.new()
 	interpreter.configure(bundle, state)
 	_expect(
-		interpreter.begin_trigger("fixture:enhanced-encounter-completion"),
-		"Classic Enhanced encounter starts at its preserved encounter slot"
+		interpreter.begin_trigger("Data DD:0:0"),
+		"City of Bywater AP 0 starts for the four-phase encounter proof"
 	)
 	var result := interpreter.run_until_yield()
 	_expect(
 		result.get("status") == "yield"
-			and result.get("command") == "start_encounter",
-		"Preserved Classic encounter still owns encounter presentation: %s"
+			and result.get("command") == "show_text"
+			and result.get("payload", {}).get("messageId") == 50,
+		"City of Bywater preserves the Classic AP text before its encounter: %s"
 			% str(result)
 	)
-	if result.get("command") != "start_encounter":
+	if result.get("status") != "yield":
 		return
-	result = interpreter.resume_encounter(1, {"optionSlot": 0})
-	var completion_seen := false
-	for _step: int in range(16):
-		if result.get("status") != "yield":
-			break
-		if result.get("command") == "show_text" \
-				and result.get("payload", {}).get("text") \
-					== "The preserved encounter result is complete.":
-			completion_seen = true
-			break
-		var response := {}
-		if result.get("command") == "take_party_wealth":
-			response = {"paid": true}
-		result = interpreter.resume_command(response)
+	result = interpreter.resume_command({})
 	_expect(
-		completion_seen,
-		"After Result behavior waits until preserved Classic result actions finish: %s"
+		_is_text_yield(
+			result,
+			"Encounter entry runs before presentation."
+		),
+		"Encounter Entry runs before City of Bywater opens its prompt: %s"
 			% str(result)
 	)
-	if not completion_seen:
+	var invalid_phase_snapshot: Dictionary = interpreter.make_execution_snapshot()
+	invalid_phase_snapshot["snapshot"]["classicAttachmentState"][
+		"encounterPhase"
+	]["stage"] = "outside-the-contract"
+	var invalid_phase_validation: Dictionary = \
+		InterpreterScript.validate_execution_snapshot(
+		invalid_phase_snapshot.get("snapshot")
+	)
+	_expect(
+		invalid_phase_validation.get("status") == "error"
+			and str(invalid_phase_validation.get("message", "")).contains(
+				"invalid stage"
+			),
+		"Encounter phase snapshots reject unknown continuation stages"
+	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"Encounter Entry"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "start_encounter"
+			and result.get("payload", {}).get("encounterKind") == "simple"
+			and result.get("payload", {}).get("encounterId") == 0,
+		"City of Bywater presentation starts after Encounter Entry: %s"
+			% str(result)
+	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"pending City of Bywater encounter presentation"
+	)
+	result = interpreter.resume_encounter(1, {"optionSlot": 0})
+	_expect(
+		_is_text_yield(
+			result,
+			"Encounter choice runs before result resolution."
+		),
+		"After Choice runs only after the selected City of Bywater option: %s"
+			% str(result)
+	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"After Choice"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		_is_text_yield(
+			result,
+			"Encounter result runs before Classic result actions."
+		),
+		"Before Result runs before City of Bywater result slot 0: %s"
+			% str(result)
+	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"Before Result"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text"
+			and result.get("payload", {}).get("messageId") == -52,
+		"City of Bywater resumes into its first preserved result action: %s"
+			% str(result)
+	)
+	for _step: int in range(24):
+		if result.get("status") != "yield" \
+				or _is_text_yield(
+					result,
+					"The preserved encounter result is complete."
+				):
+			break
+		result = interpreter.resume_command(
+			_classic_test_response(result)
+		)
+	_expect(
+		_is_text_yield(
+			result,
+			"The preserved encounter result is complete."
+		),
+		"After Result waits until City of Bywater's result actions finish: %s"
+			% str(result)
+	)
+	if result.get("status") != "yield":
 		return
-	var completion_hooks: Array = []
-	for trace_value: Variant in interpreter.trace:
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"After Result"
+	)
+	var completed := interpreter.resume_command({})
+	_expect(
+		completed.get("status") == "completed",
+		"Restored After Result resumes into Classic completion: %s"
+			% str(completed)
+	)
+
+	var trace_state := ClassicRuntimeStateScript.new()
+	trace_state.configure_from_bundle(bundle)
+	var trace_interpreter := InterpreterScript.new()
+	trace_interpreter.configure(bundle, trace_state)
+	_expect(
+		trace_interpreter.begin_trigger("Data DD:0:0"),
+		"City of Bywater encounter restarts for exact-once trace proof"
+	)
+	var trace_result := trace_interpreter.run_until_yield()
+	for _step: int in range(40):
+		if trace_result.get("status") != "yield":
+			break
+		if trace_result.get("command") == "start_encounter":
+			trace_result = trace_interpreter.resume_encounter(
+				1,
+				{"optionSlot": 0}
+			)
+		else:
+			trace_result = trace_interpreter.resume_command(
+				_classic_test_response(trace_result)
+			)
+	_expect(
+		trace_result.get("status") == "completed",
+		"Uninterrupted City of Bywater encounter replay completes: %s"
+			% str(trace_result)
+	)
+	var encounter_hooks: Array = []
+	var encounter_attachment_ids: Array = []
+	for trace_value: Variant in trace_interpreter.trace:
 		if trace_value is Dictionary \
 				and trace_value.get("event") == "behavior-attachment" \
-				and trace_value.get("hook") == "complete":
-			completion_hooks.append(trace_value.get("attachmentId"))
+				and str(trace_value.get("attachmentId", "")).begins_with(
+					"binding.providence.acceptance.encounter."
+				):
+			encounter_hooks.append(trace_value.get("hook"))
+			encounter_attachment_ids.append(
+				trace_value.get("attachmentId")
+			)
 	_expect(
-		completion_hooks == [
-			"binding.providence.acceptance.encounter.complete"
-		],
-		"Encounter completion attachment fires exactly once: %s"
-			% str(completion_hooks)
+		encounter_hooks == ["enter", "option", "result", "complete"],
+		"All four encounter phases fire exactly once in order: %s"
+			% str(encounter_hooks)
 	)
-	var saved := interpreter.make_execution_snapshot()
+	_expect(
+		encounter_attachment_ids == [
+			"binding.providence.acceptance.encounter.entry",
+			"binding.providence.acceptance.encounter.option",
+			"binding.providence.acceptance.encounter.result",
+			"binding.providence.acceptance.encounter.complete",
+		],
+		"City of Bywater uses the exact Providence-authored bindings: %s"
+			% str(encounter_attachment_ids)
+	)
+
+
+func _classic_enhanced_city_encounter_bundle():
+	var city_bundle := BundleScript.new()
+	_expect(
+		city_bundle.load_from_directory(CITY_OF_BYWATER_CAMPAIGN),
+		"City of Bywater campaign loads for the encounter proof"
+	)
+	var behavior_bundle := BundleScript.new()
+	_expect(
+		behavior_bundle.load_from_directory(
+			PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE
+		),
+		"Providence encounter behavior fixture loads"
+	)
+	if not city_bundle.last_error.is_empty() \
+			or not behavior_bundle.last_error.is_empty():
+		return null
+	city_bundle.documents["remakeScripts"] = behavior_bundle.documents.get(
+		"remakeScripts",
+		{}
+	).duplicate(true)
+	return city_bundle
+
+
+func _restore_classic_interpreter(
+	bundle,
+	interpreter,
+	label: String
+):
+	var saved: Dictionary = interpreter.make_execution_snapshot()
 	_expect(
 		saved.get("status") == "ok",
-		"Yielding encounter completion behavior is a save boundary"
+		"%s is a central-interpreter save boundary" % label
 	)
+	if saved.get("status") != "ok":
+		return interpreter
 	var restored_state := ClassicRuntimeStateScript.new()
 	restored_state.configure_from_bundle(bundle)
 	var restored := InterpreterScript.new()
 	restored.configure(bundle, restored_state)
-	_expect(
-		restored.restore_execution_snapshot(
-			saved.get("snapshot", {})
-		).get("status") == "ok",
-		"Encounter completion behavior restores through the interpreter"
+	var restore_result: Dictionary = restored.restore_execution_snapshot(
+		saved.get("snapshot", {})
 	)
-	var completed := restored.resume_command({})
 	_expect(
-		completed.get("status") == "completed",
-		"Restored encounter completion resumes into Classic completion: %s"
-			% str(completed)
+		restore_result.get("status") == "ok",
+		"%s restores through the central interpreter: %s"
+			% [label, restore_result]
 	)
+	return restored if restore_result.get("status") == "ok" else interpreter
+
+
+func _is_text_yield(result: Dictionary, text: String) -> bool:
+	return result.get("status") == "yield" \
+		and result.get("command") == "show_text" \
+		and result.get("payload", {}).get("text") == text
+
+
+func _classic_test_response(result: Dictionary) -> Dictionary:
+	match str(result.get("command", "")):
+		"choice":
+			return {"accepted": true}
+		"take_party_wealth":
+			return {"paid": true}
+	return {}
 
 
 func _test_classic_enhanced_gosub_attachments() -> void:
@@ -1011,6 +1158,16 @@ func _test_city_of_bywater_enhanced_ap() -> void:
 		result.get("status") == "yield"
 			and result.get("command") == "show_text",
 		"City of Bywater enhanced Behavior follows the declined branch"
+	)
+	result = city_interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and _is_text_yield(
+				result,
+				"Encounter entry runs before presentation."
+			),
+		"City of Bywater enters the attached Encounter Entry boundary: %s"
+			% str(result)
 	)
 	result = city_interpreter.resume_command({})
 	_expect(
@@ -2820,24 +2977,26 @@ func _test_typed_role_outcomes() -> void:
 		"item hooks reject undeclared modifier fields"
 	)
 	var handler := ScenarioScriptHandlerScript.new()
-	var halt_result: ScenarioStepResult = handler._apply_action_outcome(
+	var halt_result: ScenarioStepResult = handler._apply_behavior_outcome(
 		ScenarioStepResultScript.continued({
 			"value": {"kind": "halt", "reason": "fixture"},
-		})
+		}),
+		"action"
 	)
 	_expect(
 		halt_result.kind == ScenarioStepResultScript.HALT
 			and halt_result.data.get("reason") == "fixture",
 		"action behavior halt outcomes become central VM halt results"
 	)
-	var call_result: ScenarioStepResult = handler._apply_action_outcome(
+	var call_result: ScenarioStepResult = handler._apply_behavior_outcome(
 		ScenarioStepResultScript.continued({
 			"value": {
 				"kind": "call",
 				"triggerId": "Data DD:0:9",
 				"actionIndex": 3,
 			},
-		})
+		}),
+		"action"
 	)
 	_expect(
 		call_result.kind == ScenarioStepResultScript.CALL

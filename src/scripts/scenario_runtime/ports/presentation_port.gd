@@ -102,26 +102,6 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		}
 	if command_id == "start_encounter":
 		var encounter_id := str(routed_request.get("encounterId", ""))
-		var target_kind := (
-			"complexEncounter"
-			if str(routed_request.get(
-				"encounterKind",
-				""
-			)).to_lower().contains("complex")
-			else "simpleEncounter"
-		)
-		var attachment_result := await invoke_behavior_attachments(
-			"encounter",
-			"enter",
-			target_kind,
-			[encounter_id],
-			routed_request
-		)
-		if str(attachment_result.get("status", "")) == "error":
-			return attachment_result
-		var entry_override := _encounter_behavior_override(attachment_result)
-		if not entry_override.is_empty():
-			return entry_override
 		var extension_result := await invoke_runtime_binding(
 			"encounters",
 			"encounterResolvers",
@@ -136,73 +116,5 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		)
 		if bool(extension_result.get("handled", false)):
 			return extension_result
-		var encounter_result := await super.execute(command_id, routed_request)
-		if str(encounter_result.get("status", "")) == "error":
-			return encounter_result
-		var outcome := int(encounter_result.get("outcome", 0))
-		var option_slot := int(encounter_result.get("optionSlot", -1))
-		if option_slot >= 0:
-			var option_request := routed_request.duplicate(true)
-			option_request["response"] = encounter_result.duplicate(true)
-			option_request["outcome"] = outcome
-			option_request["slot"] = option_slot
-			var option_attachments := await invoke_behavior_attachments(
-				"encounter",
-				"option",
-				target_kind,
-				[encounter_id],
-				option_request
-			)
-			if str(option_attachments.get("status", "")) == "error":
-				return option_attachments
-			var option_override := _encounter_behavior_override(
-				option_attachments
-			)
-			if not option_override.is_empty():
-				encounter_result.merge(option_override, true)
-				outcome = int(encounter_result.get("outcome", outcome))
-		var result_request := routed_request.duplicate(true)
-		result_request["response"] = encounter_result.duplicate(true)
-		result_request["outcome"] = outcome
-		result_request["slot"] = absi(outcome) - 1 if outcome != 0 else -1
-		var result_attachments := await invoke_behavior_attachments(
-			"encounter",
-			"result",
-			target_kind,
-			[encounter_id],
-			result_request
-		)
-		if str(result_attachments.get("status", "")) == "error":
-			return result_attachments
-		var result_override := _encounter_behavior_override(result_attachments)
-		if not result_override.is_empty():
-			encounter_result.merge(result_override, true)
-		return encounter_result
+		return await super.execute(command_id, routed_request)
 	return await super.execute(command_id, routed_request)
-
-
-func _encounter_behavior_override(result: Dictionary) -> Dictionary:
-	if not bool(result.get("handled", false)):
-		return {}
-	for behavior_result_value: Variant in result.get("results", []):
-		if not (behavior_result_value is Dictionary):
-			continue
-		var outcome_value: Variant = behavior_result_value.get("value")
-		if not (outcome_value is Dictionary):
-			continue
-		var outcome: Dictionary = outcome_value
-		match str(outcome.get("kind", "continue")):
-			"close":
-				return {
-					"status": "ok",
-					"outcome": 0,
-					"behaviorOutcome": outcome.duplicate(true),
-				}
-			"resolve", "branch":
-				if outcome.has("outcome"):
-					return {
-						"status": "ok",
-						"outcome": int(outcome.get("outcome", 0)),
-						"behaviorOutcome": outcome.duplicate(true),
-					}
-	return {}

@@ -67,7 +67,7 @@ $campaigns = @(
             }
             $manifest = Get-Content -Raw -LiteralPath $manifestPath |
                 ConvertFrom-Json
-            if ($manifest.campaignKind -ne "classic-compiled") {
+            if ($manifest.campaignKind -ne "classic-interpreted") {
                 return
             }
             if (

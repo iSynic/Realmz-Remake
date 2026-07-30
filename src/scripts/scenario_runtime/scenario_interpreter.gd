@@ -41,6 +41,7 @@ var _classic_deferred_instruction: Dictionary = {}
 var _classic_deferred_result: Dictionary = {}
 var _classic_executing_anchor: Dictionary = {}
 var _classic_pending_after_anchor: Dictionary = {}
+var _classic_encounter_phase: Dictionary = {}
 
 var runtime_state: ClassicRuntimeState:
 	get:
@@ -263,6 +264,12 @@ func _run_classic_loop() -> Dictionary:
 				handler.handler_id(),
 				action_identity
 			)
+			var attachment_result := _apply_classic_attachment_outcome(
+				action_identity,
+				semantic_result.get("value")
+			)
+			if str(attachment_result.get("status", "")) == "error":
+				return attachment_result
 			if str(semantic_result.get("status", "")) == "continue":
 				continue
 			return semantic_result
@@ -435,21 +442,49 @@ func resume_command(response: Dictionary) -> Dictionary:
 		return _classic_error("No scenario command is waiting for a response")
 	var saved_pending := pending_command
 	pending_command = null
+	if saved_pending.command_id == "start_encounter" \
+			and str(_classic_encounter_phase.get("stage", "")) == "presenting":
+		return _classic_result(
+			_resume_classic_encounter_presentation(saved_pending, response)
+		)
 	var handler := instruction_registry.handler_by_id(saved_pending.handler_id)
 	if handler == null:
 		return _classic_error(
 			"Pending scenario handler '%s' is unavailable" % saved_pending.handler_id
 		)
-	var step := handler.resume(saved_pending, response, self)
 	if str(saved_pending.action_identity.get("kind", "")) == "semantic":
+		var step := handler.resume(saved_pending, response, self)
 		var semantic_result := _classic_semantic_step(
 			step,
 			saved_pending.handler_id,
 			saved_pending.action_identity
 		)
+		var attachment_result := _apply_classic_attachment_outcome(
+			saved_pending.action_identity,
+			semantic_result.get("value")
+		)
+		if str(attachment_result.get("status", "")) == "error":
+			return _classic_result(attachment_result)
 		if str(semantic_result.get("status", "")) == "continue":
 			return _classic_result(_run_classic_loop())
 		return _classic_result(semantic_result)
+	return _classic_result(
+		_resume_classic_pending_step(saved_pending, response, handler)
+	)
+
+
+func _resume_classic_pending_step(
+	saved_pending: ScenarioPendingCommand,
+	response: Dictionary,
+	handler: ScenarioInstructionHandler = null
+) -> Dictionary:
+	if handler == null:
+		handler = instruction_registry.handler_by_id(saved_pending.handler_id)
+	if handler == null:
+		return _classic_error(
+			"Pending scenario handler '%s' is unavailable" % saved_pending.handler_id
+		)
+	var step := handler.resume(saved_pending, response, self)
 	if step == null or not step.is_valid():
 		return _classic_error(
 			"Classic scenario handler '%s' returned an invalid resume result"
@@ -465,16 +500,16 @@ func resume_command(response: Dictionary) -> Dictionary:
 	if str(classic_result.get("status", "")) == "continue":
 		_activate_pending_after_attachments()
 		_queue_classic_record_transition_attachments(pending_anchor)
-		return _classic_result(_run_classic_loop())
+		return _run_classic_loop()
 	if str(classic_result.get("status", "")) == "completed" \
 			and not _classic_pending_after_anchor.is_empty():
 		_activate_pending_after_attachments()
 		_queue_classic_record_transition_attachments(pending_anchor)
 		if not _classic_attachment_queue.is_empty():
 			_classic_deferred_result = classic_result.duplicate(true)
-			return _classic_result(_run_classic_loop())
+			return _run_classic_loop()
 	_classic_pending_after_anchor.clear()
-	return _classic_result(classic_result)
+	return classic_result
 
 
 func resume_classic_instruction(
@@ -509,6 +544,7 @@ func make_execution_snapshot() -> Dictionary:
 			"deferredResult": _classic_deferred_result.duplicate(true),
 			"executingAnchor": _classic_executing_anchor.duplicate(true),
 			"pendingAfterAnchor": _classic_pending_after_anchor.duplicate(true),
+			"encounterPhase": _classic_encounter_phase.duplicate(true),
 		}
 		result["snapshot"]["scenarioScriptRuntime"] = (
 			scenario_script_runtime.snapshot()
@@ -556,6 +592,10 @@ func restore_execution_snapshot(saved: Variant) -> Dictionary:
 		).duplicate(true)
 		_classic_pending_after_anchor = attachment_state.get(
 			"pendingAfterAnchor",
+			{}
+		).duplicate(true)
+		_classic_encounter_phase = attachment_state.get(
+			"encounterPhase",
 			{}
 		).duplicate(true)
 		if scenario_script_runtime != null:
@@ -734,6 +774,11 @@ func _take_next_classic_plan_instruction() -> Dictionary:
 			"status": "instruction",
 			"instruction": injected,
 		}
+	if not _classic_encounter_phase.is_empty() and pending_command == null:
+		var encounter_phase_result := _advance_classic_encounter_phase()
+		if str(encounter_phase_result.get("status", "")) == "continue":
+			return _take_next_classic_plan_instruction()
+		return encounter_phase_result
 	if not _classic_deferred_instruction.is_empty():
 		var deferred := _classic_deferred_instruction.duplicate(true)
 		_classic_deferred_instruction.clear()
@@ -908,6 +953,212 @@ func _queue_classic_encounter_completion_attachments(
 		)
 
 
+func _begin_classic_encounter_phase(yield_result: Dictionary) -> Dictionary:
+	if pending_command == null:
+		return _classic_error(
+			"Classic encounter presentation has no pending continuation"
+		)
+	var request: Dictionary = yield_result.get(
+		"payload",
+		{}
+	).duplicate(true)
+	var encounter_kind := str(request.get("encounterKind", ""))
+	var encounter_id := str(request.get("encounterId", ""))
+	if encounter_kind not in ["simple", "complex"] or encounter_id.is_empty():
+		return _classic_error(
+			"Classic encounter presentation has an invalid identity"
+		)
+	_classic_encounter_phase = {
+		"stage": "entry",
+		"pendingCommand": pending_command.to_dictionary(),
+		"yieldResult": yield_result.duplicate(true),
+		"request": request,
+		"response": {},
+		"encounterKind": encounter_kind,
+		"encounterId": encounter_id,
+		"targetKind": (
+			"complexEncounter"
+			if encounter_kind == "complex"
+			else "simpleEncounter"
+		),
+	}
+	pending_command = null
+	_queue_classic_encounter_phase_attachments("enter", -1)
+	return _classic_result(_run_classic_loop())
+
+
+func _resume_classic_encounter_presentation(
+	saved_pending: ScenarioPendingCommand,
+	response: Dictionary
+) -> Dictionary:
+	var stored_pending := ScenarioPendingCommand.from_dictionary(
+		_classic_encounter_phase.get("pendingCommand")
+	)
+	if stored_pending == null \
+			or stored_pending.command_id != saved_pending.command_id \
+			or stored_pending.handler_id != saved_pending.handler_id \
+			or stored_pending.action_identity != saved_pending.action_identity:
+		return _classic_error(
+			"Classic encounter continuation identity changed during presentation"
+		)
+	if not response.has("outcome"):
+		return _classic_error("Encounter response is missing 'outcome'")
+	_classic_encounter_phase["response"] = response.duplicate(true)
+	var option_slot := int(response.get("optionSlot", -1))
+	if option_slot >= 0:
+		_classic_encounter_phase["stage"] = "option"
+		_queue_classic_encounter_phase_attachments(
+			"option",
+			option_slot
+		)
+	else:
+		_prepare_classic_encounter_result_phase()
+	return _run_classic_loop()
+
+
+func _advance_classic_encounter_phase() -> Dictionary:
+	for _iteration: int in range(8):
+		match str(_classic_encounter_phase.get("stage", "")):
+			"entry":
+				var entry_response: Variant = _classic_encounter_phase.get(
+					"response",
+					{}
+				)
+				if entry_response is Dictionary \
+						and entry_response.has("outcome"):
+					_prepare_classic_encounter_result_phase()
+				else:
+					var restored_pending := ScenarioPendingCommand.from_dictionary(
+						_classic_encounter_phase.get("pendingCommand")
+					)
+					if restored_pending == null:
+						return _classic_error(
+							"Classic encounter entry lost its continuation"
+						)
+					pending_command = restored_pending
+					_classic_encounter_phase["stage"] = "presenting"
+					return _classic_encounter_phase.get(
+						"yieldResult",
+						{}
+					).duplicate(true)
+			"option":
+				_prepare_classic_encounter_result_phase()
+			"result":
+				_classic_encounter_phase["stage"] = "resume"
+			"resume":
+				var resume_pending := ScenarioPendingCommand.from_dictionary(
+					_classic_encounter_phase.get("pendingCommand")
+				)
+				if resume_pending == null:
+					return _classic_error(
+						"Classic encounter result lost its continuation"
+					)
+				var resume_response: Dictionary = _classic_encounter_phase.get(
+					"response",
+					{}
+				).duplicate(true)
+				_classic_encounter_phase.clear()
+				return _resume_classic_pending_step(
+					resume_pending,
+					resume_response
+				)
+			"presenting":
+				return _classic_error(
+					"Classic encounter presentation resumed without a response"
+				)
+			_:
+				return _classic_error(
+					"Classic encounter phase is invalid"
+				)
+		if not _classic_attachment_queue.is_empty():
+			return {"status": "continue"}
+	return _classic_error(
+		"Classic encounter phase exceeded its transition limit"
+	)
+
+
+func _prepare_classic_encounter_result_phase() -> void:
+	var response: Dictionary = _classic_encounter_phase.get(
+		"response",
+		{}
+	)
+	var outcome := int(response.get("outcome", 0))
+	if outcome > 0:
+		_classic_encounter_phase["stage"] = "result"
+		_queue_classic_encounter_phase_attachments(
+			"result",
+			absi(outcome) - 1
+		)
+	else:
+		_classic_encounter_phase["stage"] = "resume"
+
+
+func _queue_classic_encounter_phase_attachments(
+	hook: String,
+	slot: int
+) -> void:
+	var request: Dictionary = _classic_encounter_phase.get(
+		"request",
+		{}
+	).duplicate(true)
+	if hook != "enter":
+		var response: Dictionary = _classic_encounter_phase.get(
+			"response",
+			{}
+		).duplicate(true)
+		request["response"] = response
+		request["outcome"] = int(response.get("outcome", 0))
+		request["slot"] = slot
+		if response.has("optionSlot"):
+			request["optionSlot"] = int(response.get("optionSlot", -1))
+	_classic_attachment_queue.append_array(
+		_behavior_attachment_instructions(
+			"encounter",
+			hook,
+			str(_classic_encounter_phase.get("targetKind", "")),
+			[str(_classic_encounter_phase.get("encounterId", ""))],
+			slot,
+			request
+		)
+	)
+
+
+func _apply_classic_attachment_outcome(
+	action_identity: Dictionary,
+	value: Variant
+) -> Dictionary:
+	if str(action_identity.get("attachmentRole", "")) != "encounter" \
+			or _classic_encounter_phase.is_empty() \
+			or not (value is Dictionary):
+		return {"status": "ok"}
+	var outcome: Dictionary = value
+	var kind := str(outcome.get("kind", "continue"))
+	if kind not in ["close", "resolve", "branch"]:
+		return {"status": "ok"}
+	var response: Dictionary = _classic_encounter_phase.get(
+		"response",
+		{}
+	).duplicate(true)
+	if kind == "close":
+		response["status"] = "ok"
+		response["outcome"] = 0
+	elif outcome.has("outcome"):
+		var selected_outcome := int(outcome.get("outcome", 0))
+		if selected_outcome < 0 or selected_outcome > 4:
+			return _classic_error(
+				"Encounter behavior outcome must be between 0 and 4"
+			)
+		response["status"] = "ok"
+		response["outcome"] = selected_outcome
+	else:
+		return _classic_error(
+			"Encounter behavior '%s' outcome requires a result number" % kind
+		)
+	response["behaviorOutcome"] = outcome.duplicate(true)
+	_classic_encounter_phase["response"] = response
+	return {"status": "ok"}
+
+
 func _activate_pending_after_attachments() -> void:
 	if _classic_pending_after_anchor.is_empty():
 		return
@@ -1014,6 +1265,10 @@ func _classic_semantic_action_identity(
 		)
 		identity["attachmentId"] = str(attachment.get("id", ""))
 		identity["anchorHook"] = str(attachment.get("hook", ""))
+		identity["attachmentRole"] = str(attachment.get("role", "action"))
+		identity["attachmentTargetKind"] = str(
+			attachment.get("targetKind", "")
+		)
 	return identity
 
 
@@ -1023,6 +1278,7 @@ func _reset_classic_attachment_plan() -> void:
 	_classic_deferred_result.clear()
 	_classic_executing_anchor.clear()
 	_classic_pending_after_anchor.clear()
+	_classic_encounter_phase.clear()
 
 
 static func _validate_classic_attachment_snapshot(value: Variant) -> Dictionary:
@@ -1036,6 +1292,7 @@ static func _validate_classic_attachment_snapshot(value: Variant) -> Dictionary:
 		"deferredResult",
 		"executingAnchor",
 		"pendingAfterAnchor",
+		"encounterPhase",
 	]:
 		if not (value.get(field_name) is Dictionary):
 			return {
@@ -1048,6 +1305,65 @@ static func _validate_classic_attachment_snapshot(value: Variant) -> Dictionary:
 			"valid": false,
 			"message": "Classic attachment snapshot has an invalid queue",
 		}
+	var encounter_validation := _validate_classic_encounter_phase_snapshot(
+		value.get("encounterPhase")
+	)
+	if not bool(encounter_validation.get("valid", false)):
+		return encounter_validation
+	return {"valid": true}
+
+
+static func _validate_classic_encounter_phase_snapshot(
+	value: Variant
+) -> Dictionary:
+	if not (value is Dictionary):
+		return {
+			"valid": false,
+			"message": "Classic attachment snapshot has invalid encounterPhase",
+		}
+	if value.is_empty():
+		return {"valid": true}
+	if str(value.get("stage", "")) not in [
+		"entry",
+		"presenting",
+		"option",
+		"result",
+		"resume",
+	]:
+		return {
+			"valid": false,
+			"message": "Classic encounter snapshot has an invalid stage",
+		}
+	var pending_validation := ScenarioPendingCommand.validate(
+		value.get("pendingCommand")
+	)
+	if not bool(pending_validation.get("valid", false)):
+		return {
+			"valid": false,
+			"message": "Classic encounter snapshot has an invalid continuation",
+		}
+	for field_name: String in ["yieldResult", "request", "response"]:
+		if not (value.get(field_name) is Dictionary):
+			return {
+				"valid": false,
+				"message": "Classic encounter snapshot has invalid %s"
+					% field_name,
+			}
+	var yield_result: Dictionary = value["yieldResult"]
+	if str(yield_result.get("status", "")) != "yield" \
+			or str(yield_result.get("command", "")) != "start_encounter":
+		return {
+			"valid": false,
+			"message": "Classic encounter snapshot has an invalid presentation",
+		}
+	for field_name: String in ["encounterKind", "encounterId", "targetKind"]:
+		if not (value.get(field_name) is String) \
+				or str(value.get(field_name)).is_empty():
+			return {
+				"valid": false,
+				"message": "Classic encounter snapshot is missing %s"
+					% field_name,
+			}
 	return {"valid": true}
 
 
@@ -1056,6 +1372,9 @@ func _classic_result(value: Variant) -> Dictionary:
 	if value is Dictionary:
 		if str(value.get("status", "")) == "yield":
 			_capture_classic_pending(value)
+			if str(value.get("command", "")) == "start_encounter" \
+					and _classic_encounter_phase.is_empty():
+				return _begin_classic_encounter_phase(value)
 		elif str(value.get("status", "")) != "error":
 			pending_command = null
 		return value
@@ -1129,7 +1448,10 @@ func _classic_semantic_step(
 		)
 	match step_result.kind:
 		ScenarioStepResult.CONTINUE:
-			return {"status": "continue"}
+			return {
+				"status": "continue",
+				"value": step_result.data.get("value"),
+			}
 		ScenarioStepResult.YIELD:
 			return {
 				"status": "yield",

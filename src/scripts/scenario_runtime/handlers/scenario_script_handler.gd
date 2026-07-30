@@ -56,7 +56,10 @@ func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
 		arguments,
 		invocation_context
 	)
-	return _apply_action_outcome(result)
+	return _apply_behavior_outcome(
+		result,
+		str(attachment.get("role", "action"))
+	)
 
 
 func resume(
@@ -70,10 +73,18 @@ func resume(
 		"resume_scenario_script",
 		response
 	)
-	return _apply_action_outcome(result)
+	return _apply_behavior_outcome(
+		result,
+		str(_pending.action_identity.get("attachmentRole", "action"))
+	)
 
 
-func _apply_action_outcome(result: ScenarioStepResult) -> ScenarioStepResult:
+func _apply_behavior_outcome(
+	result: ScenarioStepResult,
+	role: String
+) -> ScenarioStepResult:
+	if role != "action":
+		return result
 	if result == null or result.kind != ScenarioStepResult.CONTINUE:
 		return result
 	var value: Variant = result.data.get("value")
