@@ -1973,7 +1973,7 @@ func _test_nested_safe_behavior_execution() -> void:
 		"kind": "function",
 		"name": "spell_inside_scripted_battle",
 		"parameters": [],
-		"returnType": "effect-outcome",
+		"returnType": "spell-effect-outcome",
 		"body": [
 			{
 				"kind": "operation",
@@ -2009,7 +2009,7 @@ func _test_nested_safe_behavior_execution() -> void:
 			"scenario.test.nested-spell",
 			"spell",
 			"effect",
-			"effect-outcome",
+			"spell-effect-outcome",
 			["core.presentation.text"],
 			nested_program
 		),
@@ -2484,9 +2484,30 @@ func _test_typed_role_outcomes() -> void:
 				"interval": "round",
 				"stacking": "refresh",
 			},
-			"effect-outcome"
+			"spell-effect-outcome"
 		),
 		"spell effects accept bounded lifecycle schedules"
+	)
+	_expect(
+		ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "blocked", "reason": "No valid target."},
+			"spell-validation-outcome"
+		),
+		"spell validation accepts an explicit blocked result"
+	)
+	_expect(
+		not ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "applied"},
+			"spell-validation-outcome"
+		),
+		"spell validation rejects effect-phase outcomes"
+	)
+	_expect(
+		ScenarioScriptRuntimeScript._value_matches_script_type(
+			{"kind": "cancelled", "reason": "The caster was interrupted."},
+			"spell-cast-outcome"
+		),
+		"spell casting accepts an explicit cancellation"
 	)
 	_expect(
 		not ScenarioScriptRuntimeScript._value_matches_script_type(
@@ -2634,6 +2655,20 @@ func _test_native_spell_behavior_hooks() -> void:
 		runner.hooks == ["validate", "effect"],
 		"native spell behavior preserves deterministic hook order"
 	)
+	runner.cancel_cast = true
+	var cancelled: Dictionary = await port.run_spell_behavior(
+		spell,
+		null,
+		[],
+		3,
+		{"mode": "combat"}
+	)
+	_expect(
+		cancelled.get("status") == "ok"
+			and bool(cancelled.get("cancelled", false))
+			and not bool(cancelled.get("valid", true)),
+		"a cancelled casting phase stops before the spell effect"
+	)
 
 
 func _expect(condition: bool, message: String) -> void:
@@ -2705,6 +2740,7 @@ class SpellBehaviorRunner:
 	extends RefCounted
 
 	var hooks: Array[String] = []
+	var cancel_cast := false
 
 	func has_behavior_attachments(
 		role: String,
@@ -2714,7 +2750,10 @@ class SpellBehaviorRunner:
 		_slot := -1
 	) -> bool:
 		return role == "spell" \
-			and hook in ["validate", "effect"] \
+			and (
+				hook in ["validate", "effect"]
+				or (hook == "cast" and cancel_cast)
+			) \
 			and target_kind == "spell" \
 			and "4501" in target_ids
 
@@ -2726,11 +2765,16 @@ class SpellBehaviorRunner:
 		_request: Dictionary
 	) -> Dictionary:
 		hooks.append(hook)
+		var outcome := {"kind": "applied"}
+		if hook == "validate":
+			outcome = {"kind": "allowed"}
+		elif hook == "cast":
+			outcome = {"kind": "cancelled", "reason": "Fixture interruption"}
 		return {
 			"status": "ok",
 			"handled": true,
 			"results": [{
 				"status": "ok",
-				"value": {"kind": "applied"},
+				"value": outcome,
 			}],
 		}

@@ -13,6 +13,7 @@
       "label": "Action",
       "contextType": "ActionContext",
       "resultType": "ActionOutcome",
+      "hookLabel": "Action Position",
       "hooks": [
         "run",
         "before-ap",
@@ -26,6 +27,33 @@
         "before-slot",
         "after-slot",
         "after-ap"
+      ],
+      "hookContracts": [
+        {
+          "id": "run",
+          "label": "Run",
+          "description": "Runs as the action itself."
+        },
+        {
+          "id": "before-ap",
+          "label": "Before Action Point",
+          "description": "Runs before the first preserved Classic action."
+        },
+        {
+          "id": "before-slot",
+          "label": "Before Action",
+          "description": "Runs immediately before the selected Classic action."
+        },
+        {
+          "id": "after-slot",
+          "label": "After Action",
+          "description": "Runs after the selected Classic action finishes, including any resumed command."
+        },
+        {
+          "id": "after-ap",
+          "label": "After Action Point",
+          "description": "Runs after the complete Action Point finishes."
+        }
       ],
       "allowsYield": true,
       "summary": "Runs from an AP or XAP action position.",
@@ -37,6 +65,7 @@
       "label": "Encounter",
       "contextType": "EncounterContext",
       "resultType": "EncounterOutcome",
+      "hookLabel": "Encounter Stage",
       "hooks": [
         "enter",
         "option",
@@ -48,6 +77,28 @@
         "option",
         "result",
         "complete"
+      ],
+      "hookContracts": [
+        {
+          "id": "enter",
+          "label": "Entry",
+          "description": "Runs when the encounter begins."
+        },
+        {
+          "id": "option",
+          "label": "Choice",
+          "description": "Runs when the selected encounter choice is chosen."
+        },
+        {
+          "id": "result",
+          "label": "Result",
+          "description": "Runs before or after the selected encounter result, according to its attachment."
+        },
+        {
+          "id": "complete",
+          "label": "Completion",
+          "description": "Runs when the encounter closes successfully."
+        }
       ],
       "allowsYield": true,
       "summary": "Adds behavior to an encounter boundary.",
@@ -59,6 +110,7 @@
       "label": "Spell",
       "contextType": "SpellContext",
       "resultType": "EffectOutcome",
+      "hookLabel": "Spell Phase",
       "hooks": [
         "validate",
         "cast",
@@ -72,6 +124,38 @@
         "effect",
         "tick",
         "expire"
+      ],
+      "hookContracts": [
+        {
+          "id": "validate",
+          "label": "Validate",
+          "description": "Checks whether the spell may be cast. This phase is pure and cannot show UI or change game state.",
+          "resultType": "SpellValidationOutcome"
+        },
+        {
+          "id": "cast",
+          "label": "Cast",
+          "description": "Runs once after validation and may perform casting presentation or cancel the cast.",
+          "resultType": "SpellCastOutcome"
+        },
+        {
+          "id": "effect",
+          "label": "Apply Effect",
+          "description": "Applies the spell result and may register a lasting effect with duration and stacking behavior.",
+          "resultType": "SpellEffectOutcome"
+        },
+        {
+          "id": "tick",
+          "label": "Periodic Tick",
+          "description": "Runs at each scheduled interval while a lasting effect remains active.",
+          "resultType": "SpellTickOutcome"
+        },
+        {
+          "id": "expire",
+          "label": "Expiration",
+          "description": "Runs once when a lasting effect ends and performs final cleanup.",
+          "resultType": "SpellExpirationOutcome"
+        }
       ],
       "allowsYield": true,
       "pureHooks": [
@@ -79,13 +163,14 @@
       ],
       "summary": "Validates, casts, applies, ticks, or expires a scenario spell.",
       "reference": "Validation is pure; cast and effect hooks route combat and presentation through typed ports. An applied effect may declare a bounded duration and round, movement, or scenario-time interval; the runtime then dispatches tick and expiration hooks from serializable effect state.",
-      "example": "func apply_spell() -> EffectOutcome:\n    return {\"kind\": \"applied\"}"
+      "example": "func apply_spell() -> SpellEffectOutcome:\n    return {\"kind\": \"applied\"}"
     },
     {
       "id": "item",
       "label": "Item",
       "contextType": "ItemContext",
       "resultType": "ItemOutcome",
+      "hookLabel": "Item Event",
       "hooks": [
         "use-field",
         "use-combat",
@@ -103,6 +188,43 @@
         "attack",
         "defense",
         "passive"
+      ],
+      "hookContracts": [
+        {
+          "id": "use-field",
+          "label": "Use in the Field",
+          "description": "Runs when the item is used outside combat."
+        },
+        {
+          "id": "use-combat",
+          "label": "Use in Combat",
+          "description": "Runs when the item is used during combat."
+        },
+        {
+          "id": "equip",
+          "label": "Equip",
+          "description": "Checks or modifies the item being equipped."
+        },
+        {
+          "id": "unequip",
+          "label": "Unequip",
+          "description": "Checks or modifies the item being removed."
+        },
+        {
+          "id": "attack",
+          "label": "Attack",
+          "description": "Contributes the item's bounded attack behavior."
+        },
+        {
+          "id": "defense",
+          "label": "Defense",
+          "description": "Contributes the item's bounded defense behavior."
+        },
+        {
+          "id": "passive",
+          "label": "Passive Effect",
+          "description": "Runs while the item supplies a passive effect."
+        }
       ],
       "allowsYield": true,
       "pureHooks": [
@@ -121,11 +243,19 @@
       "label": "Monster AI",
       "contextType": "MonsterAiContext",
       "resultType": "MonsterDecision",
+      "hookLabel": "Decision Point",
       "hooks": [
         "decide"
       ],
       "runtimeHooks": [
         "decide"
+      ],
+      "hookContracts": [
+        {
+          "id": "decide",
+          "label": "Choose Action",
+          "description": "Chooses one validated action for this monster turn."
+        }
       ],
       "allowsYield": false,
       "summary": "Chooses one validated action from an immutable combat snapshot.",
@@ -137,6 +267,7 @@
       "label": "Lifecycle",
       "contextType": "LifecycleContext",
       "resultType": "void",
+      "hookLabel": "Lifecycle Event",
       "hooks": [
         "campaign-start",
         "campaign-resume",
@@ -166,6 +297,73 @@
         "battle-complete",
         "character-defeated",
         "party-defeated"
+      ],
+      "hookContracts": [
+        {
+          "id": "campaign-start",
+          "label": "Campaign Start",
+          "description": "Runs once when a new campaign begins."
+        },
+        {
+          "id": "campaign-resume",
+          "label": "Campaign Resume",
+          "description": "Runs after a saved campaign is restored."
+        },
+        {
+          "id": "campaign-complete",
+          "label": "Campaign Complete",
+          "description": "Runs when the campaign is completed."
+        },
+        {
+          "id": "map-enter",
+          "label": "Map Enter",
+          "description": "Runs after the party enters a map."
+        },
+        {
+          "id": "map-leave",
+          "label": "Map Leave",
+          "description": "Runs before the party leaves a map."
+        },
+        {
+          "id": "party-moved",
+          "label": "Party Moved",
+          "description": "Runs after a completed party movement."
+        },
+        {
+          "id": "rest-start",
+          "label": "Rest Start",
+          "description": "Runs when a rest attempt begins."
+        },
+        {
+          "id": "rest-complete",
+          "label": "Rest Complete",
+          "description": "Runs after rest finishes."
+        },
+        {
+          "id": "time-advanced",
+          "label": "Time Advanced",
+          "description": "Runs after scenario time changes."
+        },
+        {
+          "id": "battle-start",
+          "label": "Battle Start",
+          "description": "Runs when a battle begins."
+        },
+        {
+          "id": "battle-complete",
+          "label": "Battle Complete",
+          "description": "Runs after a battle resolves."
+        },
+        {
+          "id": "character-defeated",
+          "label": "Character Defeated",
+          "description": "Runs when a party character is defeated."
+        },
+        {
+          "id": "party-defeated",
+          "label": "Party Defeated",
+          "description": "Runs when no party member remains able to continue."
+        }
       ],
       "allowsYield": true,
       "summary": "Observes stable campaign and gameplay lifecycle boundaries.",
@@ -177,6 +375,7 @@
       "label": "Rule Modifier",
       "contextType": "RuleEvent",
       "resultType": "RuleModifier",
+      "hookLabel": "Calculation",
       "hooks": [
         "attack-chance",
         "damage",
@@ -195,7 +394,6 @@
         "attack-chance",
         "damage",
         "healing",
-        "spell-cost",
         "movement-cost",
         "fatigue",
         "experience",
@@ -204,6 +402,68 @@
         "rest-recovery",
         "time-advance",
         "condition-resistance"
+      ],
+      "hookContracts": [
+        {
+          "id": "attack-chance",
+          "label": "Attack Chance",
+          "description": "Adjusts a calculated chance to hit before final clamping."
+        },
+        {
+          "id": "damage",
+          "label": "Damage",
+          "description": "Adjusts calculated damage before it is applied."
+        },
+        {
+          "id": "healing",
+          "label": "Healing",
+          "description": "Adjusts calculated healing before it is applied."
+        },
+        {
+          "id": "spell-cost",
+          "label": "Spell Cost",
+          "description": "Reserved for a future runtime calculation and not currently attachable."
+        },
+        {
+          "id": "movement-cost",
+          "label": "Movement Cost",
+          "description": "Adjusts the movement cost of a validated step."
+        },
+        {
+          "id": "fatigue",
+          "label": "Fatigue",
+          "description": "Adjusts fatigue gained or recovered by an action."
+        },
+        {
+          "id": "experience",
+          "label": "Experience",
+          "description": "Adjusts experience awarded by a completed event."
+        },
+        {
+          "id": "loot",
+          "label": "Loot",
+          "description": "Adjusts a resolved numeric loot value before it is awarded."
+        },
+        {
+          "id": "encounter-chance",
+          "label": "Encounter Chance",
+          "description": "Adjusts a random encounter chance before the roll."
+        },
+        {
+          "id": "rest-recovery",
+          "label": "Rest Recovery",
+          "description": "Adjusts health or spell recovery produced by rest."
+        },
+        {
+          "id": "time-advance",
+          "label": "Time Advancement",
+          "description": "Adjusts scenario time advanced by a validated action."
+        },
+        {
+          "id": "condition-resistance",
+          "label": "Condition Resistance",
+          "description": "Adjusts a character's chance to resist a condition."
+        }
       ],
       "allowsYield": false,
       "pureHooks": [
@@ -218,8 +478,10 @@
       "label": "Helper",
       "contextType": "none",
       "resultType": "declared",
+      "hookLabel": "Invocation",
       "hooks": [],
       "runtimeHooks": [],
+      "hookContracts": [],
       "allowsYield": true,
       "summary": "Provides reusable typed logic called by entry behavior or migrations.",
       "reference": "Helpers cannot recurse and participate in the shared call-depth and execution budgets.",
@@ -319,6 +581,42 @@
         "interval": "round|move|minute|hour|day?",
         "effectKey": "string?",
         "stacking": "refresh|replace|stack?"
+      }
+    },
+    {
+      "id": "SpellValidationOutcome",
+      "fields": {
+        "kind": "allowed|blocked",
+        "reason": "string?"
+      }
+    },
+    {
+      "id": "SpellCastOutcome",
+      "fields": {
+        "kind": "complete|cancelled",
+        "reason": "string?"
+      }
+    },
+    {
+      "id": "SpellEffectOutcome",
+      "fields": {
+        "kind": "applied|no-effect",
+        "duration": "int?",
+        "interval": "round|move|minute|hour|day?",
+        "effectKey": "string?",
+        "stacking": "refresh|replace|stack?"
+      }
+    },
+    {
+      "id": "SpellTickOutcome",
+      "fields": {
+        "kind": "applied|no-effect"
+      }
+    },
+    {
+      "id": "SpellExpirationOutcome",
+      "fields": {
+        "kind": "complete"
       }
     },
     {

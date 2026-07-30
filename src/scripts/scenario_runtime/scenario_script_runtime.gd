@@ -1039,7 +1039,8 @@ static func validate_document(
 			role_id = "helper"
 		if not catalog.has_role(role_id):
 			return _invalid("%s has an unsupported behavior role" % context)
-		var expected_return_type := _role_return_type(role_id)
+		var hook_id := str(script.get("hook", ""))
+		var expected_return_type := _role_return_type(role_id, hook_id, catalog)
 		if behavior_kind == "entry" \
 				and str(script.get("returnType", "")) != expected_return_type:
 			return _invalid(
@@ -1053,7 +1054,6 @@ static func validate_document(
 			return _invalid("%s.requestedCapabilities must be an array" % context)
 		var role_descriptor := catalog.role(role_id)
 		var pure_hooks: Variant = role_descriptor.get("pureHooks", [])
-		var hook_id := str(script.get("hook", ""))
 		var runtime_hooks: Variant = role_descriptor.get(
 			"runtimeHooks",
 			role_descriptor.get("hooks", [])
@@ -2200,7 +2200,21 @@ func _behavior_allows_yield(behavior: Dictionary) -> bool:
 	return bool(role.get("allowsYield", false))
 
 
-static func _role_return_type(role: String) -> String:
+static func _role_return_type(
+	role: String,
+	hook: String,
+	catalog: Object
+) -> String:
+	var role_descriptor: Dictionary = catalog.role(role)
+	var hook_contracts: Variant = role_descriptor.get("hookContracts", [])
+	if hook_contracts is Array:
+		for contract_value: Variant in hook_contracts:
+			if contract_value is Dictionary \
+					and str(contract_value.get("id", "")) == hook \
+					and not str(contract_value.get("resultType", "")).is_empty():
+				return _catalog_result_type_id(
+					str(contract_value.get("resultType", ""))
+				)
 	match role:
 		"action":
 			return "action-outcome"
@@ -2217,6 +2231,35 @@ static func _role_return_type(role: String) -> String:
 		"lifecycle":
 			return "void"
 	return ""
+
+
+static func _catalog_result_type_id(type_name: String) -> String:
+	match type_name:
+		"ActionOutcome":
+			return "action-outcome"
+		"EncounterOutcome":
+			return "encounter-outcome"
+		"EffectOutcome":
+			return "effect-outcome"
+		"SpellValidationOutcome":
+			return "spell-validation-outcome"
+		"SpellCastOutcome":
+			return "spell-cast-outcome"
+		"SpellEffectOutcome":
+			return "spell-effect-outcome"
+		"SpellTickOutcome":
+			return "spell-tick-outcome"
+		"SpellExpirationOutcome":
+			return "spell-expiration-outcome"
+		"ItemOutcome":
+			return "item-outcome"
+		"MonsterDecision":
+			return "monster-decision"
+		"RuleModifier":
+			return "rule-modifier"
+		"void":
+			return "void"
+	return type_name
 
 
 static func _value_matches_script_type(value: Variant, type_id: String) -> bool:
@@ -2283,6 +2326,66 @@ static func _value_matches_script_type(value: Variant, type_id: String) -> bool:
 					_:
 						return false
 			return true
+		"spell-validation-outcome":
+			if not (value is Dictionary) or str(value.get("kind", "")) not in [
+				"allowed", "blocked",
+			]:
+				return false
+			for key: Variant in value:
+				if str(key) == "kind":
+					continue
+				if str(key) != "reason" or not (value[key] is String):
+					return false
+			return true
+		"spell-cast-outcome":
+			if not (value is Dictionary) or str(value.get("kind", "")) not in [
+				"complete", "cancelled",
+			]:
+				return false
+			for key: Variant in value:
+				if str(key) == "kind":
+					continue
+				if str(key) != "reason" or not (value[key] is String):
+					return false
+			return true
+		"spell-effect-outcome":
+			if not (value is Dictionary) or str(value.get("kind", "")) not in [
+				"applied", "no-effect",
+			]:
+				return false
+			for key: Variant in value:
+				match str(key):
+					"kind":
+						pass
+					"duration":
+						if not _is_integer(value[key]) \
+								or int(value[key]) < 0 \
+								or int(value[key]) > 1000000:
+							return false
+					"interval":
+						if str(value[key]) not in [
+							"round", "move", "minute", "hour", "day",
+						]:
+							return false
+					"effectKey":
+						if not (value[key] is String):
+							return false
+					"stacking":
+						if str(value[key]) not in [
+							"refresh", "replace", "stack",
+						]:
+							return false
+					_:
+						return false
+			return true
+		"spell-tick-outcome":
+			return value is Dictionary \
+				and value.size() == 1 \
+				and str(value.get("kind", "")) in ["applied", "no-effect"]
+		"spell-expiration-outcome":
+			return value is Dictionary \
+				and value.size() == 1 \
+				and str(value.get("kind", "")) == "complete"
 		"item-outcome":
 			if not (value is Dictionary) or str(value.get("kind", "")) not in [
 				"used", "rejected", "no-effect", "modified",

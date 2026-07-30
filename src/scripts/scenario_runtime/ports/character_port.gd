@@ -114,6 +114,15 @@ func run_spell_behavior(
 	var cast_result := await _run_spell_behavior_hook("cast", target_ids, request)
 	if str(cast_result.get("status", "")) == "error":
 		return cast_result
+	if _spell_behavior_cancelled(cast_result):
+		return {
+			"status": "ok",
+			"handled": true,
+			"valid": false,
+			"cancelled": true,
+			"validationResults": validation_result.get("results", []),
+			"castResults": cast_result.get("results", []),
+		}
 	var effect_result := await _run_spell_behavior_hook(
 		"effect",
 		target_ids,
@@ -181,6 +190,8 @@ func run_spell_behavior_hook(
 		return result
 	if hook == "validate":
 		result["valid"] = not _spell_behavior_invalid(result)
+	if hook == "cast":
+		result["cancelled"] = _spell_behavior_cancelled(result)
 	if hook == "effect":
 		var schedule_result := _register_spell_effect_from_results(
 			target_ids,
@@ -488,6 +499,14 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		)
 		if str(cast_result.get("status", "")) == "error":
 			return cast_result
+		if _spell_behavior_cancelled(cast_result):
+			return {
+				"status": "ok",
+				"handled": true,
+				"valid": false,
+				"cancelled": true,
+				"castResults": cast_result.get("results", []),
+			}
 		var effect_result := await invoke_behavior_attachments(
 			"spell",
 			"effect",
@@ -526,6 +545,17 @@ func _spell_behavior_invalid(result: Dictionary) -> bool:
 			continue
 		var effect_value: Variant = behavior_result_value.get("value")
 		if effect_value is Dictionary \
-				and str(effect_value.get("kind", "")) == "invalid":
+				and str(effect_value.get("kind", "")) in ["blocked", "invalid"]:
+			return true
+	return false
+
+
+func _spell_behavior_cancelled(result: Dictionary) -> bool:
+	for behavior_result_value: Variant in result.get("results", []):
+		if not (behavior_result_value is Dictionary):
+			continue
+		var cast_value: Variant = behavior_result_value.get("value")
+		if cast_value is Dictionary \
+				and str(cast_value.get("kind", "")) == "cancelled":
 			return true
 	return false
