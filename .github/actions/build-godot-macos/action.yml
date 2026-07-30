@@ -29,6 +29,10 @@ runs:
       run: |
         brew install fileicon
 
+    - name: Verify export hygiene
+      shell: bash
+      run: node tools/verify_export_hygiene.mjs
+
     - name: Build macOS application
       shell: bash
       working-directory: ${{ inputs.project-dir }}

@@ -16,6 +16,10 @@ runs:
       id: reimport
       run: godot --editor --headless --quit || true
 
+    - name: Verify export hygiene
+      shell: bash
+      run: node tools/verify_export_hygiene.mjs
+
     - name: Build
       id: build
       shell: bash
