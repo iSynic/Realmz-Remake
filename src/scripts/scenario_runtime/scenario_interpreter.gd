@@ -196,6 +196,11 @@ func begin_trigger(trigger_id: String, start_slot := 0, context := {}) -> bool:
 		return str(started.get("status", "")) == "ok"
 	var result: bool = _classic_executor.begin_trigger(trigger_id, start_slot, context)
 	_reset_classic_attachment_plan()
+	if result:
+		_queue_classic_attachments(
+			"before-ap",
+			{"triggerId": trigger_id, "slot": null, "callDepth": 0}
+		)
 	_sync_classic_observability()
 	return result
 
@@ -273,13 +278,27 @@ func _run_classic_loop() -> Dictionary:
 				"Classic scenario handler '%s' did not return opcode state"
 				% handler.handler_id()
 			)
-		if str(classic_result.get("status", "")) == "continue":
+		var classic_status := str(classic_result.get("status", ""))
+		if classic_status == "continue":
 			_queue_classic_attachments("after-slot", _classic_executing_anchor)
+			_queue_classic_record_transition_attachments(
+				_classic_executing_anchor
+			)
 			_classic_executing_anchor.clear()
 			continue
-		if str(classic_result.get("status", "")) == "yield":
+		if classic_status == "yield":
 			_classic_pending_after_anchor = \
 				_classic_executing_anchor.duplicate(true)
+		elif classic_status == "completed":
+			_classic_pending_after_anchor.clear()
+			_queue_classic_attachments("after-slot", _classic_executing_anchor)
+			_queue_classic_record_transition_attachments(
+				_classic_executing_anchor
+			)
+			_classic_executing_anchor.clear()
+			if not _classic_attachment_queue.is_empty():
+				_classic_deferred_result = classic_result.duplicate(true)
+				continue
 		else:
 			_classic_pending_after_anchor.clear()
 		_classic_executing_anchor.clear()
@@ -442,14 +461,18 @@ func resume_command(response: Dictionary) -> Dictionary:
 			"Classic scenario handler '%s' did not return continuation state"
 			% saved_pending.handler_id
 		)
+	var pending_anchor := _classic_pending_after_anchor.duplicate(true)
 	if str(classic_result.get("status", "")) == "continue":
 		_activate_pending_after_attachments()
+		_queue_classic_record_transition_attachments(pending_anchor)
 		return _classic_result(_run_classic_loop())
 	if str(classic_result.get("status", "")) == "completed" \
 			and not _classic_pending_after_anchor.is_empty():
 		_activate_pending_after_attachments()
-		_classic_deferred_result = classic_result.duplicate(true)
-		return _classic_result(_run_classic_loop())
+		_queue_classic_record_transition_attachments(pending_anchor)
+		if not _classic_attachment_queue.is_empty():
+			_classic_deferred_result = classic_result.duplicate(true)
+			return _classic_result(_run_classic_loop())
 	_classic_pending_after_anchor.clear()
 	return _classic_result(classic_result)
 
@@ -695,10 +718,11 @@ func _take_next_classic_plan_instruction() -> Dictionary:
 			"parameters",
 			{}
 		).get("attachment", {})
+		var attachment_slot: Variant = attachment.get("slot")
 		_classic_executor.trace.append({
 			"event": "behavior-attachment",
 			"triggerId": str(attachment.get("recordId", "")),
-			"slot": int(attachment.get("slot", -1)),
+			"slot": int(attachment_slot) if attachment_slot != null else -1,
 			"hook": str(attachment.get("hook", "")),
 			"attachmentId": str(attachment.get("id", "")),
 			"behaviorId": str(injected.get(
@@ -728,8 +752,19 @@ func _take_next_classic_plan_instruction() -> Dictionary:
 		var deferred_result := _classic_deferred_result.duplicate(true)
 		_classic_deferred_result.clear()
 		return deferred_result
+	var ending_anchor := {
+		"triggerId": str(_classic_executor.current_trigger.get("id", "")),
+		"slot": null,
+		"callDepth": _classic_executor.call_stack.size(),
+	}
 	var prepared: Dictionary = _classic_executor.take_next_instruction()
 	if str(prepared.get("status", "")) != "instruction":
+		if str(prepared.get("status", "")) == "completed" \
+				and not str(ending_anchor.get("triggerId", "")).is_empty():
+			_queue_classic_record_transition_attachments(ending_anchor)
+			if not _classic_attachment_queue.is_empty():
+				_classic_deferred_result = prepared.duplicate(true)
+				return _take_next_classic_plan_instruction()
 		return prepared
 	var instruction_value: Variant = prepared.get("instruction")
 	if not (instruction_value is Dictionary):
@@ -761,6 +796,7 @@ func _classic_instruction_anchor(instruction: Dictionary) -> Dictionary:
 			int(_classic_executor.current_action_index) - 1
 		),
 		"slot": int(instruction.get("slot", -1)),
+		"callDepth": _classic_executor.call_stack.size(),
 	}
 
 
@@ -770,6 +806,55 @@ func _queue_classic_attachments(hook: String, anchor: Dictionary) -> void:
 	_classic_attachment_queue.append_array(
 		_classic_attachment_instructions(hook, anchor)
 	)
+
+
+func _queue_classic_record_transition_attachments(
+	anchor: Dictionary
+) -> void:
+	if anchor.is_empty() or _classic_executor == null:
+		return
+	var previous_trigger_id := str(anchor.get("triggerId", ""))
+	var current_trigger_id_value := str(
+		_classic_executor.current_trigger.get("id", "")
+	)
+	var previous_depth := int(anchor.get(
+		"callDepth",
+		_classic_executor.call_stack.size()
+	))
+	var current_depth: int = int(_classic_executor.call_stack.size())
+	if previous_trigger_id == current_trigger_id_value \
+			and previous_depth == current_depth:
+		return
+	if current_depth > previous_depth:
+		if not current_trigger_id_value.is_empty():
+			_queue_classic_attachments(
+				"before-ap",
+				{
+					"triggerId": current_trigger_id_value,
+					"slot": null,
+					"callDepth": current_depth,
+				}
+			)
+		return
+	if not previous_trigger_id.is_empty():
+		_queue_classic_attachments(
+			"after-ap",
+			{
+				"triggerId": previous_trigger_id,
+				"slot": null,
+				"callDepth": previous_depth,
+			}
+		)
+	if current_depth == previous_depth \
+			and not current_trigger_id_value.is_empty():
+		_queue_classic_attachments(
+			"before-ap",
+			{
+				"triggerId": current_trigger_id_value,
+				"slot": null,
+				"callDepth": current_depth,
+			}
+		)
 
 
 func _activate_pending_after_attachments() -> void:
@@ -789,15 +874,17 @@ func _classic_attachment_instructions(
 	if scenario_script_runtime == null:
 		return []
 	var trigger_id := str(anchor.get("triggerId", ""))
-	var slot := int(anchor.get("slot", -1))
-	if trigger_id.is_empty() or slot < 0:
+	var slot_value: Variant = anchor.get("slot")
+	var slot := int(slot_value) if slot_value != null else -1
+	var is_record_hook := hook in ["before-ap", "after-ap"]
+	if trigger_id.is_empty() or (not is_record_hook and slot < 0):
 		return []
 	var bindings := scenario_script_runtime.matching_bindings(
 		"action",
 		hook,
 		"trigger",
 		[trigger_id],
-		slot
+		-1 if is_record_hook else slot
 	)
 	var instructions: Array = []
 	for binding_value: Variant in bindings:
@@ -820,7 +907,7 @@ func _classic_attachment_instructions(
 					"hook": hook,
 					"targetKind": "trigger",
 					"recordId": trigger_id,
-					"slot": slot,
+					"slot": null if is_record_hook else slot,
 					"priority": int(binding.get("priority", 0)),
 				},
 			},
@@ -847,10 +934,12 @@ func _classic_semantic_action_identity(
 			"recordId",
 			identity.get("triggerId", "")
 		))
-		identity["slot"] = int(attachment.get(
-			"slot",
-			identity.get("slot", -1)
-		))
+		var attachment_slot: Variant = attachment.get("slot")
+		identity["slot"] = (
+			int(attachment_slot)
+			if attachment_slot != null
+			else -1
+		)
 		identity["attachmentId"] = str(attachment.get("id", ""))
 		identity["anchorHook"] = str(attachment.get("hook", ""))
 	return identity

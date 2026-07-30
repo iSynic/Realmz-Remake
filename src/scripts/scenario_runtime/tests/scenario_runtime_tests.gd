@@ -107,6 +107,7 @@ func _ready() -> void:
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
 	await _test_providence_scripting_acceptance_bundle()
+	_test_classic_enhanced_gosub_attachments()
 	await _test_city_of_bywater_enhanced_ap()
 	_test_safe_script_quest_slice()
 	_test_guided_source_node_assignment()
@@ -231,8 +232,8 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 	_expect(
 		scripts.get("schemaVersion") == 2
 			and scripts.get("apiVersion") == 2
-			and scripts.get("behaviors", []).size() == 9
-			and scripts.get("bindings", []).size() == 7
+			and scripts.get("behaviors", []).size() == 11
+			and scripts.get("bindings", []).size() == 9
 			and scripts.get("stateDefinitions", []).size() == 3
 			and scripts.get("migrations", []).size() == 1,
 		"Remake consumes the complete Providence-authored scripting contract"
@@ -600,6 +601,210 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 			and restored_interpreter.trace[0].get("slot") == 1,
 		"The first Classic instruction after the Behavior is original slot 1: %s"
 			% str(restored_interpreter.trace)
+	)
+	var xap_state := ClassicRuntimeStateScript.new()
+	xap_state.configure_from_bundle(bundle)
+	var xap_interpreter := InterpreterScript.new()
+	xap_interpreter.configure(bundle, xap_state)
+	_expect(
+		xap_interpreter.begin_trigger("Data ED3:macro:2"),
+		"Providence-authored Extra Action Point starts through the interpreter"
+	)
+	var xap_result := xap_interpreter.run_until_yield()
+	_expect(
+		xap_result.get("status") == "yield"
+			and xap_result.get("command") == "show_text"
+			and xap_result.get("payload", {}).get("text")
+				== "Before the preserved Extra Action Point.",
+		"Before-XAP Behavior runs before the first preserved Classic action: %s"
+			% str(xap_result)
+	)
+	var xap_saved := xap_interpreter.make_execution_snapshot()
+	_expect(
+		xap_saved.get("status") == "ok",
+		"Pending before-XAP Behavior is a save boundary"
+	)
+	xap_state = ClassicRuntimeStateScript.new()
+	xap_state.configure_from_bundle(bundle)
+	xap_interpreter = InterpreterScript.new()
+	xap_interpreter.configure(bundle, xap_state)
+	_expect(
+		xap_interpreter.restore_execution_snapshot(
+			xap_saved.get("snapshot", {})
+		).get("status") == "ok",
+		"Before-XAP Behavior restores through the interpreter snapshot"
+	)
+	xap_result = xap_interpreter.resume_command({})
+	_expect(
+		xap_result.get("status") == "yield"
+			and xap_result.get("command") == "show_text"
+			and xap_result.get("payload", {}).get("messageId") == 0,
+		"Before-XAP Behavior resumes into the preserved Classic XAP slot: %s"
+			% str(xap_result)
+	)
+	xap_result = xap_interpreter.resume_command({})
+	_expect(
+		xap_result.get("status") == "yield"
+			and xap_result.get("command") == "show_text"
+			and xap_result.get("payload", {}).get("text")
+				== "After the preserved Extra Action Point.",
+		"After-XAP Behavior runs only after the preserved XAP completes: %s"
+			% str(xap_result)
+	)
+	xap_saved = xap_interpreter.make_execution_snapshot()
+	_expect(
+		xap_saved.get("status") == "ok",
+		"Pending after-XAP Behavior is a save boundary"
+	)
+	xap_state = ClassicRuntimeStateScript.new()
+	xap_state.configure_from_bundle(bundle)
+	xap_interpreter = InterpreterScript.new()
+	xap_interpreter.configure(bundle, xap_state)
+	_expect(
+		xap_interpreter.restore_execution_snapshot(
+			xap_saved.get("snapshot", {})
+		).get("status") == "ok",
+		"After-XAP Behavior restores through the interpreter snapshot"
+	)
+	xap_result = xap_interpreter.resume_command({})
+	_expect(
+		xap_result.get("status") == "completed",
+		"After-XAP Behavior resumes into the deferred Classic completion: %s"
+			% str(xap_result)
+	)
+	var trace_xap_state := ClassicRuntimeStateScript.new()
+	trace_xap_state.configure_from_bundle(bundle)
+	var trace_xap_interpreter := InterpreterScript.new()
+	trace_xap_interpreter.configure(bundle, trace_xap_state)
+	_expect(
+		trace_xap_interpreter.begin_trigger("Data ED3:macro:2"),
+		"Extra Action Point starts for attachment trace verification"
+	)
+	var trace_xap_result := trace_xap_interpreter.run_until_yield()
+	while trace_xap_result.get("status") == "yield":
+		trace_xap_result = trace_xap_interpreter.resume_command({})
+	_expect(
+		trace_xap_result.get("status") == "completed",
+		"Extra Action Point trace replay reaches Classic completion"
+	)
+	var xap_attachment_hooks: Array = []
+	for trace_value: Variant in trace_xap_interpreter.trace:
+		if trace_value is Dictionary \
+				and trace_value.get("event") == "behavior-attachment":
+			xap_attachment_hooks.append(trace_value.get("hook"))
+	_expect(
+		xap_attachment_hooks == ["before-ap", "after-ap"],
+		"Extra Action Point record attachments fire exactly once in order: %s"
+			% str(xap_attachment_hooks)
+	)
+
+
+func _test_classic_enhanced_gosub_attachments() -> void:
+	var war_bundle := BundleScript.new()
+	_expect(
+		war_bundle.load_from_directory(V3_FIXTURE),
+		"War GOSUB fixture loads for Enhanced XAP attachments"
+	)
+	var behavior_bundle := BundleScript.new()
+	_expect(
+		behavior_bundle.load_from_directory(
+			PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE
+		),
+		"Providence behavior fixture loads for Enhanced GOSUB attachments"
+	)
+	if not war_bundle.last_error.is_empty() \
+			or not behavior_bundle.last_error.is_empty():
+		return
+	var source_document: Dictionary = behavior_bundle.documents.get(
+		"remakeScripts",
+		{}
+	)
+	var script_document := source_document.duplicate(true)
+	var behavior_ids := [
+		"scenario.providence.before-extra-action",
+		"scenario.providence.after-extra-action",
+	]
+	var behaviors: Array = []
+	for behavior_value: Variant in script_document.get("behaviors", []):
+		if behavior_value is Dictionary \
+				and str(behavior_value.get("id", "")) in behavior_ids:
+			behaviors.append(behavior_value)
+	var bindings: Array = []
+	for binding_value: Variant in script_document.get("bindings", []):
+		if not (binding_value is Dictionary):
+			continue
+		var behavior_id := str(binding_value.get("behaviorId", ""))
+		if behavior_id not in behavior_ids:
+			continue
+		var binding: Dictionary = binding_value
+		binding["recordId"] = "Data ED3:macro:1027"
+		bindings.append(binding)
+	script_document["behaviors"] = behaviors
+	script_document["bindings"] = bindings
+	script_document["stateDefinitions"] = []
+	script_document["migrations"] = []
+	war_bundle.documents["remakeScripts"] = script_document
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(war_bundle)
+	state.set_quest_flag(29)
+	state.set_quest_flag(64)
+	var interpreter := InterpreterScript.new()
+	interpreter.configure(war_bundle, state)
+	_expect(
+		interpreter.begin_trigger("Data DD:9:48", 3),
+		"War GOSUB chain starts with Enhanced XAP attachments"
+	)
+	var result := interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text",
+		"War GOSUB chain reaches its source random text"
+	)
+	result = interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("payload", {}).get("text")
+				== "Before the preserved Extra Action Point.",
+		"Before-XAP Behavior runs on GOSUB entry before XAP 1027: %s"
+			% str(result)
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("payload", {}).get("messageId") == 1110,
+		"GOSUB entry resumes into XAP 1027's first Classic action: %s"
+			% str(result)
+	)
+	result = interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("payload", {}).get("messageId") == 1246,
+		"Nested GOSUB remains source-faithful beneath the attached XAP"
+	)
+	result = interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("payload", {}).get("text")
+				== "After the preserved Extra Action Point.",
+		"After-XAP Behavior runs after opcode 111 returns from XAP 1027: %s"
+			% str(result)
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "completed"
+			and result.get("reason") == "keep-codes",
+		"After-XAP Behavior resumes the suspended War caller to completion: %s"
+			% str(result)
+	)
+	var attachment_hooks: Array = []
+	for trace_value: Variant in interpreter.trace:
+		if trace_value is Dictionary \
+				and trace_value.get("event") == "behavior-attachment":
+			attachment_hooks.append(trace_value.get("hook"))
+	_expect(
+		attachment_hooks == ["before-ap", "after-ap"],
+		"GOSUB entry and return fire each XAP attachment exactly once: %s"
+			% str(attachment_hooks)
 	)
 
 
