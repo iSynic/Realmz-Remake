@@ -756,6 +756,7 @@ func _take_next_classic_plan_instruction() -> Dictionary:
 		"triggerId": str(_classic_executor.current_trigger.get("id", "")),
 		"slot": null,
 		"callDepth": _classic_executor.call_stack.size(),
+		"encounterOrigins": _classic_executor.encounter_origins.duplicate(true),
 	}
 	var prepared: Dictionary = _classic_executor.take_next_instruction()
 	if str(prepared.get("status", "")) != "instruction":
@@ -797,6 +798,7 @@ func _classic_instruction_anchor(instruction: Dictionary) -> Dictionary:
 		),
 		"slot": int(instruction.get("slot", -1)),
 		"callDepth": _classic_executor.call_stack.size(),
+		"encounterOrigins": _classic_executor.encounter_origins.duplicate(true),
 	}
 
 
@@ -813,6 +815,7 @@ func _queue_classic_record_transition_attachments(
 ) -> void:
 	if anchor.is_empty() or _classic_executor == null:
 		return
+	_queue_classic_encounter_completion_attachments(anchor)
 	var previous_trigger_id := str(anchor.get("triggerId", ""))
 	var current_trigger_id_value := str(
 		_classic_executor.current_trigger.get("id", "")
@@ -857,6 +860,54 @@ func _queue_classic_record_transition_attachments(
 		)
 
 
+func _queue_classic_encounter_completion_attachments(
+	anchor: Dictionary
+) -> void:
+	var previous_origins: Variant = anchor.get("encounterOrigins", [])
+	if not (previous_origins is Array):
+		return
+	var current_origins: Array = _classic_executor.encounter_origins
+	if previous_origins.size() <= current_origins.size():
+		return
+	for index: int in range(
+		previous_origins.size() - 1,
+		current_origins.size() - 1,
+		-1
+	):
+		var origin_value: Variant = previous_origins[index]
+		if not (origin_value is Dictionary):
+			continue
+		var origin: Dictionary = origin_value
+		var outcome := int(origin.get("selectedOutcome", 0))
+		if outcome <= 0:
+			continue
+		var encounter_kind := str(origin.get("encounterKind", ""))
+		var encounter_id := str(origin.get("encounterId", ""))
+		var target_kind := (
+			"complexEncounter"
+			if encounter_kind == "complex"
+			else "simpleEncounter"
+		)
+		_classic_attachment_queue.append_array(
+			_behavior_attachment_instructions(
+				"encounter",
+				"complete",
+				target_kind,
+				[encounter_id],
+				-1,
+				{
+					"encounterKind": encounter_kind,
+					"encounterId": int(origin.get("encounterId", -1)),
+					"outcome": outcome,
+					"resultSlot": outcome - 1,
+					"optionSlot": int(
+						origin.get("selectedOptionSlot", -1)
+					),
+				}
+			)
+		)
+
+
 func _activate_pending_after_attachments() -> void:
 	if _classic_pending_after_anchor.is_empty():
 		return
@@ -879,12 +930,29 @@ func _classic_attachment_instructions(
 	var is_record_hook := hook in ["before-ap", "after-ap"]
 	if trigger_id.is_empty() or (not is_record_hook and slot < 0):
 		return []
-	var bindings := scenario_script_runtime.matching_bindings(
+	return _behavior_attachment_instructions(
 		"action",
 		hook,
 		"trigger",
 		[trigger_id],
 		-1 if is_record_hook else slot
+	)
+
+
+func _behavior_attachment_instructions(
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_ids: Array,
+	slot: int,
+	request := {}
+) -> Array:
+	var bindings := scenario_script_runtime.matching_bindings(
+		role,
+		hook,
+		target_kind,
+		target_ids,
+		slot
 	)
 	var instructions: Array = []
 	for binding_value: Variant in bindings:
@@ -903,12 +971,16 @@ func _classic_attachment_instructions(
 				).duplicate(true),
 				"attachment": {
 					"id": str(binding.get("id", "")),
-					"role": "action",
+					"role": role,
 					"hook": hook,
-					"targetKind": "trigger",
-					"recordId": trigger_id,
-					"slot": null if is_record_hook else slot,
+					"targetKind": target_kind,
+					"recordId": str(binding.get("recordId", "")),
+					"slot": null if slot < 0 else slot,
 					"priority": int(binding.get("priority", 0)),
+					"request": (
+						request.duplicate(true)
+						if request is Dictionary else {}
+					),
 				},
 			},
 		})

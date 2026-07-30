@@ -177,17 +177,6 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		var result_override := _encounter_behavior_override(result_attachments)
 		if not result_override.is_empty():
 			encounter_result.merge(result_override, true)
-		var completion_request := result_request.duplicate(true)
-		completion_request["response"] = encounter_result.duplicate(true)
-		var completion_result := await invoke_behavior_attachments(
-			"encounter",
-			"complete",
-			target_kind,
-			[encounter_id],
-			completion_request
-		)
-		if str(completion_result.get("status", "")) == "error":
-			return completion_result
 		return encounter_result
 	return await super.execute(command_id, routed_request)
 

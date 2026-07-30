@@ -104,6 +104,11 @@ func resume_encounter(
 				and int(encounter_loop.get("remainingAttempts", 1)) == 1 \
 				and int(encounter_loop.get("maxAttempts", 1)) > 1:
 			outcome = 3
+		encounter_loop["selectedOutcome"] = outcome
+		encounter_loop["selectedOptionSlot"] = int(
+			encounter_state.get("optionSlot", -1)
+		)
+		runtime.encounter_origins[-1] = encounter_loop
 
 	var encounter: Dictionary = encounter_context["encounter"]
 	var outcome_trigger := _result(

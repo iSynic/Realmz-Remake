@@ -82,22 +82,22 @@
         {
           "id": "enter",
           "label": "Entry",
-          "description": "Runs when the encounter begins."
+          "description": "Runs before the encounter prompt opens."
         },
         {
           "id": "option",
-          "label": "Choice",
-          "description": "Runs when the selected encounter choice is chosen."
+          "label": "After Choice",
+          "description": "Runs after the player chooses this option and before its result is resolved."
         },
         {
           "id": "result",
-          "label": "Result",
-          "description": "Runs before or after the selected encounter result, according to its attachment."
+          "label": "Before Result",
+          "description": "Runs before the selected Classic result actions."
         },
         {
           "id": "complete",
-          "label": "Completion",
-          "description": "Runs when the encounter closes successfully."
+          "label": "After Result",
+          "description": "Runs after the selected Classic result actions close the encounter successfully."
         }
       ],
       "allowsYield": true,

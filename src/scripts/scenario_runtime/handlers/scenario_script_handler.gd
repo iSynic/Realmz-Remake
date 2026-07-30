@@ -30,6 +30,9 @@ func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
 	}
 	if not attachment.is_empty():
 		invocation_context["attachment"] = attachment
+		var attachment_request: Variant = attachment.get("request")
+		if attachment_request is Dictionary:
+			invocation_context["request"] = attachment_request.duplicate(true)
 	var arguments: Variant = parameters.get("arguments", {})
 	if parameters.has("argumentBindings"):
 		if not context.has_method("resolve_scenario_behavior_arguments"):

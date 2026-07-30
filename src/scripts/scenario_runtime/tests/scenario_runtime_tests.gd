@@ -107,6 +107,7 @@ func _ready() -> void:
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
 	await _test_providence_scripting_acceptance_bundle()
+	_test_classic_enhanced_encounter_completion()
 	_test_classic_enhanced_gosub_attachments()
 	await _test_city_of_bywater_enhanced_ap()
 	_test_safe_script_quest_slice()
@@ -232,8 +233,8 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 	_expect(
 		scripts.get("schemaVersion") == 2
 			and scripts.get("apiVersion") == 2
-			and scripts.get("behaviors", []).size() == 11
-			and scripts.get("bindings", []).size() == 9
+			and scripts.get("behaviors", []).size() == 14
+			and scripts.get("bindings", []).size() == 12
 			and scripts.get("stateDefinitions", []).size() == 3
 			and scripts.get("migrations", []).size() == 1,
 		"Remake consumes the complete Providence-authored scripting contract"
@@ -696,6 +697,103 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 		xap_attachment_hooks == ["before-ap", "after-ap"],
 		"Extra Action Point record attachments fire exactly once in order: %s"
 			% str(xap_attachment_hooks)
+	)
+
+
+func _test_classic_enhanced_encounter_completion() -> void:
+	var bundle := BundleScript.new()
+	_expect(
+		bundle.load_from_directory(
+			PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE
+		),
+		"Providence encounter boundary fixture loads"
+	)
+	if not bundle.last_error.is_empty():
+		return
+	bundle.triggers_by_id["fixture:enhanced-encounter-completion"] = {
+		"id": "fixture:enhanced-encounter-completion",
+		"source": "fixture",
+		"recordIndex": 0,
+		"actions": [{
+			"kind": "classic",
+			"slot": 0,
+			"rawCode": 4,
+			"code": 4,
+			"id": 0,
+			"gosub": false,
+		}],
+	}
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var interpreter := InterpreterScript.new()
+	interpreter.configure(bundle, state)
+	_expect(
+		interpreter.begin_trigger("fixture:enhanced-encounter-completion"),
+		"Classic Enhanced encounter starts at its preserved encounter slot"
+	)
+	var result := interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "start_encounter",
+		"Preserved Classic encounter still owns encounter presentation: %s"
+			% str(result)
+	)
+	if result.get("command") != "start_encounter":
+		return
+	result = interpreter.resume_encounter(1, {"optionSlot": 0})
+	var completion_seen := false
+	for _step: int in range(16):
+		if result.get("status") != "yield":
+			break
+		if result.get("command") == "show_text" \
+				and result.get("payload", {}).get("text") \
+					== "The preserved encounter result is complete.":
+			completion_seen = true
+			break
+		var response := {}
+		if result.get("command") == "take_party_wealth":
+			response = {"paid": true}
+		result = interpreter.resume_command(response)
+	_expect(
+		completion_seen,
+		"After Result behavior waits until preserved Classic result actions finish: %s"
+			% str(result)
+	)
+	if not completion_seen:
+		return
+	var completion_hooks: Array = []
+	for trace_value: Variant in interpreter.trace:
+		if trace_value is Dictionary \
+				and trace_value.get("event") == "behavior-attachment" \
+				and trace_value.get("hook") == "complete":
+			completion_hooks.append(trace_value.get("attachmentId"))
+	_expect(
+		completion_hooks == [
+			"binding.providence.acceptance.encounter.complete"
+		],
+		"Encounter completion attachment fires exactly once: %s"
+			% str(completion_hooks)
+	)
+	var saved := interpreter.make_execution_snapshot()
+	_expect(
+		saved.get("status") == "ok",
+		"Yielding encounter completion behavior is a save boundary"
+	)
+	var restored_state := ClassicRuntimeStateScript.new()
+	restored_state.configure_from_bundle(bundle)
+	var restored := InterpreterScript.new()
+	restored.configure(bundle, restored_state)
+	_expect(
+		restored.restore_execution_snapshot(
+			saved.get("snapshot", {})
+		).get("status") == "ok",
+		"Encounter completion behavior restores through the interpreter"
+	)
+	var completed := restored.resume_command({})
+	_expect(
+		completed.get("status") == "completed",
+		"Restored encounter completion resumes into Classic completion: %s"
+			% str(completed)
 	)
 
 
