@@ -202,7 +202,8 @@ func _drain_timed_encounter_scans() -> void:
 			runtime_state,
 			int(pending_scan.get("day", -1)),
 			int(pending_scan.get("nextIndex", 0)),
-			Callable(self, "_party_has_timed_item")
+			Callable(self, "_party_has_timed_item"),
+			Callable(self, "_resolve_rule_modifier_value")
 		)
 		if str(scan_result.get("status", "")) == "error":
 			push_error(str(scan_result.get("message", "Classic timed-encounter scan failed")))
@@ -243,6 +244,32 @@ func _drain_timed_encounter_scans() -> void:
 			)))
 		# Resume after the macro so opcode 54 can alter a later record in this scan.
 	_timed_dispatch_loop_active = false
+
+
+func _resolve_rule_modifier_value(
+	event_id: String,
+	base_value: float,
+	context: Dictionary
+) -> float:
+	if not is_instance_valid(host) or not host.has_method("resolve_rule_modifiers"):
+		return base_value
+	var result: Variant = host.call(
+		"resolve_rule_modifiers",
+		event_id,
+		base_value,
+		context
+	)
+	if not (result is Dictionary) or str(result.get("status", "")) != "ok":
+		var message := (
+			str(result.get("message", ""))
+			if result is Dictionary else ""
+		)
+		push_error(
+			message if not message.is_empty()
+			else "Scenario rule modifier '%s' failed" % event_id
+		)
+		return base_value
+	return float(result.get("value", base_value))
 
 
 func _party_has_timed_item(item_id: int) -> bool:

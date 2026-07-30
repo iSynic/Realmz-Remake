@@ -3,6 +3,7 @@ extends DelegatingScenarioPort
 
 const COMMANDS := [
 	"query_party_members",
+	"query_spell_definition",
 	"alter_party_fatigue",
 	"check_party_condition",
 	"check_party_ally",
@@ -25,6 +26,7 @@ const COMMANDS := [
 ]
 const OPERATIONS := {
 	"query_party_members": "_query_party_members",
+	"query_spell_definition": "_query_spell_definition",
 	"alter_party_fatigue": "_alter_party_fatigue",
 	"check_party_condition": "_check_party_condition",
 	"check_party_ally": "_check_party_ally",

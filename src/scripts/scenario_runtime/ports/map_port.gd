@@ -4,6 +4,8 @@ extends DelegatingScenarioPort
 const COMMANDS := [
 	"query_location",
 	"query_time",
+	"query_exploration",
+	"query_map_definition",
 	"redraw_map",
 	"set_map_tile",
 	"set_trigger_percent",
@@ -23,6 +25,8 @@ const COMMANDS := [
 const OPERATIONS := {
 	"query_location": "_query_location",
 	"query_time": "_query_time",
+	"query_exploration": "_query_exploration",
+	"query_map_definition": "_query_map_definition",
 	"redraw_map": "_redraw_map",
 	"set_map_tile": "_set_map_tile",
 	"set_trigger_percent": "_set_trigger_percent",

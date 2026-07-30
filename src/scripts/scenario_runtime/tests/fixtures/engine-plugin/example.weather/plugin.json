@@ -1,0 +1,46 @@
+{
+  "packageSchemaVersion": 1,
+  "id": "example.weather",
+  "displayName": "Example Weather",
+  "description": "Fixture plug-in used to verify installation and approval.",
+  "apiVersion": 1,
+  "entryPoint": "plugin.gd",
+  "files": [
+    {
+      "path": "plugin.gd",
+      "size": 242,
+      "sha256": "0ddcb18a58424ff691f4915e4c472837a3fb3b9c682ebc15136cfc6aff49da65"
+    }
+  ],
+  "contentHash": "8a573e475203ba6b378c3bf5059e9b4ce0da01cff0d2dad53f10fe728aa8dd5f",
+  "providers": [
+    {
+      "id": "example.weather.forecast-provider",
+      "method": "forecast"
+    }
+  ],
+  "operations": [
+    {
+      "id": "example.weather.forecast",
+      "label": "Forecast Weather",
+      "category": "Example",
+      "owningPort": "engine.plugins",
+      "minimumTier": "safe",
+      "roles": [
+        "action",
+        "helper"
+      ],
+      "yields": true,
+      "mutates": false,
+      "commandId": "example.weather.forecast-command",
+      "providerId": "example.weather.forecast-provider",
+      "parameters": {
+        "value": "int"
+      },
+      "result": "int",
+      "summary": "Returns a fixture forecast.",
+      "reference": "Used to prove installed plug-in registration.",
+      "example": "var forecast = await weather_forecast(1)"
+    }
+  ]
+}

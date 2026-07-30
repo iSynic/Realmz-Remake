@@ -81,7 +81,8 @@ static func apply_from_weapon(
 	target: Object,
 	weapon: Dictionary,
 	duration_roll := -1,
-	save_roll := -1
+	save_roll := -1,
+	chance_modifier := Callable()
 ) -> Dictionary:
 	var extra_data: Variant = weapon.get("extra_data", {})
 	if not (extra_data is Dictionary):
@@ -89,7 +90,14 @@ static func apply_from_weapon(
 	var special_code := int(extra_data.get("classicSpecialAttack", 0))
 	if not supports(special_code):
 		return {"handled": false}
-	return apply(attacker, target, special_code, duration_roll, save_roll)
+	return apply(
+		attacker,
+		target,
+		special_code,
+		duration_roll,
+		save_roll,
+		chance_modifier
+	)
 
 
 static func apply(
@@ -97,7 +105,8 @@ static func apply(
 	target: Object,
 	special_code: int,
 	duration_roll := -1,
-	save_roll := -1
+	save_roll := -1,
+	chance_modifier := Callable()
 ) -> Dictionary:
 	if not supports(special_code):
 		return {"handled": false}
@@ -126,6 +135,25 @@ static func apply(
 		target,
 		save_index
 	)
+	if chance_modifier.is_valid():
+		save_chance = clampf(
+			float(chance_modifier.call(
+				"condition-resistance",
+				save_chance,
+				{
+					"source": "monster-status-attack",
+					"specialCode": special_code,
+					"conditionIndex": int(definition["conditionIndex"]),
+					"conditionName": str(definition["name"]),
+					"attacker": _rule_subject(attacker),
+					"target": _rule_subject(target),
+					"minimum": 0.0,
+					"maximum": 100.0,
+				}
+			)),
+			0.0,
+			100.0
+		)
 	result["saveChance"] = save_chance
 	result["saveRoll"] = actual_save_roll
 	result["saved"] = actual_save_roll <= save_chance
@@ -171,6 +199,21 @@ static func _has_named_trait(traits: Array, names: Array) -> bool:
 		if trait_value is Object and str(trait_value.get("name")) in names:
 			return true
 	return false
+
+
+static func _rule_subject(value: Object) -> Dictionary:
+	if value == null:
+		return {}
+	var result := {}
+	for property: Dictionary in value.get_property_list():
+		var property_name := str(property.get("name", ""))
+		if property_name == "name":
+			result["name"] = str(value.get(property_name))
+		elif property_name == "level":
+			result["level"] = int(value.get(property_name))
+	if value.has_meta("classic_monster_id"):
+		result["classicMonsterId"] = int(value.get_meta("classic_monster_id"))
+	return result
 
 
 static func _condition_duration(traits: Array, names: Array) -> int:

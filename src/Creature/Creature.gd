@@ -402,7 +402,17 @@ func get_mp_cost_for_tile_stack(stack : Array)->int : #<0 means not walkable
 		for f in effects :
 			cost_f *= f
 		total_cost += cost_f
-	return max(ceil(total_cost),0)
+	var base_cost: int = maxi(ceili(total_cost), 0)
+	return maxi(0, roundi(GameGlobal.apply_scenario_rule_modifier(
+		"movement-cost",
+		float(base_cost),
+		{
+			"mode": "combat",
+			"creature": GameGlobal.scenario_rule_subject(self),
+			"tileCount": stack.size(),
+			"minimum": 0.0,
+		}
+	)))
 
 		
 func recalculate_stats() :
@@ -1664,7 +1674,15 @@ func get_spell_resource_cost(spell, plvl : int) :
 		for t in traits :
 			if t.has_method("_on_get_spell_sp_cost") :
 				cost = t._on_get_spell_sp_cost(cost,spell, plvl, self)
-		return floor(cost)
+		return maxi(0, floori(GameGlobal.apply_scenario_rule_modifier(
+			"spell-cost",
+			float(cost),
+			{
+				"caster": GameGlobal.scenario_rule_subject(self),
+				"spell": GameGlobal.scenario_rule_spell(spell, plvl),
+				"minimum": 0.0,
+			}
+		)))
 	else :
 		return 0
 

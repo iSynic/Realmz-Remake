@@ -1868,6 +1868,38 @@ func _classic_party_charm_resistance_bonus(character: Object) -> int:
 	return int(game_global.call("classic_party_charm_resistance_bonus", character))
 
 
+func _apply_scenario_rule_modifier(
+	event_id: String,
+	base_value: float,
+	context: Dictionary
+) -> float:
+	var game_global: Object = _autoload("GameGlobal")
+	if game_global == null \
+			or not game_global.has_method("apply_scenario_rule_modifier"):
+		return base_value
+	return float(game_global.call(
+		"apply_scenario_rule_modifier",
+		event_id,
+		base_value,
+		context
+	))
+
+
+func _rule_subject(value: Object) -> Dictionary:
+	if value == null:
+		return {}
+	var result := {}
+	if _object_has_property(value, "name"):
+		result["name"] = str(value.get("name"))
+	if _object_has_property(value, "level"):
+		result["level"] = int(value.get("level"))
+	if value.has_meta("classic_monster_id"):
+		result["classicMonsterId"] = int(value.get_meta("classic_monster_id"))
+	elif _object_has_property(value, "classic_monster_id"):
+		result["classicMonsterId"] = int(value.get("classic_monster_id"))
+	return result
+
+
 func classic_field_spell_target_resolution(
 	payload: Dictionary,
 	character: Object,
@@ -1903,7 +1935,8 @@ func classic_field_spell_target_resolution(
 		int(payload.get("power", 0)),
 		save_roll,
 		int(payload.get("saveAdjustment", 0)),
-		forced or resisted
+		forced or resisted,
+		Callable(self, "_apply_scenario_rule_modifier")
 	)
 	if str(save_resolution.get("status", "")) == "error":
 		return _error(str(save_resolution.get("message", "Classic spell save failed")))
@@ -1980,6 +2013,24 @@ func classic_custom_spell_target_resolution(
 					int(spell.classic_save_adjust)
 					+ int(payload.get("saveAdjustment", 0))
 				),
+			0.0,
+			100.0
+		)
+		save_chance = clampf(
+			_apply_scenario_rule_modifier(
+				"condition-resistance",
+				save_chance,
+				{
+					"source": "custom-spell-save",
+					"saveIndex": save_index,
+					"saveMode": save_mode,
+					"power": power,
+					"target": _rule_subject(character),
+					"spell": _rule_subject(spell),
+					"minimum": 0.0,
+					"maximum": 100.0,
+				}
+			),
 			0.0,
 			100.0
 		)
@@ -2862,6 +2913,14 @@ func _party_characters() -> Array:
 		return []
 	var party: Variant = game_global.player_characters
 	return party if party is Array else []
+
+
+func _character_inventory_items(character: Object) -> Array:
+	if character != null and character.has_method("inventory_instances"):
+		return character.inventory_instances()
+	var inventory_value: Variant = character.get("inventory") \
+		if character != null else []
+	return inventory_value if inventory_value is Array else []
 
 
 func _refresh_character_panel(character: Variant) -> void:

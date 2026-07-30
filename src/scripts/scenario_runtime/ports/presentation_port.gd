@@ -3,6 +3,8 @@ extends DelegatingScenarioPort
 
 const COMMANDS := [
 	"show_text",
+	"query_encounter_definition",
+	"query_media_definition",
 	"show_scrolling_text",
 	"choice",
 	"start_encounter",
@@ -15,6 +17,8 @@ const COMMANDS := [
 ]
 const OPERATIONS := {
 	"show_text": "_show_text",
+	"query_encounter_definition": "_query_encounter_definition",
+	"query_media_definition": "_query_media_definition",
 	"show_scrolling_text": "_show_scrolling_text",
 	"choice": "_show_yes_no_choice",
 	"start_encounter": "_show_encounter",

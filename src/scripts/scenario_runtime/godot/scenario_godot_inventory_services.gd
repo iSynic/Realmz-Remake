@@ -34,6 +34,92 @@ func _query_party_wealth(_payload: Dictionary = {}) -> Dictionary:
 	}
 
 
+func _query_party_items(payload: Dictionary = {}) -> Dictionary:
+	var requested_owner := str(payload.get("characterId", ""))
+	var snapshots: Array = []
+	var party: Array = service_owner.call("_party_characters")
+	var node_access: Object = _autoload("NodeAccess")
+	var resources: Object = (
+		node_access.__Resources() if node_access != null else null
+	)
+	for party_index: int in range(party.size()):
+		var owner_value: Variant = party[party_index]
+		if not (owner_value is Object):
+			continue
+		var owner_id := "party:%d" % party_index
+		if not requested_owner.is_empty() and requested_owner != owner_id:
+			continue
+		for instance_value: Variant in service_owner.call(
+			"_character_inventory_items",
+			owner_value
+		):
+			if not (instance_value is ItemInstance):
+				continue
+			var definition: Variant = (
+				resources.get_item_definition(instance_value)
+				if resources != null \
+					and resources.has_method("get_item_definition")
+				else null
+			)
+			var classic_item_ids: Array[int] = []
+			for item_id_value: Variant in service_owner.call(
+				"_classic_item_ids",
+				instance_value
+			):
+				var item_id := int(item_id_value)
+				if item_id != 0 and not classic_item_ids.has(item_id):
+					classic_item_ids.append(item_id)
+			classic_item_ids.sort()
+			snapshots.append({
+				"id": str(instance_value.instance_id),
+				"definitionId": str(instance_value.definition_id),
+				"name": (
+					str(definition.get("name"))
+					if definition is Object else ""
+				),
+				"ownerId": owner_id,
+				"charges": int(instance_value.charges),
+				"equipped": bool(instance_value.equipped),
+				"identified": bool(instance_value.identified),
+				"classicItemIds": classic_item_ids,
+			})
+			if snapshots.size() >= 256:
+				return {"items": snapshots, "value": snapshots}
+	return {"items": snapshots, "value": snapshots}
+
+
+func _query_item_definition(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario item definitions are unavailable")
+	var item_id := int(payload.get("itemId", -1))
+	if item_id < 0:
+		return _error("Scenario item definition reference is invalid")
+	var record: Dictionary = service_owner.classic_bundle.get_scenario_item(
+		item_id
+	)
+	if record.is_empty():
+		return _error("Scenario item %d is unavailable" % item_id)
+	var text: Dictionary = service_owner.classic_bundle.get_item_text(item_id)
+	return {
+		"id": str(int(record.get("itemId", item_id))),
+		"name": str(text.get(
+			"identifiedName",
+			text.get("unidentifiedName", "")
+		)),
+		"iconId": int(record.get("iconId", 0)),
+		"itemType": int(record.get(
+			"itemType",
+			record.get("type", 0)
+		)),
+		"cost": int(record.get("cost", 0)),
+		"weight": int(record.get("weight", 0)),
+		"maximumCharges": int(record.get(
+			"charge",
+			record.get("charges", 0)
+		)),
+	}
+
+
 func classic_save_state() -> Dictionary:
 	return service_owner.call("classic_save_state")
 

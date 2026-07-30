@@ -5,6 +5,15 @@ const PROTOCOL_VERSION := 1
 const InstallScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_install.gd"
 )
+const MapMaterializerScript = preload(
+	"res://scripts/classic_runtime/classic_map_materializer.gd"
+)
+const ItemMaterializerScript = preload(
+	"res://scripts/classic_runtime/classic_item_materializer.gd"
+)
+const BestiaryMaterializerScript = preload(
+	"res://scripts/classic_runtime/classic_bestiary_materializer.gd"
+)
 
 var socket := WebSocketPeer.new()
 var port := 0
@@ -20,6 +29,7 @@ var _evidence_index: Dictionary = {}
 var _debug_breakpoints: Array = []
 var _debug_pause_on_start := false
 var _preview_assertions: Array = []
+var _preview_watches: Array[String] = []
 
 
 func start_from_command_line() -> bool:
@@ -102,6 +112,11 @@ func _handle_message(message: Dictionary) -> void:
 				"status": "ok",
 				"summary": _state_summary(),
 			})
+		"set-watches":
+			var watch_result := _set_preview_watches(message.get("watches", []))
+			_respond(request_id, watch_result)
+		"capture-screenshot":
+			call_deferred("_capture_screenshot", request_id)
 		"set-breakpoints":
 			var breakpoints: Variant = message.get("breakpoints", [])
 			if not (breakpoints is Array):
@@ -153,6 +168,23 @@ func _load_package(path: String, request_id: String) -> void:
 			"message": install.last_error,
 		})
 		return
+	var materialize_result := _materialize_preview_runtime(
+		install.bundle,
+		normalized
+	)
+	if str(materialize_result.get("status", "")) != "ok":
+		_respond(request_id, materialize_result)
+		return
+	install = InstallScript.new()
+	if not install.load_from_campaigns_directory(
+		normalized.get_base_dir(),
+		normalized.get_file()
+	):
+		_respond(request_id, {
+			"status": "error",
+			"message": install.last_error,
+		})
+		return
 	package_directory = normalized
 	_evidence_index.clear()
 	Paths.campaignsfolderpath = normalized.get_base_dir() + "/"
@@ -166,6 +198,35 @@ func _load_package(path: String, request_id: String) -> void:
 		"readiness": rules,
 		"entryPoints": _entry_points(),
 	})
+
+
+func _materialize_preview_runtime(bundle: Object, directory: String) -> Dictionary:
+	var materializers := [
+		{
+			"name": "maps",
+			"instance": MapMaterializerScript.new(),
+		},
+		{
+			"name": "items",
+			"instance": ItemMaterializerScript.new(),
+		},
+		{
+			"name": "bestiary",
+			"instance": BestiaryMaterializerScript.new(),
+		},
+	]
+	for descriptor: Dictionary in materializers:
+		var materializer: Object = descriptor["instance"]
+		var result: Dictionary = materializer.materialize(bundle, directory)
+		if str(result.get("status", "")) != "ok":
+			return {
+				"status": "error",
+				"message": "Preview %s could not be generated: %s" % [
+					descriptor["name"],
+					materializer.last_error,
+				],
+			}
+	return {"status": "ok"}
 
 
 func _launch_entry(entry_value: Variant, request_id: String) -> void:
@@ -193,7 +254,7 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 		_respond(request_id, panel_result)
 		return
 	session = GameGlobal.classic_campaign_session
-	var fixture_result := _apply_preview_fixture(fixture)
+	var fixture_result := await _apply_preview_fixture(fixture)
 	if str(fixture_result.get("status", "")) == "error":
 		_launching = false
 		_respond(request_id, fixture_result)
@@ -268,6 +329,27 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 			entry.get("arguments", {}),
 			entry.get("context", {})
 		)
+	elif kind in [
+		"encounter",
+		"spell",
+		"item",
+		"monster",
+		"lifecycle",
+		"rule",
+	]:
+		var normalized_entry := _normalized_role_entry(entry)
+		if str(normalized_entry.get("status", "")) == "error":
+			_launching = false
+			_respond(request_id, normalized_entry)
+			return
+		call_deferred("_run_preview_role", normalized_entry)
+	else:
+		_launching = false
+		_respond(request_id, {
+			"status": "error",
+			"message": "Preview entry kind '%s' is unavailable" % kind,
+		})
+		return
 	_respond(request_id, {
 		"status": "ok",
 		"entry": entry,
@@ -369,6 +451,9 @@ func _apply_preview_fixture(fixture: Dictionary) -> Dictionary:
 		if fixture.get("assertions", []) is Array
 		else []
 	)
+	var watch_result := _set_preview_watches(fixture.get("watches", []))
+	if str(watch_result.get("status", "")) == "error":
+		return watch_result
 	if fixture.is_empty():
 		return {"status": "ok", "profileId": ""}
 	var wealth: Dictionary = (
@@ -437,11 +522,97 @@ func _apply_preview_fixture(fixture: Dictionary) -> Dictionary:
 	)
 	if script_runtime != null:
 		script_runtime.rng_state = maxi(1, int(fixture.get("rngSeed", 1)))
+	var location_value: Variant = fixture.get("location")
+	if location_value is Dictionary:
+		var location: Dictionary = location_value
+		var teleport_result: Dictionary = await session.host.command_router.route(
+			"teleport",
+			{
+				"levelType": str(location.get("levelType", "land")),
+				"levelIndex": int(location.get("levelIndex", 0)),
+				"x": int(location.get("x", 0)),
+				"y": int(location.get("y", 0)),
+				"source": "providence-preview-profile",
+			}
+		)
+		if str(teleport_result.get("status", "")) == "error":
+			return teleport_result
 	return {
 		"status": "ok",
 		"profileId": str(fixture.get("profileId", "")),
 		"gameplayProfile": str(fixture.get("gameplayProfile", "core.classic")),
 	}
+
+
+func _set_preview_watches(watches_value: Variant) -> Dictionary:
+	if not (watches_value is Array) or watches_value.size() > 64:
+		return {
+			"status": "error",
+			"message": "Preview watches must be an array of at most 64 paths",
+		}
+	var next: Array[String] = []
+	for watch_value: Variant in watches_value:
+		if not (watch_value is String):
+			return {
+				"status": "error",
+				"message": "Preview watch paths must be strings",
+			}
+		var path := str(watch_value).strip_edges()
+		if path.is_empty() or path.length() > 160:
+			return {
+				"status": "error",
+				"message": "Preview watch path is empty or too long",
+			}
+		if path not in next:
+			next.append(path)
+	_preview_watches = next
+	return {
+		"status": "ok",
+		"watches": _watch_report(),
+	}
+
+
+func _capture_screenshot(request_id: String) -> void:
+	await RenderingServer.frame_post_draw
+	var image := get_viewport().get_texture().get_image()
+	if image == null or image.is_empty():
+		_respond(request_id, {
+			"status": "error",
+			"message": "Remake could not capture the preview window",
+		})
+		return
+	var maximum_width := 1024
+	var maximum_height := 720
+	if image.get_width() > maximum_width or image.get_height() > maximum_height:
+		var scale := minf(
+			float(maximum_width) / float(image.get_width()),
+			float(maximum_height) / float(image.get_height())
+		)
+		image.resize(
+			maxi(1, int(round(float(image.get_width()) * scale))),
+			maxi(1, int(round(float(image.get_height()) * scale))),
+			Image.INTERPOLATE_LANCZOS
+		)
+	var bytes := image.save_jpg_to_buffer(0.86)
+	var encoded := Marshalls.raw_to_base64(bytes)
+	if encoded.length() > 800_000:
+		bytes = image.save_jpg_to_buffer(0.68)
+		encoded = Marshalls.raw_to_base64(bytes)
+	if encoded.length() > 800_000:
+		_respond(request_id, {
+			"status": "error",
+			"message": "Preview screenshot exceeded the protocol size limit",
+		})
+		return
+	_respond(request_id, {
+		"status": "ok",
+		"screenshot": {
+			"mimeType": "image/jpeg",
+			"base64": encoded,
+			"width": image.get_width(),
+			"height": image.get_height(),
+		},
+	})
 
 
 static func _apply_optional_stat(
@@ -455,6 +626,13 @@ static func _apply_optional_stat(
 
 
 func _run_preview_trigger(trigger_id: String, slot: int) -> void:
+	var debug_result := _prepare_debugger_for_entry()
+	if str(debug_result.get("status", "")) != "ok":
+		_send({
+			"type": "runtime-error",
+			"message": debug_result.get("message", "Scenario debugger is unavailable"),
+		})
+		return
 	var result: Dictionary = await session.host.run_trigger(
 		trigger_id,
 		slot,
@@ -475,6 +653,13 @@ func _run_preview_behavior(
 	arguments_value: Variant,
 	context_value: Variant
 ) -> void:
+	var debug_result := _prepare_debugger_for_entry()
+	if str(debug_result.get("status", "")) != "ok":
+		_send({
+			"type": "runtime-error",
+			"message": debug_result.get("message", "Scenario debugger is unavailable"),
+		})
+		return
 	var arguments: Dictionary = (
 		arguments_value if arguments_value is Dictionary else {}
 	)
@@ -495,6 +680,207 @@ func _run_preview_behavior(
 		"debugger": _debugger_snapshot(),
 		"assertions": _assertion_report(),
 	})
+
+
+func _run_preview_role(entry: Dictionary) -> void:
+	var debug_result := _prepare_debugger_for_entry()
+	if str(debug_result.get("status", "")) != "ok":
+		_send({
+			"type": "runtime-error",
+			"message": debug_result.get("message", "Scenario debugger is unavailable"),
+		})
+		return
+	var role := str(entry.get("role", ""))
+	var hook := str(entry.get("hook", ""))
+	var result := {}
+	if role == "rule-modifier":
+		result = session.host.resolve_rule_modifiers(
+			hook,
+			float(entry.get("baseValue", 50.0)),
+			_preview_role_request(entry)
+		)
+	elif role == "lifecycle" and str(entry.get("behaviorId", "")).is_empty():
+		result = await session.host.emit_lifecycle_event(
+			hook,
+			_preview_role_request(entry)
+		)
+	else:
+		result = await session.host.run_behavior_binding(
+			str(entry.get("behaviorId", "")),
+			role,
+			hook,
+			str(entry.get("targetKind", "")),
+			str(entry.get("recordId", "")),
+			int(entry.get("slot", -1)),
+			_preview_role_request(entry)
+		)
+	_send({
+		"type": "runtime-event",
+		"event": "%s-preview-finished" % role,
+		"entry": entry,
+		"result": result,
+		"trace": _vm_trace(),
+		"debugger": _debugger_snapshot(),
+		"state": _state_summary(),
+		"assertions": _assertion_report(),
+	})
+
+
+func _normalized_role_entry(entry: Dictionary) -> Dictionary:
+	var result := entry.duplicate(true)
+	var kind := str(result.get("kind", ""))
+	var role := str(result.get("role", _role_for_entry_kind(kind)))
+	var behavior_id := str(result.get("behaviorId", ""))
+	var document: Dictionary = install.bundle.documents.get("remakeScripts", {})
+	var selected_binding := {}
+	for binding_value: Variant in document.get("bindings", []):
+		if not (binding_value is Dictionary):
+			continue
+		var binding: Dictionary = binding_value
+		if not behavior_id.is_empty() \
+				and str(binding.get("behaviorId", "")) != behavior_id:
+			continue
+		if not role.is_empty() and str(binding.get("role", "")) != role:
+			continue
+		selected_binding = binding
+		break
+	if selected_binding.is_empty():
+		return {
+			"status": "error",
+			"message": (
+				"Preview behavior '%s' has no %s binding"
+				% [behavior_id, role]
+			),
+		}
+	result["status"] = "ok"
+	result["behaviorId"] = str(selected_binding.get("behaviorId", behavior_id))
+	result["role"] = str(selected_binding.get("role", role))
+	for field: String in ["hook", "targetKind", "recordId"]:
+		if str(result.get(field, "")).is_empty():
+			result[field] = str(selected_binding.get(field, ""))
+	var slot_value: Variant = result.get("slot")
+	if slot_value == null:
+		slot_value = selected_binding.get("slot", -1)
+	result["slot"] = int(slot_value)
+	if result["hook"].is_empty() \
+			or result["targetKind"].is_empty() \
+			or result["recordId"].is_empty():
+		return {
+			"status": "error",
+			"message": "Preview behavior binding is incomplete",
+		}
+	return result
+
+
+func _preview_role_request(entry: Dictionary) -> Dictionary:
+	var role := str(entry.get("role", ""))
+	var record_id := str(entry.get("recordId", ""))
+	var context: Dictionary = (
+		entry.get("context", {}).duplicate(true)
+		if entry.get("context", {}) is Dictionary else {}
+	)
+	var party := _preview_party_summary()
+	var request := {
+		"source": "providence-preview",
+		"preview": true,
+		"slot": int(entry.get("slot", -1)),
+		"recordId": record_id,
+		"party": party,
+		"world": {
+			"location": _current_location(),
+			"totalSeconds": int(GameGlobal.time),
+			"questValues": _preview_quest_values(),
+		},
+		"context": context,
+	}
+	match role:
+		"encounter":
+			request.merge({
+				"encounterId": record_id,
+				"encounterKind": str(entry.get(
+					"targetKind",
+					"simpleEncounter"
+				)),
+				"outcome": int(context.get("outcome", 1)),
+				"response": context.get("response", {}),
+			}, true)
+		"spell":
+			var caster: Dictionary = party[0] if not party.is_empty() else {}
+			var targets: Array = (
+				party.slice(1) if party.size() > 1 else [caster]
+			)
+			request.merge({
+				"spell": {
+					"ids": [record_id],
+					"name": str(context.get("spellName", "Preview Spell")),
+					"power": int(context.get("power", 1)),
+				},
+				"caster": caster,
+				"targets": targets,
+				"cast": {
+					"mode": str(context.get("mode", "field")),
+					"preview": true,
+				},
+			}, true)
+		"item":
+			var user: Dictionary = party[0] if not party.is_empty() else {}
+			request.merge({
+				"item": {
+					"definitionId": record_id,
+					"instanceId": "preview:%s" % record_id,
+					"charges": int(context.get("charges", 1)),
+					"state": context.get("itemState", {}),
+				},
+				"definition": {
+					"id": record_id,
+					"name": str(context.get("itemName", "Preview Item")),
+				},
+				"user": user,
+				"target": user,
+				"hook": str(entry.get("hook", "")),
+			}, true)
+		"monster-ai":
+			request.merge({
+				"monster": {
+					"id": record_id,
+					"name": str(context.get("monsterName", "Preview Monster")),
+					"health": int(context.get("health", 10)),
+					"maximumHealth": int(context.get("maximumHealth", 10)),
+					"spellPoints": int(context.get("spellPoints", 0)),
+					"maximumSpellPoints": int(context.get("maximumSpellPoints", 0)),
+					"position": context.get("position", {"x": 0, "y": 0}),
+					"faction": int(context.get("faction", 1)),
+					"alive": true,
+				},
+				"combat": {
+					"active": StateMachine.is_combat_state(),
+					"party": party,
+					"seed": int(context.get("rngSeed", 1)),
+				},
+			}, true)
+		"lifecycle":
+			request["event"] = str(entry.get("hook", ""))
+		"rule-modifier":
+			request.merge({
+				"event": str(entry.get("hook", "")),
+				"baseValue": float(entry.get("baseValue", 50.0)),
+				"currentValue": float(entry.get("baseValue", 50.0)),
+				"minimum": float(context.get("minimum", -INF)),
+				"maximum": float(context.get("maximum", INF)),
+				"pure": true,
+			}, true)
+	return request
+
+
+static func _role_for_entry_kind(kind: String) -> String:
+	return str({
+		"encounter": "encounter",
+		"spell": "spell",
+		"item": "item",
+		"monster": "monster-ai",
+		"lifecycle": "lifecycle",
+		"rule": "rule-modifier",
+	}.get(kind, ""))
 
 
 func _on_command_started(command: String, payload: Dictionary) -> void:
@@ -530,10 +916,51 @@ func _entry_points() -> Dictionary:
 	var battles: Array[Dictionary] = []
 	for battle: Variant in install.bundle.documents.get("encounters", {}).get("battles", []):
 		battles.append({"id": battle.get("id", 0), "name": battle.get("name", "")})
+	var behavior_entries: Dictionary = {
+		"action": [],
+		"encounter": [],
+		"spell": [],
+		"item": [],
+		"monster-ai": [],
+		"lifecycle": [],
+		"rule-modifier": [],
+		"helper": [],
+	}
+	var document: Dictionary = install.bundle.documents.get("remakeScripts", {})
+	var behaviors_by_id := {}
+	for behavior_value: Variant in document.get("behaviors", []):
+		if behavior_value is Dictionary:
+			behaviors_by_id[str(behavior_value.get("id", ""))] = behavior_value
+	for binding_value: Variant in document.get("bindings", []):
+		if not (binding_value is Dictionary):
+			continue
+		var binding: Dictionary = binding_value
+		var behavior_id := str(binding.get("behaviorId", ""))
+		var behavior: Dictionary = behaviors_by_id.get(behavior_id, {})
+		var role := str(binding.get("role", behavior.get("role", "")))
+		if not behavior_entries.has(role):
+			continue
+		behavior_entries[role].append({
+			"behaviorId": behavior_id,
+			"name": str(behavior.get("name", behavior_id)),
+			"hook": str(binding.get("hook", behavior.get("hook", ""))),
+			"targetKind": str(binding.get("targetKind", "")),
+			"recordId": str(binding.get("recordId", "")),
+			"slot": binding.get("slot"),
+		})
+	for behavior_id: Variant in behaviors_by_id:
+		var behavior: Dictionary = behaviors_by_id[behavior_id]
+		if str(behavior.get("kind", "")) != "helper":
+			continue
+		behavior_entries["helper"].append({
+			"behaviorId": str(behavior_id),
+			"name": str(behavior.get("name", behavior_id)),
+		})
 	return {
 		"start": install.bundle.get_start(),
 		"actionPoints": action_points,
 		"battles": battles,
+		"behaviors": behavior_entries,
 	}
 
 
@@ -619,6 +1046,7 @@ func _state_summary() -> Dictionary:
 		),
 		"debugger": _debugger_snapshot(),
 	}
+	summary["watches"] = _watch_report(summary)
 	summary["assertions"] = _assertion_report(summary)
 	return summary
 
@@ -696,6 +1124,21 @@ func _assertion_report(state: Dictionary = {}) -> Dictionary:
 	}
 
 
+func _watch_report(state: Dictionary = {}) -> Array:
+	var summary := state if not state.is_empty() else _state_without_assertions()
+	if not summary.has("debugger"):
+		summary["debugger"] = _debugger_snapshot()
+	var result: Array = []
+	for path: String in _preview_watches:
+		var resolved := _value_at_path(summary, path)
+		result.append({
+			"path": path,
+			"found": bool(resolved.get("found", false)),
+			"value": resolved.get("value"),
+		})
+	return result
+
+
 func _state_without_assertions() -> Dictionary:
 	return {
 		"campaignId": (
@@ -769,6 +1212,16 @@ func _configure_scenario_debugger() -> Dictionary:
 	)
 
 
+func _prepare_debugger_for_entry() -> Dictionary:
+	var result := _configure_scenario_debugger()
+	if bool(result.get("deferred", false)):
+		return {
+			"status": "error",
+			"message": "Scenario debugger is not ready for the selected preview entry",
+		}
+	return result
+
+
 func _debugger_snapshot() -> Dictionary:
 	if not is_instance_valid(session) \
 			or session.host == null \
@@ -780,10 +1233,19 @@ func _debugger_snapshot() -> Dictionary:
 
 
 func _current_location() -> Dictionary:
+	var x := 0
+	var y := 0
+	if is_instance_valid(GameGlobal.map):
+		var map_character: Variant = GameGlobal.map.get("owcharacter")
+		if not is_instance_valid(map_character):
+			map_character = GameGlobal.map.get("focuscharacter")
+		if is_instance_valid(map_character):
+			x = int(map_character.get("tile_position_x"))
+			y = int(map_character.get("tile_position_y"))
 	return {
 		"map": GameGlobal.currentmap_name,
-		"x": int(GameGlobal.position.x),
-		"y": int(GameGlobal.position.y),
+		"x": x,
+		"y": y,
 	}
 
 

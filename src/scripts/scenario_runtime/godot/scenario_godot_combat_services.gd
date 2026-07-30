@@ -1,6 +1,10 @@
 class_name ScenarioGodotCombatServices
 extends "res://scripts/scenario_runtime/godot/scenario_godot_domain_service.gd"
 
+const CharacterConditionRulesScript = preload(
+	"res://scripts/classic_runtime/classic_character_condition_rules.gd"
+)
+
 var last_classic_spawn_presentation: Dictionary = {}
 # Opcode 100 runs in a nested host while start_battle waits on this service.
 # This one-shot carries its slot-8 result back to the suspended outer command.
@@ -45,6 +49,69 @@ func _query_combat(_payload: Dictionary = {}) -> Dictionary:
 	}
 
 
+func _query_monster_definition(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario monster definitions are unavailable")
+	var monster_id := int(payload.get("monsterId", -1))
+	if monster_id < 0:
+		return _error("Scenario monster definition reference is invalid")
+	var record: Dictionary = service_owner.classic_bundle.get_monster(
+		monster_id
+	)
+	if record.is_empty():
+		return _error(
+			"Scenario monster %d is unavailable" % monster_id
+		)
+	var spell_ids: Array[int] = []
+	for spell_value: Variant in record.get("spells", []):
+		var spell_id := int(spell_value)
+		if spell_id != 0 and not spell_ids.has(spell_id):
+			spell_ids.append(spell_id)
+	return {
+		"id": str(record.get("id", monster_id)),
+		"name": str(record.get("displayName", "")),
+		"nameId": int(record.get(
+			"nameId",
+			record.get("monsterNameId", -1)
+		)),
+		"iconId": int(record.get("iconId", 0)),
+		"maximumHealth": int(record.get(
+			"staminaMax",
+			record.get("stamina", 0)
+		)),
+		"armor": int(record.get("armor", 0)),
+		"movement": int(record.get(
+			"movementMax",
+			record.get("movement", 0)
+		)),
+		"experience": int(record.get("exp", 0)),
+		"spellIds": spell_ids,
+	}
+
+
+func _query_battle_definition(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario battle definitions are unavailable")
+	var battle_id := int(payload.get("battleId", -1))
+	if battle_id < 0:
+		return _error("Scenario battle definition reference is invalid")
+	var record: Dictionary = service_owner.classic_bundle.get_battle(battle_id)
+	if record.is_empty():
+		return _error("Scenario battle %d is unavailable" % battle_id)
+	var monster_ids: Array[int] = []
+	for cell_value: Variant in record.get("grid", []):
+		var monster_id := int(cell_value)
+		if monster_id != 0 and not monster_ids.has(monster_id):
+			monster_ids.append(monster_id)
+	return {
+		"id": str(record.get("id", battle_id)),
+		"name": str(record.get("name", "Battle %d" % battle_id)),
+		"monsterIds": monster_ids,
+		"distance": int(record.get("dist", 0)),
+		"macroId": int(record.get("battleMacro", 0)),
+	}
+
+
 func _apply_combat_damage(payload: Dictionary) -> Dictionary:
 	return _change_combat_health(payload, -absi(int(payload.get("amount", 0))))
 
@@ -53,22 +120,52 @@ func _apply_combat_healing(payload: Dictionary) -> Dictionary:
 	return _change_combat_health(payload, absi(int(payload.get("amount", 0))))
 
 
-func _change_combat_health(payload: Dictionary, amount: int) -> Dictionary:
-	var context: Dictionary = service_owner.call("_combat_context")
-	if context.has("error"):
-		return _error(str(context["error"]))
-	var target_id := str(payload.get("targetId", ""))
-	if not target_id.begins_with("combat:") or not target_id.substr(7).is_valid_int():
-		return _error("Scenario combat target reference is invalid")
-	var target_index := int(target_id.substr(7))
-	var combatants: Array = context["combatants"]
-	if target_index < 0 or target_index >= combatants.size():
-		return _error("Scenario combat target is unavailable")
-	var creature: Variant = service_owner.call(
-		"_combatant_creature",
-		combatants[target_index]
+func _apply_combat_condition(payload: Dictionary) -> Dictionary:
+	var target_result := _combat_target(payload)
+	if target_result.has("error"):
+		return _error(str(target_result["error"]))
+	var condition_index := int(payload.get("conditionIndex", -1))
+	if not CharacterConditionRulesScript.supports_condition(condition_index):
+		return _error(
+			"Scenario combat condition %d has no Remake mapping"
+			% condition_index
+		)
+	var duration := clampi(int(payload.get("duration", 0)), -100000, 100000)
+	var mode := str(payload.get("mode", "add")).to_lower()
+	if mode not in ["add", "set", "clear"]:
+		return _error("Scenario combat condition mode is invalid")
+	var creature: Object = target_result["creature"]
+	var previous := CharacterConditionRulesScript.condition_value(
+		creature,
+		condition_index
 	)
-	if not (creature is Object) or not creature.has_method("change_cur_hp"):
+	var value := 0 if mode == "clear" else duration
+	if mode == "add":
+		value += previous
+	var set_result := CharacterConditionRulesScript.set_condition_value(
+		creature,
+		condition_index,
+		value
+	)
+	if str(set_result.get("status", "")) == "error":
+		return set_result
+	return {
+		"targetId": target_result["targetId"],
+		"conditionIndex": condition_index,
+		"conditionName": CharacterConditionRulesScript.condition_name(
+			condition_index
+		),
+		"previousValue": previous,
+		"value": value,
+	}
+
+
+func _change_combat_health(payload: Dictionary, amount: int) -> Dictionary:
+	var target_result := _combat_target(payload)
+	if target_result.has("error"):
+		return _error(str(target_result["error"]))
+	var creature: Object = target_result["creature"]
+	if not creature.has_method("change_cur_hp"):
 		return _error("Scenario combat target cannot change health")
 	var stats: Variant = creature.get("stats")
 	var previous := int(stats.get("curHP", 0)) if stats is Dictionary else 0
@@ -77,10 +174,34 @@ func _change_combat_health(payload: Dictionary, amount: int) -> Dictionary:
 	var current := int(current_stats.get("curHP", previous)) \
 		if current_stats is Dictionary else previous
 	return {
-		"targetId": target_id,
+		"targetId": target_result["targetId"],
 		"amount": absi(current - previous),
 		"previousHealth": previous,
 		"health": current,
+	}
+
+
+func _combat_target(payload: Dictionary) -> Dictionary:
+	var context: Dictionary = service_owner.call("_combat_context")
+	if context.has("error"):
+		return {"error": str(context["error"])}
+	var target_id := str(payload.get("targetId", ""))
+	if not target_id.begins_with("combat:") \
+			or not target_id.substr(7).is_valid_int():
+		return {"error": "Scenario combat target reference is invalid"}
+	var target_index := int(target_id.substr(7))
+	var combatants: Array = context["combatants"]
+	if target_index < 0 or target_index >= combatants.size():
+		return {"error": "Scenario combat target is unavailable"}
+	var creature: Variant = service_owner.call(
+		"_combatant_creature",
+		combatants[target_index]
+	)
+	if not (creature is Object):
+		return {"error": "Scenario combat target has no creature state"}
+	return {
+		"targetId": target_id,
+		"creature": creature,
 	}
 
 

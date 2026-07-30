@@ -966,8 +966,17 @@ func get_spell_resource_cost(spell, plvl : int) :
 			if t.has_method("_on_get_spell_sp_cost") :
 				#print("PlayerCHar get_spell_resource_cost trait affects")
 				cost = t._on_get_spell_sp_cost(cost,spell, plvl, self)
-		print(max(0,floor(cost)))
-		return max(0,floor(cost))
+		var modified_cost := maxi(0, floori(GameGlobal.apply_scenario_rule_modifier(
+			"spell-cost",
+			float(cost),
+			{
+				"caster": GameGlobal.scenario_rule_subject(self),
+				"spell": GameGlobal.scenario_rule_spell(spell, plvl),
+				"minimum": 0.0,
+			}
+		)))
+		print(modified_cost)
+		return modified_cost
 	else :
 		return 0
 

@@ -57,18 +57,41 @@ const RuntimeScript = preload(
 const RuleModifierPipelineScript = preload(
 	"res://scripts/scenario_runtime/scenario_rule_modifier_pipeline.gd"
 )
+const PreviewHostScript = preload(
+	"res://scripts/scenario_runtime/preview/scenario_preview_host.gd"
+)
+const EnginePluginRegistryScript = preload(
+	"res://scripts/scenario_runtime/scenario_engine_plugin_registry.gd"
+)
+const EnginePluginStoreScript = preload(
+	"res://scripts/scenario_runtime/scenario_engine_plugin_store.gd"
+)
 
 const V3_FIXTURE := \
 	"res://scripts/classic_runtime/tests/fixtures/war_in_the_sword_lands_gosub"
 const V1_FIXTURE := \
 	"res://scripts/scenario_runtime/tests/fixtures/v1_rejected"
+const PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE := \
+	"res://scripts/scenario_runtime/tests/fixtures/providence-scripting-acceptance"
 
 var failures := 0
 
 
+class PartyItemCarrier:
+	extends RefCounted
+	var item_inventory: Array[ItemInstance] = []
+
+	func inventory_instances() -> Array[ItemInstance]:
+		return item_inventory.duplicate()
+
+
 func _ready() -> void:
 	_test_v3_bundle_contract()
+	_test_definition_snapshot_services()
 	_test_extension_registry()
+	await _test_engine_plugin_registry()
+	_test_engine_plugin_store()
+	_test_engine_plugin_settings_ui()
 	await _test_gameplay_rules()
 	_test_handler_registry()
 	_test_command_ports()
@@ -76,7 +99,9 @@ func _ready() -> void:
 	_test_classic_execution_state_ownership()
 	_test_classic_dispatcher_noops()
 	await _test_builtin_extension_execution()
+	await _test_providence_scripting_acceptance_bundle()
 	_test_safe_script_quest_slice()
+	_test_guided_source_node_assignment()
 	_test_nested_safe_behavior_execution()
 	_test_spell_effect_lifecycle()
 	_test_campaign_completion_state()
@@ -91,6 +116,30 @@ func _ready() -> void:
 	else:
 		push_error("Scenario runtime tests failed: %d" % failures)
 		get_tree().quit(1)
+
+
+func _test_guided_source_node_assignment() -> void:
+	var statements: Array = [
+		{"kind": "operation", "sourceNode": "n1"},
+		{
+			"kind": "if",
+			"then": [{"kind": "assign"}],
+			"else": [{"kind": "return"}],
+		},
+	]
+	ScenarioScriptRuntimeScript._assign_debug_source_nodes(statements, "/body")
+	_expect(
+		str(statements[0].get("sourceNode", "")) == "n1",
+		"Safe source keeps its authored source-node identity"
+	)
+	_expect(
+		str(statements[1].get("sourceNode", "")) == "guided/body/1"
+			and str(statements[1]["then"][0].get("sourceNode", "")) \
+				== "guided/body/1/then/0"
+			and str(statements[1]["else"][0].get("sourceNode", "")) \
+				== "guided/body/1/else/0",
+		"Guided outline blocks receive deterministic debugger identities"
+	)
 
 
 func _test_v3_bundle_contract() -> void:
@@ -112,6 +161,325 @@ func _test_v3_bundle_contract() -> void:
 	_expect(
 		old_bundle.last_error.contains("Unsupported scenario campaign format"),
 		"obsolete bundle rejection identifies the unsupported contract"
+	)
+
+
+func _test_providence_scripting_acceptance_bundle() -> void:
+	var bundle := BundleScript.new()
+	_expect(
+		bundle.load_from_directory(PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE),
+		"Providence scripting acceptance bundle loads in Remake"
+	)
+	if not bundle.last_error.is_empty():
+		push_error(bundle.last_error)
+		return
+	var scripts: Dictionary = bundle.documents.get("remakeScripts", {})
+	_expect(
+		scripts.get("schemaVersion") == 2
+			and scripts.get("apiVersion") == 2
+			and scripts.get("behaviors", []).size() == 9
+			and scripts.get("bindings", []).size() == 7
+			and scripts.get("stateDefinitions", []).size() == 3
+			and scripts.get("migrations", []).size() == 1,
+		"Remake consumes the complete Providence-authored scripting contract"
+	)
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var interpreter := InterpreterScript.new()
+	interpreter.configure(bundle, state)
+	_expect(
+		interpreter.scenario_script_runtime != null
+			and interpreter.scenario_script_runtime.last_error.is_empty(),
+		"Providence-authored behaviors configure in the central interpreter"
+	)
+	var host := HostScript.new()
+	add_child(host)
+	host.configure(RefCounted.new())
+	host.use_campaign(bundle)
+	for role_case: Dictionary in [
+		{
+			"behaviorId": "scenario.providence.encounter-result",
+			"role": "encounter",
+			"hook": "result",
+			"targetKind": "simpleEncounter",
+			"recordId": "0",
+			"slot": 0,
+			"expectedKind": "continue",
+		},
+		{
+			"behaviorId": "scenario.providence.spell-effect",
+			"role": "spell",
+			"hook": "effect",
+			"targetKind": "spell",
+			"recordId": "16",
+			"slot": -1,
+			"expectedKind": "applied",
+		},
+		{
+			"behaviorId": "scenario.providence.item-use",
+			"role": "item",
+			"hook": "use-field",
+			"targetKind": "item",
+			"recordId": "101",
+			"slot": -1,
+			"expectedKind": "used",
+		},
+		{
+			"behaviorId": "scenario.providence.monster-ai",
+			"role": "monster-ai",
+			"hook": "decide",
+			"targetKind": "monster",
+			"recordId": "1",
+			"slot": -1,
+			"expectedKind": "wait",
+		},
+		{
+			"behaviorId": "scenario.providence.campaign-start",
+			"role": "lifecycle",
+			"hook": "campaign-start",
+			"targetKind": "lifecycle",
+			"recordId": "campaign",
+			"slot": -1,
+			"expectedKind": "",
+		},
+	]:
+		var role_result: Dictionary = await host.run_behavior_binding(
+			role_case["behaviorId"],
+			role_case["role"],
+			role_case["hook"],
+			role_case["targetKind"],
+			role_case["recordId"],
+			role_case["slot"],
+			{"source": "preview-role-test", "slot": role_case["slot"]}
+		)
+		_expect(
+			role_result.get("status") == "ok"
+				and (
+					str(role_case["expectedKind"]).is_empty()
+					or role_result.get("value", {}).get("kind")
+						== role_case["expectedKind"]
+				),
+			"Providence-authored %s binding runs through its typed role: %s"
+				% [role_case["role"], role_result]
+		)
+	var rule_result: Dictionary = host.resolve_rule_modifiers(
+		"attack-chance",
+		50.0,
+		{"minimum": 0.0, "maximum": 100.0}
+	)
+	_expect(
+		rule_result.get("status") == "ok"
+			and is_equal_approx(float(rule_result.get("value", 0.0)), 55.0),
+		"Providence-authored rule binding runs through the modifier pipeline"
+	)
+	for entry_kind: String in [
+		"encounter",
+		"spell",
+		"item",
+		"monster",
+		"lifecycle",
+		"rule",
+	]:
+		_expect(
+			not PreviewHostScript._role_for_entry_kind(entry_kind).is_empty(),
+			"preview entry '%s' resolves a typed behavior role" % entry_kind
+		)
+	host.queue_free()
+	_expect(
+		interpreter.begin_trigger("land:0:ap:0"),
+		"Providence-authored AP binding starts through the Classic trigger"
+	)
+	var result := interpreter.run_until_yield()
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "query_party_wealth",
+		"Providence-authored AP queries party wealth"
+	)
+	result = interpreter.resume_command({
+		"gold": 500,
+		"gems": 0,
+		"jewelry": 0,
+		"pooledGold": 500,
+	})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "query_time",
+		"Providence-authored AP resumes into the campaign clock query"
+	)
+	result = interpreter.resume_command({
+		"day": 3,
+		"hour": 12,
+		"minute": 0,
+		"second": 0,
+		"totalSeconds": 216000,
+	})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "query_party_members",
+		"Providence-authored AP resumes into immutable party snapshots"
+	)
+	result = interpreter.resume_command({
+		"value": [{
+			"id": "party:0",
+			"name": "Acceptance Hero",
+			"level": 1,
+			"raceId": 1,
+			"raceName": "Human",
+			"casteId": 1,
+			"casteName": "Warrior",
+			"gender": 0,
+			"health": 10,
+			"maximumHealth": 10,
+			"spellPoints": 0,
+			"maximumSpellPoints": 0,
+			"strength": 10,
+			"intellect": 10,
+			"wisdom": 10,
+			"dexterity": 10,
+			"vitality": 10,
+			"luck": 10,
+			"movement": 12,
+			"conditions": [],
+			"itemIds": [],
+			"alive": true,
+		}],
+	})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "take_party_wealth"
+			and result.get("payload", {}).get("gold") == 500,
+		"Providence-authored collection query reaches its payment branch"
+	)
+	result = interpreter.resume_command({"paid": true})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text"
+			and result.get("payload", {}).get("text")
+				== "The captain accepts your payment.",
+		"Providence-authored AP writes state and yields presentation"
+	)
+	var saved := interpreter.make_execution_snapshot()
+	_expect(
+		saved.get("status") == "ok",
+		"Providence-authored pending behavior produces a save snapshot"
+	)
+	var restored_state := ClassicRuntimeStateScript.new()
+	restored_state.configure_from_bundle(bundle)
+	var restored_interpreter := InterpreterScript.new()
+	restored_interpreter.configure(bundle, restored_state)
+	var restore_result := restored_interpreter.restore_execution_snapshot(
+		saved.get("snapshot", {})
+	)
+	_expect(
+		restore_result.get("status") == "ok",
+		"Remake restores the Providence-authored behavior snapshot"
+	)
+	result = restored_interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "choice"
+			and result.get("payload", {}).get("options")
+				== ["Accept", "Decline"],
+		"Restored Providence-authored AP reaches its authored choice: %s"
+			% str(result)
+	)
+	saved = restored_interpreter.make_execution_snapshot()
+	_expect(
+		saved.get("status") == "ok",
+		"Providence-authored pending choice remains a save boundary"
+	)
+	restored_state = ClassicRuntimeStateScript.new()
+	restored_state.configure_from_bundle(bundle)
+	restored_interpreter = InterpreterScript.new()
+	restored_interpreter.configure(bundle, restored_state)
+	restore_result = restored_interpreter.restore_execution_snapshot(
+		saved.get("snapshot", {})
+	)
+	_expect(
+		restore_result.get("status") == "ok",
+		"Remake restores the Providence-authored pending choice"
+	)
+	result = restored_interpreter.resume_command({"choice": 0})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "teleport"
+			and result.get("payload", {}).get("levelType") == "land"
+			and result.get("payload", {}).get("levelIndex") == 0
+			and result.get("payload", {}).get("x") == 11
+			and result.get("payload", {}).get("y") == 12,
+		"Providence-authored choice resumes into a typed teleport: %s"
+			% str(result)
+	)
+	saved = restored_interpreter.make_execution_snapshot()
+	_expect(
+		saved.get("status") == "ok",
+		"Providence-authored pending teleport remains a save boundary"
+	)
+	restored_state = ClassicRuntimeStateScript.new()
+	restored_state.configure_from_bundle(bundle)
+	restored_interpreter = InterpreterScript.new()
+	restored_interpreter.configure(bundle, restored_state)
+	restore_result = restored_interpreter.restore_execution_snapshot(
+		saved.get("snapshot", {})
+	)
+	_expect(
+		restore_result.get("status") == "ok",
+		"Remake restores the Providence-authored pending teleport"
+	)
+	result = restored_interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "start_battle"
+			and result.get("payload", {}).get("battleId") == 0,
+		"Providence-authored teleport resumes into its authored battle: %s"
+			% str(result)
+	)
+	saved = restored_interpreter.make_execution_snapshot()
+	_expect(
+		saved.get("status") == "ok",
+		"Providence-authored pending battle remains a save boundary"
+	)
+	restored_state = ClassicRuntimeStateScript.new()
+	restored_state.configure_from_bundle(bundle)
+	restored_interpreter = InterpreterScript.new()
+	restored_interpreter.configure(bundle, restored_state)
+	restore_result = restored_interpreter.restore_execution_snapshot(
+		saved.get("snapshot", {})
+	)
+	_expect(
+		restore_result.get("status") == "ok",
+		"Remake restores the Providence-authored pending battle"
+	)
+	result = restored_interpreter.resume_command({"won": true})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "show_text"
+			and result.get("payload", {}).get("text")
+				== "The contract is complete. The captain records your success.",
+		"Providence-authored battle resumes into completion presentation: %s"
+			% str(result)
+	)
+	result = restored_interpreter.resume_command({})
+	_expect(
+		result.get("status") in ["yield", "completed"]
+			and (
+				result.get("status") == "completed"
+				or result.get("command") != "show_text"
+			),
+		"Providence-authored scenario-scale AP returns to the central interpreter: %s"
+			% str(result)
+	)
+	_expect(
+		restored_interpreter.scenario_script_runtime.persistent_values.get(
+			"campaign\u001f\u001fpaid_the_captain"
+		) == true,
+		"Providence-authored typed campaign state survives save restoration"
+	)
+	_expect(
+		restored_interpreter.scenario_script_runtime.persistent_values.get(
+			"campaign\u001f\u001fquest_stage"
+		) == 2,
+		"Providence-authored multi-stage quest state survives every yield"
 	)
 
 
@@ -276,6 +644,255 @@ func _test_handler_registry() -> void:
 	)
 
 
+func _test_engine_plugin_registry() -> void:
+	var plugin_fixture_root := (
+		"res://scripts/scenario_runtime/tests/fixtures/engine-plugin"
+	)
+	var plugin_script_path := (
+		plugin_fixture_root + "/example.weather/plugin.gd"
+	)
+	var plugin_source := FileAccess.get_file_as_bytes(plugin_script_path)
+	var plugin_files := [{
+		"path": "plugin.gd",
+		"size": plugin_source.size(),
+		"sha256": EnginePluginRegistryScript.content_hash_for_file(
+			plugin_script_path
+		),
+	}]
+	var descriptor := {
+		"id": "example.weather",
+		"apiVersion": 1,
+		"approved": false,
+		"approvedHash": "",
+		"entryPoint": "plugin.gd",
+		"files": plugin_files,
+		"contentHash": EnginePluginRegistryScript.content_hash_for_files(
+			plugin_files
+		),
+		"providers": [{
+			"id": "example.weather.forecast-provider",
+			"method": "forecast",
+		}],
+		"operations": [{
+			"id": "example.weather.forecast",
+			"label": "Forecast Weather",
+			"category": "Example",
+			"owningPort": "engine.plugins",
+			"minimumTier": "safe",
+			"roles": ["action", "helper"],
+			"yields": true,
+			"mutates": false,
+			"commandId": "example.weather.forecast-command",
+			"providerId": "example.weather.forecast-provider",
+			"parameters": {"value": "int"},
+			"result": "int",
+			"summary": "Returns a fixture forecast.",
+			"reference": "Used to prove installed plug-in registration.",
+			"example": "var forecast = await weather_forecast(1)",
+		}],
+	}
+	descriptor["approvedHash"] = EnginePluginRegistryScript.approval_hash(
+		descriptor
+	)
+	descriptor["approved"] = true
+	var registry := EnginePluginRegistryScript.new()
+	registry.install_root = plugin_fixture_root
+	_expect(
+		registry.load_catalog_document({
+			"schemaVersion": 1,
+			"plugins": [descriptor],
+		}),
+		"engine plug-in catalog accepts exact-hash approved descriptors"
+	)
+	_expect(
+		registry.validate_requirements([{
+			"id": "example.weather",
+			"apiVersion": 1,
+		}]).get("valid", false),
+		"engine plug-in requirements resolve installed approved APIs"
+	)
+	var operation_rows: Array = registry.operation_descriptors([{
+		"id": "example.weather",
+		"apiVersion": 1,
+	}])
+	_expect(
+		operation_rows.size() == 1
+			and operation_rows[0].get("id") == "example.weather.forecast",
+		"engine plug-ins expose only required namespaced capabilities"
+	)
+	_expect(
+		registry.activate_required([{
+			"id": "example.weather",
+			"apiVersion": 1,
+		}]),
+		"approved engine plug-ins load only from their installed entry point: %s"
+			% registry.last_error
+	)
+	var plugin_port := ScenarioEnginePluginPort.new()
+	plugin_port.bind_registry(registry)
+	var plugin_router := ScenarioCommandRouter.new()
+	_expect(
+		plugin_router.register_port(plugin_port),
+		"active engine plug-in commands register through one bridge port"
+	)
+	plugin_router.configure({"enginePluginRegistry": registry})
+	var provider_result: Dictionary = await plugin_router.route(
+		"example.weather.forecast-command",
+		{"value": 4}
+	)
+	_expect(
+		provider_result.get("status") == "ok"
+			and int(provider_result.get("value", 0)) == 5,
+		"engine plug-in providers execute through validated command routing"
+	)
+	var changed_descriptor: Dictionary = descriptor.duplicate(true)
+	changed_descriptor["apiVersion"] = 2
+	var changed_registry := EnginePluginRegistryScript.new()
+	_expect(
+		not changed_registry.load_catalog_document({
+			"schemaVersion": 1,
+			"plugins": [changed_descriptor],
+		})
+			and changed_registry.last_error.contains("changed after approval"),
+		"engine plug-in metadata changes invalidate approval"
+	)
+	var core_descriptor: Dictionary = descriptor.duplicate(true)
+	core_descriptor["approved"] = false
+	core_descriptor["operations"][0]["id"] = "core.override"
+	core_descriptor["approvedHash"] = (
+		EnginePluginRegistryScript.approval_hash(core_descriptor)
+	)
+	var core_registry := EnginePluginRegistryScript.new()
+	_expect(
+		not core_registry.load_catalog_document({
+			"schemaVersion": 1,
+			"plugins": [core_descriptor],
+		}),
+		"engine plug-ins cannot register reserved core capabilities"
+	)
+
+
+func _test_engine_plugin_store() -> void:
+	var fixture_manifest := (
+		"res://scripts/scenario_runtime/tests/fixtures/engine-plugin/"
+		+ "example.weather/plugin.json"
+	)
+	var test_root := "user://scenario_plugin_store_test_%d" \
+		% Time.get_ticks_usec()
+	var store := EnginePluginStoreScript.new()
+	store.install_root = test_root
+	store.catalog_path = test_root.path_join("installed.json")
+	var inspection: Dictionary = store.inspect_manifest(fixture_manifest)
+	_expect(
+		inspection.get("status") == "ok",
+		"engine plug-in packages inspect without executing source: %s"
+			% inspection.get("message", "")
+	)
+	var installation: Dictionary = store.install_from_manifest(fixture_manifest)
+	_expect(
+		installation.get("status") == "ok",
+		"engine plug-in packages install from an exact file manifest: %s"
+			% installation.get("message", "")
+	)
+	var installed_descriptor: Dictionary = store.descriptor("example.weather")
+	_expect(
+		not bool(installed_descriptor.get("approved", true)),
+		"newly installed engine plug-ins are not implicitly approved"
+	)
+	_expect(
+		store.approve("example.weather"),
+		"exact installed engine plug-in packages can be approved: %s"
+			% store.last_error
+	)
+	installed_descriptor = store.descriptor("example.weather")
+	_expect(
+		bool(installed_descriptor.get("approved", false)),
+		"engine plug-in approval persists in the user-local catalog"
+	)
+	var update_result: Dictionary = store.install_from_manifest(
+		fixture_manifest,
+		true
+	)
+	_expect(
+		update_result.get("status") == "ok"
+			and bool(update_result.get("updated", false))
+			and not bool(
+				store.descriptor("example.weather").get("approved", true)
+			),
+		"engine plug-in updates revoke approval"
+	)
+	_expect(
+		store.approve("example.weather"),
+		"updated engine plug-ins can be explicitly reapproved"
+	)
+	var installed_script := test_root.path_join("example.weather/plugin.gd")
+	var tampered := FileAccess.open(installed_script, FileAccess.WRITE)
+	if tampered != null:
+		tampered.store_string("extends RefCounted\n")
+		tampered.flush()
+		tampered = null
+	_expect(
+		not store.approve("example.weather")
+			and store.last_error.contains("changed"),
+		"engine plug-in file changes invalidate approval"
+	)
+	var repair_result: Dictionary = store.install_from_manifest(
+		fixture_manifest,
+		true
+	)
+	_expect(
+		repair_result.get("status") == "ok",
+		"reinstalling an exact package repairs changed plug-in files: %s"
+			% repair_result.get("message", "")
+	)
+	_expect(
+		store.approve("example.weather")
+			and store.revoke("example.weather")
+			and not bool(
+				store.descriptor("example.weather").get("approved", true)
+			),
+		"engine plug-in approval can be revoked"
+	)
+	_expect(
+		store.remove("example.weather")
+			and store.plugin_descriptors().is_empty(),
+		"engine plug-ins can be removed from the user-local store"
+	)
+	var catalog_global := ProjectSettings.globalize_path(store.catalog_path)
+	if FileAccess.file_exists(store.catalog_path):
+		DirAccess.remove_absolute(catalog_global)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(test_root))
+
+
+func _test_engine_plugin_settings_ui() -> void:
+	var settings_scene: PackedScene = load(
+		"res://scenes/UI/HUD/Settings/settings_rect.tscn"
+	)
+	var settings: Node = settings_scene.instantiate()
+	add_child(settings)
+	var panel := settings.get_node_or_null(
+		"HBoxContainer/ScenarioPluginSettings"
+	)
+	_expect(
+		panel != null
+			and panel.get_node_or_null("VBoxContainer/Content/PluginList") != null
+			and panel.get_node_or_null(
+				"VBoxContainer/Toolbar/InstallPluginButton"
+			) != null
+			and panel.get_node_or_null(
+				"VBoxContainer/Content/Details/Actions/ApprovePluginButton"
+			) != null
+			and panel.get_node_or_null(
+				"VBoxContainer/Content/Details/Actions/RevokePluginButton"
+			) != null
+			and panel.get_node_or_null(
+				"VBoxContainer/Content/Details/Actions/RemovePluginButton"
+			) != null,
+		"Remake Settings exposes plug-in install and approval management"
+	)
+	settings.queue_free()
+
+
 func _test_command_ports() -> void:
 	var result := DefaultPortsScript.create(RefCounted.new())
 	_expect(result.get("status") == "ok", "six default command ports register")
@@ -284,10 +901,18 @@ func _test_command_ports() -> void:
 	var router: ScenarioCommandRouter = result["router"]
 	for command_id: String in [
 		"teleport",
+		"query_map_definition",
 		"start_battle",
+		"query_monster_definition",
+		"apply_combat_condition",
 		"give_treasure",
+		"query_party_items",
+		"query_item_definition",
 		"pick_characters",
+		"query_spell_definition",
 		"show_text",
+		"query_encounter_definition",
+		"query_media_definition",
 		"snapshot_runtime",
 		"complete_campaign",
 	]:
@@ -336,6 +961,119 @@ func _test_command_ports() -> void:
 		complex_choices.get("slots", []) == [0, 2]
 			and complex_choices.get("tokens", []) == ["action:3", "action:3"],
 		"complex encounter choices retain authored option slots"
+	)
+
+
+func _test_definition_snapshot_services() -> void:
+	var bundle := BundleScript.new()
+	_expect(
+		bundle.load_from_directory(PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE),
+		"definition snapshot fixture bundle loads"
+	)
+	if not bundle.last_error.is_empty():
+		return
+	var services := ScenarioGodotServicesScript.new()
+	services.configure_classic_bundle(bundle)
+	var map_service: Object = services.scenario_port_runtime("core.map")
+	var combat_service: Object = services.scenario_port_runtime("core.combat")
+	var inventory_service: Object = services.scenario_port_runtime(
+		"core.inventory"
+	)
+	var character_service: Object = services.scenario_port_runtime(
+		"core.character"
+	)
+	var presentation_service: Object = services.scenario_port_runtime(
+		"core.presentation"
+	)
+	var map_definition: Dictionary = map_service._query_map_definition({
+		"levelType": "land",
+		"levelIndex": 0,
+	})
+	var monster_definition: Dictionary = (
+		combat_service._query_monster_definition({"monsterId": 1})
+	)
+	var battle_definition: Dictionary = combat_service._query_battle_definition(
+		{"battleId": 0}
+	)
+	var item_definition: Dictionary = inventory_service._query_item_definition(
+		{"itemId": 901}
+	)
+	var original_party: Array = GameGlobal.player_characters
+	var item_carrier := PartyItemCarrier.new()
+	item_carrier.item_inventory.append(ItemInstance.new(
+		"instance:acceptance-token",
+		"scenario:acceptance:item:901",
+		7,
+		true,
+		false
+	))
+	GameGlobal.player_characters = [item_carrier]
+	var item_instances: Dictionary = inventory_service._query_party_items()
+	GameGlobal.player_characters = original_party
+	var spell_definition: Dictionary = (
+		character_service._query_spell_definition({"spellId": 16})
+	)
+	var encounter_definition: Dictionary = (
+		presentation_service._query_encounter_definition({
+			"encounterKind": "simple",
+			"encounterId": 0,
+		})
+	)
+	var media_definition: Dictionary = (
+		presentation_service._query_media_definition({
+			"mediaKind": "picture",
+			"resourceId": 306,
+		})
+	)
+	_expect(
+		map_definition.get("id") == "land:0"
+			and int(map_definition.get("width", 0)) == 90,
+		"map definitions are exposed as bounded immutable snapshots"
+	)
+	_expect(
+		monster_definition.get("name") == "Providence Sentinel"
+			and int(monster_definition.get("maximumHealth", 0)) == 31,
+		"monster definitions preserve authored identity and combat metadata"
+	)
+	_expect(
+		battle_definition.get("monsterIds", []) == [1],
+		"battle definitions expose bounded referenced monster identities"
+	)
+	_expect(
+		item_definition.get("id") == "901"
+			and int(item_definition.get("itemType", 0)) == 25,
+		"item definitions remain separate from live item instances: %s"
+			% str(item_definition)
+	)
+	var item_snapshots: Array = item_instances.get("items", [])
+	_expect(
+		item_snapshots.size() == 1
+			and item_snapshots[0].get("id") == "instance:acceptance-token"
+			and item_snapshots[0].get("definitionId") \
+				== "scenario:acceptance:item:901"
+			and int(item_snapshots[0].get("charges", 0)) == 7
+			and bool(item_snapshots[0].get("equipped", false))
+			and not bool(item_snapshots[0].get("identified", true)),
+		"item-instance queries preserve exact identity and mutable state: %s"
+			% str(item_snapshots)
+	)
+	_expect(
+		spell_definition.get("name") == "Providence Ward"
+			and int(spell_definition.get("cost", 0)) == 4,
+		"spell definitions are data snapshots rather than GDScript resources: %s"
+			% str(spell_definition)
+	)
+	_expect(
+		encounter_definition.get("encounterKind") == "simple"
+			and int(encounter_definition.get("optionCount", 0)) == 1,
+		"encounter definitions expose bounded authoring metadata"
+	)
+	_expect(
+		media_definition.get("mediaKind") == "picture"
+			and str(media_definition.get("runtimePath", "")).ends_with(
+				".png"
+			),
+		"media definitions expose package-relative runtime metadata"
 	)
 
 
@@ -1105,6 +1843,37 @@ func _test_nested_safe_behavior_execution() -> void:
 		outer_step.kind == ScenarioStepResult.CONTINUE
 			and outer_step.data.get("value", {}).get("kind") == "continue",
 		"outer action resumes after nested battle behavior"
+	)
+
+	var debug_runtime := ScenarioScriptRuntimeScript.new()
+	_expect(
+		debug_runtime.configure(document, state, bundle),
+		"nested debugger behavior runtime configures"
+	)
+	outer_step = debug_runtime.invoke("scenario.test.outer-battle")
+	_expect(
+		outer_step.kind == ScenarioStepResult.YIELD
+			and outer_step.data.get("commandId") == "start_battle",
+		"nested debugger fixture suspends its outer action"
+	)
+	_expect(
+		debug_runtime.configure_debugger([], true).get("status") == "ok",
+		"nested debugger enables pause on behavior start"
+	)
+	nested_step = debug_runtime.invoke_nested(
+		"scenario.test.nested-spell",
+		{},
+		{"role": "spell", "hook": "effect"}
+	)
+	var debug_snapshot: Dictionary = debug_runtime.debugger_snapshot()
+	_expect(
+		nested_step.kind == ScenarioStepResult.YIELD
+			and nested_step.data.get("commandId") == "scenario_debug_pause"
+			and bool(debug_snapshot.get("paused", false))
+			and debug_snapshot.get("callStack", []).size() == 2
+			and str(debug_snapshot.get("pause", {}).get("sourceNode", "")) \
+				== "nested-text",
+		"nested Safe behavior pauses at its first statement while the outer action remains suspended"
 	)
 
 

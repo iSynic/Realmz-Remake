@@ -54,6 +54,7 @@ var complex_encounters_by_id: Dictionary = {}
 var thief_encounters_by_id: Dictionary = {}
 var timed_encounters_by_id: Dictionary = {}
 var spell_overrides_by_id: Dictionary = {}
+var spell_overrides_by_record_id: Dictionary = {}
 var spell_overrides_by_record_reference: Dictionary = {}
 var maps_by_id: Dictionary = {}
 var player_maps_by_id: Dictionary = {}
@@ -790,22 +791,31 @@ func _validate_action_array(
 			var operation: Variant = action.get("operation")
 			if not (operation is String) or not _is_namespaced_identifier(operation):
 				return _fail("%s.operation must be a namespaced semantic ID" % action_context)
-			if str(operation).begins_with("core."):
+			if str(operation).begins_with("core.") and str(operation) != "core.script.call":
 				return _fail("%s.operation cannot target the reserved core namespace" % action_context)
 			if not (action.get("parameters") is Dictionary):
 				return _fail("%s.parameters must be a JSON object" % action_context)
-			var semantic_validation := extension_registry.validate_semantic_operation(
-				str(operation),
-				action.get("parameters"),
-				_runtime_extension_ids()
-			)
-			if not bool(semantic_validation.get("valid", false)):
-				return _fail(
-					"%s: %s" % [
-						action_context,
-						semantic_validation.get("message", "Invalid semantic operation"),
-					]
+			if str(operation) == "core.script.call":
+				var parameters: Dictionary = action.get("parameters")
+				if str(parameters.get("behaviorId", "")).is_empty() \
+						or not (parameters.get("argumentBindings", {}) is Dictionary):
+					return _fail(
+						"%s core.script.call requires a behavior ID and argument bindings"
+						% action_context
+					)
+			else:
+				var semantic_validation := extension_registry.validate_semantic_operation(
+					str(operation),
+					action.get("parameters"),
+					_runtime_extension_ids()
 				)
+				if not bool(semantic_validation.get("valid", false)):
+					return _fail(
+						"%s: %s" % [
+							action_context,
+							semantic_validation.get("message", "Invalid semantic operation"),
+						]
+					)
 		else:
 			return _fail("%s.kind must be 'classic' or 'semantic'" % action_context)
 		if action.has("mediaRequiredForProgression") \
@@ -1282,6 +1292,10 @@ func get_spell_override(spell_id: int) -> Dictionary:
 	return spell_overrides_by_record_reference.get(spell_id, {})
 
 
+func get_spell_override_by_record_id(record_id: int) -> Dictionary:
+	return spell_overrides_by_record_id.get(record_id, {})
+
+
 func get_map(map_id: String) -> Dictionary:
 	return maps_by_id.get(map_id, {})
 
@@ -1433,6 +1447,7 @@ func _reset() -> void:
 	thief_encounters_by_id.clear()
 	timed_encounters_by_id.clear()
 	spell_overrides_by_id.clear()
+	spell_overrides_by_record_id.clear()
 	spell_overrides_by_record_reference.clear()
 	maps_by_id.clear()
 	player_maps_by_id.clear()
@@ -1534,6 +1549,7 @@ func _build_indexes() -> void:
 	for spell_override: Variant in _array_value(rules_document, "spellOverrides"):
 		if spell_override is Dictionary:
 			var record_id := int(spell_override.get("id", -1))
+			spell_overrides_by_record_id[record_id] = spell_override
 			spell_overrides_by_id[packed_spell_id_for_record_id(record_id)] = spell_override
 			# Encounter records store Data Spell references as one-based row numbers.
 			spell_overrides_by_record_reference[record_id + 1] = spell_override

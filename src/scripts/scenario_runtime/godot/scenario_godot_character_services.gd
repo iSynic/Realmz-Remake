@@ -184,6 +184,29 @@ func _query_party_members(_payload: Dictionary = {}) -> Dictionary:
 	return {"members": snapshots, "value": snapshots}
 
 
+func _query_spell_definition(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario spell definitions are unavailable")
+	var spell_id := int(payload.get("spellId", -1))
+	if spell_id < 0:
+		return _error("Scenario spell definition reference is invalid")
+	var record: Dictionary = service_owner.classic_bundle.get_spell_override_by_record_id(
+		spell_id
+	)
+	if record.is_empty():
+		return _error("Scenario spell %d is unavailable" % spell_id)
+	return {
+		"id": str(record.get("id", spell_id)),
+		"name": str(record.get("displayName", "")),
+		"spellClass": int(record.get("spellClass", 0)),
+		"cost": int(record.get("cost", 0)),
+		"targetType": int(record.get("targetType", 0)),
+		"inCombat": bool(record.get("inCombat", false)),
+		"inCamp": bool(record.get("inCamp", false)),
+		"duration": int(record.get("duration1", 0)),
+	}
+
+
 static func _character_stat(character: Object, stat_name: String) -> int:
 	if character != null and character.has_method("get_stat"):
 		return int(character.call("get_stat", stat_name))
@@ -220,7 +243,12 @@ func _change_scenario_party_fatigue(payload: Dictionary) -> Dictionary:
 		return _error("Realmz party fatigue is unavailable")
 	var previous := float(game_global.get("fatigue"))
 	var current := previous + float(payload.get("amount", 0.0))
-	game_global.call("set_party_fatigue", current)
+	game_global.call(
+		"set_party_fatigue",
+		current,
+		false,
+		{"source": "scenario-api"}
+	)
 	return {
 		"previousFatigue": previous,
 		"fatigue": float(game_global.get("fatigue")),

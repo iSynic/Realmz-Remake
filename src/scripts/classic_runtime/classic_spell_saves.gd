@@ -104,7 +104,8 @@ static func target_resolution(
 	power: int,
 	roll: int,
 	extra_adjustment := 0,
-	forced := false
+	forced := false,
+	chance_modifier := Callable()
 ) -> Dictionary:
 	var save_index := int(spell.get("classic_spell_save_index"))
 	var save_mode := str(spell.get("classic_spell_save_mode"))
@@ -134,6 +135,25 @@ static func target_resolution(
 		0.0,
 		100.0
 	)
+	if chance_modifier.is_valid():
+		save_chance = clampf(
+			float(chance_modifier.call(
+				"condition-resistance",
+				save_chance,
+				{
+					"source": "spell-save",
+					"saveIndex": save_index,
+					"saveMode": save_mode,
+					"power": power,
+					"target": _rule_subject(character),
+					"spell": _rule_subject(spell),
+					"minimum": 0.0,
+					"maximum": 100.0,
+				}
+			)),
+			0.0,
+			100.0
+		)
 	var saved := not forced and roll <= save_chance
 	var effect_scale := 1.0
 	if saved:
@@ -178,6 +198,21 @@ static func _has_tag(character: Object, tag: String) -> bool:
 		var tags: Variant = character.get("tags")
 		return tags is Array and tag in tags
 	return false
+
+
+static func _rule_subject(value: Object) -> Dictionary:
+	if value == null:
+		return {}
+	var result := {}
+	for property: Dictionary in value.get_property_list():
+		var property_name := str(property.get("name", ""))
+		if property_name == "name":
+			result["name"] = str(value.get(property_name))
+		elif property_name == "level":
+			result["level"] = int(value.get(property_name))
+	if value.has_meta("classic_monster_id"):
+		result["classicMonsterId"] = int(value.get_meta("classic_monster_id"))
+	return result
 
 
 static func _integer_array(values: Variant, expected_size: int) -> Array:

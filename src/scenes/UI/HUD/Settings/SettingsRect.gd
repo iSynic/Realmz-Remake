@@ -6,6 +6,7 @@ extends NinePatchRect
 # var b = "text"
 
 @onready var musicSettings = $HBoxContainer/VBoxContainer/MusicSettingsRect
+@onready var scenarioPluginSettings = $HBoxContainer/ScenarioPluginSettings
 @onready var gameSpeedBar : HScrollBar = (
 	$HBoxContainer/VBoxContainer/MusicSettingsRect/VBoxContainer/VolumeVbox/GameSpeedLabel/GameSpeedHScrollBar
 )
@@ -24,6 +25,7 @@ func _ready():
 
 func _initialize() :
 	musicSettings._initialize()
+	scenarioPluginSettings._initialize()
 	gameSpeedBar.set_value_no_signal(GameGlobal.game_speed_percent)
 	gameSpeedValueLabel.text = _format_game_speed(GameGlobal.game_speed_percent)
 	mapDebugCheckButton.set_pressed_no_signal(GameGlobal.map_debug_overlays_enabled)

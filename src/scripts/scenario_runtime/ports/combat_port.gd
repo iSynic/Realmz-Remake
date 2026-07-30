@@ -3,8 +3,11 @@ extends DelegatingScenarioPort
 
 const COMMANDS := [
 	"query_combat",
+	"query_monster_definition",
+	"query_battle_definition",
 	"apply_combat_damage",
 	"apply_combat_healing",
+	"apply_combat_condition",
 	"start_battle",
 	"check_combat_monster",
 	"destroy_combat_monsters",
@@ -22,8 +25,11 @@ const COMMANDS := [
 ]
 const OPERATIONS := {
 	"query_combat": "_query_combat",
+	"query_monster_definition": "_query_monster_definition",
+	"query_battle_definition": "_query_battle_definition",
 	"apply_combat_damage": "_apply_combat_damage",
 	"apply_combat_healing": "_apply_combat_healing",
+	"apply_combat_condition": "_apply_combat_condition",
 	"start_battle": "_start_classic_battle",
 	"check_combat_monster": "_check_combat_monster",
 	"destroy_combat_monsters": "_destroy_combat_monsters",

@@ -444,12 +444,31 @@ func restore_native_encounter_state(saved_state: Variant) -> void:
 		native_encounter_state.merge(saved_state, true)
 
 
-func set_party_fatigue(value: float) -> float:
+func set_party_fatigue(
+	value: float,
+	apply_scenario_modifier := true,
+	context := {}
+) -> float:
 	var upper_limit: float = (
 		ClassicRestScript.MAX_FATIGUE
 		if is_classic_runtime_active()
 		else max_fatigue * 2.0
 	)
+	if apply_scenario_modifier:
+		var modifier_context: Dictionary = (
+			context.duplicate(true) if context is Dictionary else {}
+		)
+		modifier_context.merge({
+			"previousFatigue": fatigue,
+			"requestedFatigue": value,
+			"minimum": 0.0,
+			"maximum": upper_limit,
+		}, false)
+		value = apply_scenario_rule_modifier(
+			"fatigue",
+			value,
+			modifier_context
+		)
 	fatigue = clampf(value, 0.0, upper_limit)
 	var hud: Variant = UI.get("ow_hud") if UI != null else null
 	if hud is Object and hud.has_method("update_fatigue_bar"):
@@ -466,6 +485,17 @@ func fatigue_limit() -> float:
 
 
 func pass_time(seconds : int, fatiguemultiplier : float = 1.0) :
+	var requested_seconds := seconds
+	seconds = maxi(0, roundi(apply_scenario_rule_modifier(
+		"time-advance",
+		float(seconds),
+		{
+			"requestedSeconds": requested_seconds,
+			"fatigueMultiplier": fatiguemultiplier,
+			"inCombat": StateMachine.is_combat_state(),
+			"minimum": 0.0,
+		}
+	)))
 	var previous_time := time
 	time += seconds *time_scale
 	var classic_field_time: bool = (
@@ -554,7 +584,8 @@ func pass_time(seconds : int, fatiguemultiplier : float = 1.0) :
 			player_allies,
 			previous_time,
 			time,
-			Callable(self, "_consume_classic_rest_ration")
+			Callable(self, "_consume_classic_rest_ration"),
+			Callable(self, "apply_scenario_rule_modifier")
 		)
 
 	for effect in global_effects.keys() :
@@ -675,10 +706,20 @@ func classic_movement_pass_time_units(timeclicks: int, tile_stack: Array) -> int
 			# Normalize older installed maps whose generated native tile used time 5.
 			source_timeclicks = 1
 			break
-	return classic_timeclick_pass_time_units(
+	var base_cost := classic_timeclick_pass_time_units(
 		source_timeclicks,
 		classic_base_scale_for_tile_stack(tile_stack)
 	)
+	return maxi(0, roundi(apply_scenario_rule_modifier(
+		"movement-cost",
+		float(base_cost),
+		{
+			"mode": "exploration",
+			"timeclicks": source_timeclicks,
+			"tileCount": tile_stack.size(),
+			"minimum": 0.0,
+		}
+	)))
 
 
 func apply_classic_search_time_cost() -> bool:
@@ -874,6 +915,70 @@ func process_classic_spell_effect_event(
 	return result if result is Dictionary else {
 		"status": "error",
 		"message": "Scenario spell-effect event returned an invalid response",
+	}
+
+
+func apply_scenario_rule_modifier(
+	event_id: String,
+	base_value: float,
+	context := {}
+) -> float:
+	if not is_instance_valid(classic_runtime_host) \
+			or not classic_runtime_host.has_method("resolve_rule_modifiers"):
+		return base_value
+	var event_context: Dictionary = (
+		context.duplicate(true) if context is Dictionary else {}
+	)
+	var result: Variant = classic_runtime_host.call(
+		"resolve_rule_modifiers",
+		event_id,
+		base_value,
+		event_context
+	)
+	if not (result is Dictionary):
+		push_error(
+			"Scenario rule modifier '%s' returned an invalid response" % event_id
+		)
+		return base_value
+	if str(result.get("status", "")) != "ok":
+		push_error(str(result.get(
+			"message",
+			"Scenario rule modifier '%s' failed" % event_id
+		)))
+		return base_value
+	return float(result.get("value", base_value))
+
+
+func scenario_rule_subject(value: Variant) -> Dictionary:
+	if not (value is Object or value is Dictionary):
+		return {}
+	var level_value: Variant = value.get("level")
+	var result := {
+		"name": str(value.get("name")),
+		"level": int(level_value) if level_value != null else 0,
+	}
+	if value is Object:
+		if value.has_meta("classic_monster_id"):
+			result["monsterId"] = int(value.get_meta("classic_monster_id"))
+		if value.has_meta("classic_hit_dice"):
+			result["hitDice"] = int(value.get_meta("classic_hit_dice"))
+		if value.has_method("get_stat"):
+			result["health"] = int(value.call("get_stat", "curHP"))
+	return result
+
+
+func scenario_rule_spell(spell: Variant, power: int) -> Dictionary:
+	if not (spell is Object or spell is Dictionary):
+		return {"power": power}
+	var classic_spell_id_value: Variant = spell.get("classic_spell_id")
+	return {
+		"name": str(spell.get("name")),
+		"classicId": (
+			int(classic_spell_id_value)
+			if classic_spell_id_value != null
+			else 0
+		),
+		"power": power,
 	}
 
 
@@ -1652,12 +1757,26 @@ func check_classic_random_rectangles(
 		var rectangle: Dictionary = rectangle_value
 		if not ClassicRandomRectangleScript.contains(rectangle, area, position):
 			continue
-		var chance_succeeded: bool = bool(
-			ClassicRandomRectangleScript.chance_succeeds(
-				rectangle,
-				area,
-				randi_range(1, 10000)
-			)
+		var base_percent := int(rectangle.get(
+			"percent",
+			roundi(float(area.get("chance", 0.0)) * 10000.0)
+		))
+		var encounter_percent := clampi(roundi(apply_scenario_rule_modifier(
+			"encounter-chance",
+			float(base_percent),
+			{
+				"mode": "random-rectangle",
+				"levelType": str(identity["levelType"]),
+				"levelIndex": int(identity["levelIndex"]),
+				"rectangleIndex": rect_index,
+				"position": {"x": position.x, "y": position.y},
+				"minimum": 0.0,
+				"maximum": 10000.0,
+			}
+		)), 0, 10000)
+		var chance_roll := randi_range(1, 10000)
+		var chance_succeeded: bool = (
+			encounter_percent > 0 and chance_roll <= encounter_percent
 		)
 		if chance_succeeded:
 			for outcome: Dictionary in ClassicRandomRectangleScript.door_outcomes(
@@ -1665,6 +1784,23 @@ func check_classic_random_rectangles(
 			):
 				var trigger_index := int(outcome["triggerId"])
 				var door_percent := int(outcome["percent"])
+				var door_sign := signi(door_percent)
+				var modified_door_percent := clampi(roundi(
+					apply_scenario_rule_modifier(
+						"encounter-chance",
+						float(absi(door_percent)),
+						{
+							"mode": "random-door",
+							"levelType": str(identity["levelType"]),
+							"levelIndex": int(identity["levelIndex"]),
+							"rectangleIndex": rect_index,
+							"doorIndex": int(outcome["doorIndex"]),
+							"minimum": 0.0,
+							"maximum": 100.0,
+						}
+					)
+				), 0, 100)
+				door_percent = door_sign * modified_door_percent
 				if trigger_index <= 0 or not ClassicRandomRectangleScript.door_roll_succeeds(
 					door_percent,
 					randi_range(1, 100)
@@ -1859,6 +1995,23 @@ func end_battle(
 					rewards["treasure"].append_array(
 						StateMachine.combat_state.classic_fumbled_items
 					)
+			var currency_names := ["gold", "gems", "jewelry"]
+			for currency_index: int in range(mini(
+				currency_names.size(),
+				rewards.get("money", []).size()
+			)):
+				rewards["money"][currency_index] = maxi(0, roundi(
+					apply_scenario_rule_modifier(
+						"loot",
+						float(rewards["money"][currency_index]),
+						{
+							"lootKind": "battle-currency",
+							"currency": currency_names[currency_index],
+							"treasureCount": rewards.get("treasure", []).size(),
+							"minimum": 0.0,
+						}
+					)
+				))
 			allow_next_battle_loot = true
 
 			#this won't show the allies  screen
@@ -2140,7 +2293,13 @@ func calculate_melee_accuracy(attacker : Creature, defender : Creature, weapon: 
 			accuracy,
 			{"phase": "accuracy"}
 		)
-	return clampf(accuracy, 0.0, 1.0)
+	return _scenario_attack_accuracy(
+		accuracy,
+		"melee",
+		attacker,
+		defender,
+		{"weaponDefinitionId": weapon_instance.definition_id if weapon_instance != null else ""}
+	)
 
 
 func _classic_melee_evasion(defender: Variant) -> float:
@@ -2177,16 +2336,21 @@ func calculate_melee_damage(attacker : Creature, defender : Creature, weapon: Va
 			is_crit,
 			crit_mult
 		)
-		return _apply_scenario_item_damage_modifiers(
-			apply_classic_party_weapon_protection(
-				custom_damage,
+		return _apply_scenario_rule_damage_detail(
+			_apply_scenario_item_damage_modifiers(
+				apply_classic_party_weapon_protection(
+					custom_damage,
+					attacker,
+					defender
+				),
+				weapon_instance,
 				attacker,
-				defender
+				defender,
+				should_check_script
 			),
-			weapon_instance,
 			attacker,
 			defender,
-			should_check_script
+			"melee"
 		)
 	#if weapon["name"] == "NO_MELEE_WEAPON" :
 		#print("GameGlobal calculate_melee_damage NO_MELEE_WEAPON : ", weapon)
@@ -2259,16 +2423,21 @@ func calculate_melee_damage(attacker : Creature, defender : Creature, weapon: Va
 		is_crit,
 		crit_mult
 	)
-	return _apply_scenario_item_damage_modifiers(
-		apply_classic_party_weapon_protection(
-			damage_detail,
+	return _apply_scenario_rule_damage_detail(
+		_apply_scenario_item_damage_modifiers(
+			apply_classic_party_weapon_protection(
+				damage_detail,
+				attacker,
+				defender
+			),
+			weapon_instance,
 			attacker,
-			defender
+			defender,
+			should_check_script
 		),
-		weapon_instance,
 		attacker,
 		defender,
-		should_check_script
+		"melee"
 	)
 
 
@@ -2409,6 +2578,60 @@ func apply_classic_party_weapon_protection(
 		protects_target
 	)
 
+
+func _scenario_attack_accuracy(
+	accuracy: float,
+	attack_kind: String,
+	attacker: Object,
+	defender: Object,
+	details := {}
+) -> float:
+	var context: Dictionary = details.duplicate(true) if details is Dictionary else {}
+	context.merge({
+		"attackKind": attack_kind,
+		"attacker": scenario_rule_subject(attacker),
+		"defender": scenario_rule_subject(defender),
+		"minimum": 0.0,
+		"maximum": 100.0,
+	}, false)
+	return clampf(
+		apply_scenario_rule_modifier(
+			"attack-chance",
+			clampf(accuracy, 0.0, 1.0) * 100.0,
+			context
+		) / 100.0,
+		0.0,
+		1.0
+	)
+
+
+func _apply_scenario_rule_damage_detail(
+	damage_detail: Dictionary,
+	attacker: Object,
+	defender: Object,
+	attack_kind: String
+) -> Dictionary:
+	var result := damage_detail.duplicate(true)
+	var base_total := float(result.get("total", 0.0))
+	var modified_total := maxf(0.0, apply_scenario_rule_modifier(
+		"damage",
+		base_total,
+		{
+			"attackKind": attack_kind,
+			"attacker": scenario_rule_subject(attacker),
+			"defender": scenario_rule_subject(defender),
+			"minimum": 0.0,
+		}
+	))
+	var adjustment := roundi(modified_total) - roundi(base_total)
+	if adjustment != 0:
+		result["Scenario_modifier"] = (
+			int(result.get("Scenario_modifier", 0)) + adjustment
+		)
+	result["total"] = roundi(modified_total)
+	return result
+
+
 func calculate_spell_damage(attacker : Creature, defender : Creature, spell : Spell, spellpower : int, _should_check_script : bool = true) -> int :
 	#print("Gameglobal calculate_spell_damage : atker", attacker.name, ", defer", defender.name,", spell:", spell.name)
 
@@ -2418,8 +2641,8 @@ func calculate_spell_damage(attacker : Creature, defender : Creature, spell : Sp
 #	var hits : int = spell.get_hits(spellpower, attacker)  #for ninja stars  arrowstorm etc.. TBI  #TODO
 	var spell_damage : float = 0
 	if spell.has_method("get_damage_total") :
-		return spell.get_damage_total(spellpower, attacker, defender)
-	if spell.has_method("get_damage_roll") :
+		spell_damage = spell.get_damage_total(spellpower, attacker, defender)
+	elif spell.has_method("get_damage_roll") :
 		spell_damage = spell.get_damage_roll(spellpower, attacker)
 	else :
 		var dmg = 0
@@ -2457,7 +2680,20 @@ func calculate_spell_damage(attacker : Creature, defender : Creature, spell : Sp
 					#crit_mult = spell.get_critical_mult(attacker, defender, spellpower)
 	if is_crit :
 		spell_damage *= crit_mult
-	return roundi(spell_damage)
+	var modifier_family := (
+		"healing" if ELEMENTS.HEALING in spell_attributes else "damage"
+	)
+	return maxi(0, roundi(apply_scenario_rule_modifier(
+		modifier_family,
+		spell_damage,
+		{
+			"attackKind": "spell",
+			"attacker": scenario_rule_subject(attacker),
+			"defender": scenario_rule_subject(defender),
+			"spell": scenario_rule_spell(spell, spellpower),
+			"minimum": 0.0,
+		}
+	)))
 
 func calculate_spell_accuracy(caster : Creature, defender : Creature, spell, spellpower : int) -> Array :
 	#resist==0  ignores both resistance and dodge, resist==1 ignores resistance, resist==2 ignores evasion, resist==3 ignores neither
@@ -2465,14 +2701,32 @@ func calculate_spell_accuracy(caster : Creature, defender : Creature, spell, spe
 	var res : int = spell.resist
 	if res==0 or res==2 :
 		#print("GAMEGLOBAL calculate_spell_accuracy  if res==0 or res==2 : return 1.0 ")
-		return [1.0, []]
+		return [
+			_scenario_attack_accuracy(
+				1.0,
+				"spell",
+				caster,
+				defender,
+				{"spell": scenario_rule_spell(spell, spellpower)}
+			),
+			[],
+		]
 	var accuracy = 0
 	var evasion = 0
 	if spell.has_method("get_accuracy") and spell.has_method("get_evasion"):
 		accuracy = spell.get_accuracy(caster,defender,spellpower)
 		evasion = spell.get_evasion(caster,defender,spellpower)
 		#print("  using spell methods : base_accuracy ", accuracy, ", base_evasion", evasion)
-		return [clampf(0.5+0.05*(accuracy-evasion), 0.0, 1.0), []]
+		return [
+			_scenario_attack_accuracy(
+				clampf(0.5 + 0.05 * (accuracy - evasion), 0.0, 1.0),
+				"spell",
+				caster,
+				defender,
+				{"spell": scenario_rule_spell(spell, spellpower)}
+			),
+			[],
+		]
 	var spell_attributes : Array= spell.attributes
 	var base_accuracy : float = 1.0
 	var evasion_stats_used : Array = []
@@ -2497,7 +2751,16 @@ func calculate_spell_accuracy(caster : Creature, defender : Creature, spell, spe
 	#  [continue_action : bool, added_to_action_queue : Array]
 
 
-	return [clampf(base_accuracy, 0.0, 1.0), evasion_stats_used]
+	return [
+		_scenario_attack_accuracy(
+			clampf(base_accuracy, 0.0, 1.0),
+			"spell",
+			caster,
+			defender,
+			{"spell": scenario_rule_spell(spell, spellpower)}
+		),
+		evasion_stats_used,
+	]
 
 
 func do_spell_field_effect(
@@ -2549,6 +2812,15 @@ func give_exp_to_pcs(
 					experience
 				)
 			)
+		awarded_experience = maxi(0, roundi(apply_scenario_rule_modifier(
+			"experience",
+			float(awarded_experience),
+			{
+				"recipient": scenario_rule_subject(pc),
+				"classicBattleReward": classic_battle_reward,
+				"minimum": 0.0,
+			}
+		)))
 		pc.exp_tnl -= awarded_experience
 		while pc.exp_tnl <0 :
 			# HUD level up !

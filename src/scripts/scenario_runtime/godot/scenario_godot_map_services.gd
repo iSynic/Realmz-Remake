@@ -32,6 +32,55 @@ func _query_time(_payload: Dictionary = {}) -> Dictionary:
 	}
 
 
+func _query_exploration(_payload: Dictionary = {}) -> Dictionary:
+	var game_global: Object = _autoload("GameGlobal")
+	var runtime_state := _classic_runtime_state()
+	if game_global == null or runtime_state == null:
+		return _error("Scenario exploration state is unavailable")
+	return {
+		"camping": bool(game_global.get("camping")),
+		"campingAllowed": not bool(
+			game_global.get("classic_camping_disabled")
+		),
+		"sailing": bool(game_global.get("is_sailing_boat")),
+		"heading": int(runtime_state.get("heading")),
+		"viewMode": (
+			"map"
+			if int(runtime_state.get("view_type")) \
+				== runtime_state.VIEW_MAP
+			else "3d"
+		),
+		"compassEnabled": bool(runtime_state.get("compass_enabled")),
+		"randomEncountersEnabled": bool(
+			runtime_state.get("random_encounters_enabled")
+		),
+	}
+
+
+func _query_map_definition(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario map definitions are unavailable")
+	var level_type := str(payload.get("levelType", "")).to_lower()
+	var level_index := int(payload.get("levelIndex", -1))
+	if level_type not in ["land", "dungeon"] or level_index < 0:
+		return _error("Scenario map definition reference is invalid")
+	var record: Dictionary = service_owner.classic_bundle.get_map(
+		"%s:%d" % [level_type, level_index]
+	)
+	if record.is_empty():
+		return _error(
+			"Scenario %s map %d is unavailable" % [level_type, level_index]
+		)
+	return {
+		"id": str(record.get("id", "%s:%d" % [level_type, level_index])),
+		"name": str(record.get("name", "")),
+		"levelType": str(record.get("levelType", level_type)),
+		"levelIndex": int(record.get("index", level_index)),
+		"width": int(record.get("width", 0)),
+		"height": int(record.get("height", 0)),
+	}
+
+
 func _set_map_tile(payload: Dictionary) -> Dictionary:
 	var routed_payload := payload.duplicate(true)
 	if str(routed_payload.get("_scenarioApiOperation", "")) \

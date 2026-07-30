@@ -10,6 +10,9 @@ const CapabilityCatalogScript = preload(
 const SandboxClientScript = preload(
 	"res://scripts/scenario_runtime/scenario_sandbox_client.gd"
 )
+const EnginePluginRegistryScript = preload(
+	"res://scripts/scenario_runtime/scenario_engine_plugin_registry.gd"
+)
 
 const SCHEMA_VERSION := 2
 const API_VERSION := 2
@@ -38,6 +41,7 @@ var campaign_completion: Dictionary = {}
 var completed_value: Variant = null
 var debug_enabled := false
 var debug_breakpoints: Dictionary = {}
+var debug_pause_on_invocation := false
 var debug_step_mode := "run"
 var debug_depth_target := -1
 var debug_pause: Dictionary = {}
@@ -80,10 +84,22 @@ func configure(
 	if not capability_catalog.load_builtin():
 		last_error = capability_catalog.last_error
 		return false
+	var plugin_catalog_result := _register_plugin_capabilities(
+		capability_catalog,
+		campaign_bundle
+	)
+	if not bool(plugin_catalog_result.get("valid", false)):
+		last_error = str(plugin_catalog_result.get("message", ""))
+		return false
 	sandbox_client = SandboxClientScript.new()
 	for script_value: Variant in script_document.get("behaviors", []):
 		var script: Dictionary = script_value
-		scripts_by_id[str(script.get("id", ""))] = script.duplicate(true)
+		var runtime_script: Dictionary = script.duplicate(true)
+		if str(runtime_script.get("tier", "")) == "safe" \
+				and runtime_script.get("program") is Dictionary:
+			var program: Dictionary = runtime_script["program"]
+			_assign_debug_source_nodes(program.get("body", []), "/body")
+		scripts_by_id[str(script.get("id", ""))] = runtime_script
 	for variable_value: Variant in script_document.get("stateDefinitions", []):
 		var variable: Dictionary = variable_value
 		var key := _state_key(
@@ -100,6 +116,48 @@ func configure(
 	if hash_text.length() >= 8:
 		rng_state = maxi(1, hash_text.substr(0, 8).hex_to_int() & 0x7fffffff)
 	return true
+
+
+static func _assign_debug_source_nodes(statements_value: Variant, path: String) -> void:
+	if not (statements_value is Array):
+		return
+	var statements: Array = statements_value
+	for index: int in range(statements.size()):
+		if not (statements[index] is Dictionary):
+			continue
+		var statement: Dictionary = statements[index]
+		var statement_path := "%s/%d" % [path, index]
+		if str(statement.get("sourceNode", "")).strip_edges().is_empty():
+			statement["sourceNode"] = "guided%s" % statement_path
+		match str(statement.get("kind", "")):
+			"if":
+				_assign_debug_source_nodes(
+					statement.get("then", []),
+					"%s/then" % statement_path
+				)
+				_assign_debug_source_nodes(
+					statement.get("else", []),
+					"%s/else" % statement_path
+				)
+			"for":
+				_assign_debug_source_nodes(
+					statement.get("body", []),
+					"%s/body" % statement_path
+				)
+			"match":
+				var cases_value: Variant = statement.get("cases", [])
+				if cases_value is Array:
+					for case_index: int in range(cases_value.size()):
+						if cases_value[case_index] is Dictionary:
+							var case_value: Dictionary = cases_value[case_index]
+							_assign_debug_source_nodes(
+								case_value.get("body", []),
+								"%s/cases/%d/body" % [statement_path, case_index]
+							)
+				_assign_debug_source_nodes(
+					statement.get("default", []),
+					"%s/default" % statement_path
+				)
 
 
 func invoke(
@@ -135,6 +193,8 @@ func invoke(
 	if str(frame_result.get("status", "")) == "error":
 		return StepResultScript.failed(str(frame_result.get("message", "")))
 	frames.append(frame_result["frame"])
+	if debug_pause_on_invocation:
+		debug_step_mode = "into"
 	return _run()
 
 
@@ -608,6 +668,7 @@ func configure_debugger(breakpoint_values: Variant, pause_on_start := false) -> 
 			debug_breakpoints[behavior_id] = {}
 		debug_breakpoints[behavior_id][source_node] = true
 	debug_enabled = pause_on_start or not debug_breakpoints.is_empty()
+	debug_pause_on_invocation = pause_on_start
 	debug_step_mode = "into" if pause_on_start else "run"
 	debug_depth_target = -1
 	debug_pause.clear()
@@ -945,6 +1006,12 @@ static func validate_document(
 		return _invalid(catalog.last_error)
 	if str(document.get("capabilityCatalogHash", "")) != catalog.catalog_hash():
 		return _invalid("Scenario capability catalog hash does not match this runtime")
+	var plugin_catalog_result := _register_plugin_capabilities(
+		catalog,
+		campaign_bundle
+	)
+	if not bool(plugin_catalog_result.get("valid", false)):
+		return plugin_catalog_result
 	var seen_scripts: Dictionary = {}
 	var declared_sources: Dictionary = {}
 	for index: int in range(document["behaviors"].size()):
@@ -1106,6 +1173,41 @@ static func validate_document(
 			)
 		seen_migrations[migration_id] = true
 		migration_origins[from_version] = to_version
+	return {"valid": true}
+
+
+static func _register_plugin_capabilities(
+	catalog: ScenarioCapabilityCatalog,
+	campaign_bundle: ClassicCampaignBundle
+) -> Dictionary:
+	if campaign_bundle == null:
+		return {"valid": true}
+	var runtime_document: Variant = campaign_bundle.documents.get("runtime", {})
+	if not (runtime_document is Dictionary):
+		return {"valid": true}
+	var requirements: Variant = runtime_document.get("requiredPlugins", [])
+	if not (requirements is Array) or requirements.is_empty():
+		return {"valid": true}
+	var registry := EnginePluginRegistryScript.new()
+	if not registry.load_installed_catalog():
+		return _invalid(registry.last_error)
+	var requirement_validation := registry.validate_requirements(requirements)
+	if not bool(requirement_validation.get("valid", false)):
+		return requirement_validation
+	var operations_by_plugin: Dictionary = {}
+	for operation_value: Variant in registry.operation_descriptors(requirements):
+		if not (operation_value is Dictionary):
+			continue
+		var plugin_id := str(operation_value.get("pluginId", ""))
+		if not operations_by_plugin.has(plugin_id):
+			operations_by_plugin[plugin_id] = []
+		operations_by_plugin[plugin_id].append(operation_value)
+	for plugin_id: String in operations_by_plugin:
+		if not catalog.register_external_operations(
+			plugin_id,
+			operations_by_plugin[plugin_id]
+		):
+			return _invalid(catalog.last_error)
 	return {"valid": true}
 
 
@@ -1931,6 +2033,16 @@ func _evaluate_collection(expression: Dictionary) -> Dictionary:
 			"message": "Safe collection operation requires a bounded array",
 		}
 	var operation := str(expression.get("operation", "count"))
+	if operation not in ["any", "all", "find", "count", "filter"]:
+		return {
+			"status": "error",
+			"message": "Unsupported collection operation '%s'" % operation,
+		}
+	if operation != "count" and not expression.has("predicate"):
+		return {
+			"status": "error",
+			"message": "Safe collection operation '%s' requires a predicate" % operation,
+		}
 	if operation == "count" and not expression.has("predicate"):
 		return {"status": "ok", "value": source.size()}
 	var item_name := str(expression.get("itemName", "item"))
@@ -1969,10 +2081,7 @@ func _evaluate_collection(expression: Dictionary) -> Dictionary:
 			return {"status": "ok", "value": selected}
 		"find":
 			return {"status": "ok", "value": null}
-	return {
-		"status": "error",
-		"message": "Unsupported collection operation '%s'" % operation,
-	}
+	return {"status": "error", "message": "Safe collection operation did not resolve"}
 
 
 func _make_frame(script: Dictionary, arguments: Variant, result_target: String) -> Dictionary:
@@ -2243,6 +2352,7 @@ func clear() -> void:
 	completed_value = null
 	debug_enabled = false
 	debug_breakpoints.clear()
+	debug_pause_on_invocation = false
 	debug_step_mode = "run"
 	debug_depth_target = -1
 	debug_pause.clear()

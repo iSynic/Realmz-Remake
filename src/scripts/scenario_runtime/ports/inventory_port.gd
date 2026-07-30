@@ -3,6 +3,8 @@ extends DelegatingScenarioPort
 
 const COMMANDS := [
 	"query_party_wealth",
+	"query_party_items",
+	"query_item_definition",
 	"give_treasure",
 	"drop_party_items",
 	"load_shop",
@@ -17,6 +19,8 @@ const COMMANDS := [
 ]
 const OPERATIONS := {
 	"query_party_wealth": "_query_party_wealth",
+	"query_party_items": "_query_party_items",
+	"query_item_definition": "_query_item_definition",
 	"give_treasure": "_give_treasure",
 	"drop_party_items": "_drop_party_items",
 	"load_shop": "_load_shop",

@@ -276,6 +276,70 @@ Built-in extensions ship under reserved `res://` game paths and follow the same
 namespace and duplicate-ownership rules. A package may select and configure a
 built-in extension by stable ID, but it cannot supply or replace its code.
 
+Remake reads the user-local engine plug-in catalog from
+`user://scenario_plugins/installed.json`. A catalog entry has this shape:
+
+```json
+{
+  "id": "example.weather",
+  "displayName": "Example Weather",
+  "description": "Adds authored weather behavior.",
+  "apiVersion": 1,
+  "approved": true,
+  "approvedHash": "<canonical descriptor SHA-256>",
+  "entryPoint": "plugin.gd",
+  "files": [
+    {
+      "path": "plugin.gd",
+      "size": 2048,
+      "sha256": "<exact file SHA-256>"
+    }
+  ],
+  "contentHash": "<canonical declared-file-manifest SHA-256>",
+  "providers": [
+    {"id": "example.weather.forecast-provider", "method": "forecast"}
+  ],
+  "operations": [
+    {
+      "id": "example.weather.forecast",
+      "commandId": "example.weather.forecast-command",
+      "providerId": "example.weather.forecast-provider",
+      "owningPort": "engine.plugins",
+      "label": "Forecast Weather",
+      "category": "Weather",
+      "minimumTier": "safe",
+      "roles": ["action", "helper"],
+      "yields": true,
+      "mutates": false,
+      "parameters": {"value": "int"},
+      "result": "int",
+      "summary": "Returns the scenario forecast.",
+      "reference": "Reads the installed weather provider.",
+      "example": "var forecast = await weather_forecast(1)"
+    }
+  ]
+}
+```
+
+An installable package is a directory containing `plugin.json` and every file
+declared by its manifest. `plugin.json` adds `"packageSchemaVersion": 1` to the
+descriptor above and never carries approval state. Remake Settings can inspect,
+install, update, approve, revoke, and remove a package. Inspection and
+installation parse and copy bytes only; they never load the entry script.
+
+Installed files live below `user://scenario_plugins/<plug-in-id>/`. Paths must
+be relative, unique, and explicitly declared. The package `contentHash` covers
+the canonical path, size, and SHA-256 record for every declared file. The
+entry point must be one of those files. Updates replace the whole installed
+directory and revoke approval, so undeclared or stale files cannot survive an
+update.
+
+Every public ID must use the plug-in namespace and cannot begin with `core.`.
+Approval pins exact hashes for all declared files plus canonical descriptor
+metadata; a change to either requires approval again. The approval dialog
+warns that engine plug-ins run with the user's account privileges. Only
+plug-ins named in `runtime.requiredPlugins` are activated for a campaign.
+
 ## Persistence and scenario updates
 
 Campaign saves use schema 5 and pin:

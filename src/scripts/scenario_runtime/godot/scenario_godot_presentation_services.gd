@@ -31,6 +31,90 @@ func resume_scenario_debugger(action: String) -> Dictionary:
 	return {"status": "ok"}
 
 
+func _query_encounter_definition(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario encounter definitions are unavailable")
+	var encounter_kind := str(
+		payload.get("encounterKind", "")
+	).to_lower()
+	var encounter_id := int(payload.get("encounterId", -1))
+	if encounter_kind not in ["simple", "complex"] or encounter_id < 0:
+		return _error("Scenario encounter definition reference is invalid")
+	var record: Dictionary = service_owner.classic_bundle.get_encounter(
+		encounter_kind,
+		encounter_id
+	)
+	if record.is_empty():
+		return _error(
+			"Scenario %s encounter %d is unavailable"
+			% [encounter_kind, encounter_id]
+		)
+	var option_count := 0
+	var texts: Variant = record.get("texts", [])
+	if texts is Array:
+		for text_value: Variant in texts:
+			if not str(text_value).strip_edges().is_empty():
+				option_count += 1
+	return {
+		"id": str(record.get("id", encounter_id)),
+		"name": str(record.get(
+			"name",
+			"%s Encounter %d" % [
+				encounter_kind.capitalize(),
+				encounter_id,
+			]
+		)),
+		"encounterKind": encounter_kind,
+		"optionCount": option_count,
+		"canBackOut": bool(record.get("canBackOut", false)),
+		"maximumRuns": int(record.get("maxTimes", 0)),
+	}
+
+
+func _query_media_definition(payload: Dictionary) -> Dictionary:
+	if service_owner.classic_bundle == null:
+		return _error("Scenario media definitions are unavailable")
+	var media_kind := str(payload.get("mediaKind", "")).to_lower()
+	var resource_id := int(payload.get("resourceId", -1))
+	if media_kind not in ["picture", "sound", "text"] or resource_id < 0:
+		return _error("Scenario media definition reference is invalid")
+	var record: Dictionary
+	match media_kind:
+		"picture":
+			record = service_owner.classic_bundle.get_picture(resource_id)
+		"sound":
+			record = service_owner.classic_bundle.get_sound(resource_id)
+		"text":
+			record = service_owner.classic_bundle.get_scrolling_text(
+				resource_id
+			)
+	if record.is_empty():
+		return _error(
+			"Scenario %s resource %d is unavailable"
+			% [media_kind, resource_id]
+		)
+	var runtime_media: Variant = record.get("runtimeMedia", {})
+	if not (runtime_media is Dictionary):
+		runtime_media = {}
+	return {
+		"id": str(record.get("id", resource_id)),
+		"name": str(record.get(
+			"label",
+			record.get("name", "%s %d" % [media_kind, resource_id])
+		)),
+		"mediaKind": media_kind,
+		"resourceId": int(record.get("resourceId", resource_id)),
+		"runtimePath": str(runtime_media.get(
+			"path",
+			record.get("runtimePath", "")
+		)),
+		"mediaType": str(runtime_media.get(
+			"mediaType",
+			record.get("resourceType", "")
+		)),
+	}
+
+
 func _show_text(payload: Dictionary) -> Dictionary:
 	var override: Variant = service_owner.call(
 		"scenario_presentation_override",

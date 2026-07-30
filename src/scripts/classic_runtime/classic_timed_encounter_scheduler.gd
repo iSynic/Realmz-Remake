@@ -22,7 +22,8 @@ func scan_day(
 	runtime_state: Object,
 	scenario_day: int,
 	start_index: int,
-	has_item: Callable = Callable()
+	has_item: Callable = Callable(),
+	chance_modifier: Callable = Callable()
 ) -> Dictionary:
 	if bundle == null or runtime_state == null:
 		return _error("Classic timed-encounter scheduling requires a loaded campaign")
@@ -46,7 +47,26 @@ func scan_day(
 		# A location mismatch continues without writing, matching timeclick's file cursor.
 		encounter["day"] = scheduled_day + int(encounter.get("increment", 0))
 		var roll := _roll_percent()
-		if roll > int(encounter.get("percent", 0)):
+		var encounter_percent := float(encounter.get("percent", 0))
+		if chance_modifier.is_valid():
+			encounter_percent = clampf(
+				float(chance_modifier.call(
+					"encounter-chance",
+					encounter_percent,
+					{
+						"source": "timed-encounter",
+						"encounterId": encounter_id,
+						"scenarioDay": scenario_day,
+						"locationKind": str(encounter.get("locationKind", "any")),
+						"requiredLevel": int(encounter.get("requiredLevel", -1)),
+						"minimum": 0.0,
+						"maximum": 100.0,
+					}
+				)),
+				0.0,
+				100.0
+			)
+		if roll > encounter_percent:
 			runtime_state.set_timed_encounter_override(encounter_id, encounter)
 			return _complete(encounter_index + 1)
 		var required_item := int(encounter.get("requiredItem", -1))

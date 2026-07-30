@@ -7,6 +7,12 @@ const DefaultScenarioPortsScript = preload(
 const ScenarioRuleModifierPipelineScript = preload(
 	"res://scripts/scenario_runtime/scenario_rule_modifier_pipeline.gd"
 )
+const EnginePluginRegistryScript = preload(
+	"res://scripts/scenario_runtime/scenario_engine_plugin_registry.gd"
+)
+const EnginePluginPortScript = preload(
+	"res://scripts/scenario_runtime/ports/scenario_engine_plugin_port.gd"
+)
 
 signal command_started(command: String, payload: Dictionary)
 signal command_finished(command: String, response: Dictionary)
@@ -19,6 +25,7 @@ var command_adapter: Object
 var command_router: ScenarioCommandRouter
 var gameplay_rule_set: GameplayRuleSet
 var rule_modifier_pipeline: ScenarioRuleModifierPipeline
+var engine_plugin_registry: ScenarioEnginePluginRegistry
 var active := false
 var command_context: Dictionary = {}
 var nested_trigger_active := false
@@ -40,12 +47,7 @@ func _init() -> void:
 func configure(adapter: Object, rules: GameplayRuleSet = null) -> void:
 	command_adapter = adapter
 	gameplay_rule_set = rules
-	var router_result := DefaultScenarioPortsScript.create(adapter, rules)
-	if str(router_result.get("status", "")) == "ok":
-		command_router = router_result["router"]
-	else:
-		command_router = null
-		push_error(str(router_result.get("message", "Scenario command router is unavailable")))
+	_create_command_router()
 	if (
 		command_router != null
 		and runtime != null
@@ -55,6 +57,18 @@ func configure(adapter: Object, rules: GameplayRuleSet = null) -> void:
 		_configure_extensions(false)
 
 
+func _create_command_router() -> void:
+	var router_result := DefaultScenarioPortsScript.create(
+		command_adapter,
+		gameplay_rule_set
+	)
+	if str(router_result.get("status", "")) == "ok":
+		command_router = router_result["router"]
+	else:
+		command_router = null
+		push_error(str(router_result.get("message", "Scenario command router is unavailable")))
+
+
 func load_campaign(directory: String) -> bool:
 	active = false
 	nested_trigger_active = false
@@ -62,6 +76,7 @@ func load_campaign(directory: String) -> bool:
 	command_context.clear()
 	if not runtime.load_campaign(directory):
 		return false
+	_create_command_router()
 	if not _configure_extensions():
 		return false
 	_configure_adapter()
@@ -76,6 +91,7 @@ func use_campaign(campaign_bundle: ClassicCampaignBundle) -> void:
 	var loaded_state := ClassicRuntimeState.new()
 	loaded_state.configure_from_bundle(campaign_bundle)
 	runtime.use_shared_campaign(campaign_bundle, loaded_state)
+	_create_command_router()
 	_configure_extensions()
 	_configure_adapter()
 
@@ -96,11 +112,14 @@ func _configure_extensions(invoke_lifecycle := true) -> bool:
 		):
 			push_error(extension_registry.last_error)
 			return false
+	if not _configure_engine_plugins():
+		return false
 	command_router.configure({
 		"scenarioPortRuntime": command_adapter,
 		"commandRouter": command_router,
 		"gameplayRules": gameplay_rule_set,
 		"extensionRegistry": extension_registry,
+		"enginePluginRegistry": engine_plugin_registry,
 		"behaviorRunner": self,
 		"runtimeBindings": runtime.bundle.documents.get(
 			"runtime",
@@ -115,6 +134,29 @@ func _configure_extensions(invoke_lifecycle := true) -> bool:
 	)
 	if invoke_lifecycle:
 		call_deferred("_run_campaign_loaded_behaviors")
+	return true
+
+
+func _configure_engine_plugins() -> bool:
+	engine_plugin_registry = EnginePluginRegistryScript.new()
+	if not engine_plugin_registry.load_installed_catalog():
+		push_error(engine_plugin_registry.last_error)
+		return false
+	var runtime_document: Variant = runtime.bundle.documents.get("runtime", {})
+	var requirements: Variant = (
+		runtime_document.get("requiredPlugins", [])
+		if runtime_document is Dictionary else []
+	)
+	if not engine_plugin_registry.activate_required(requirements):
+		push_error(engine_plugin_registry.last_error)
+		return false
+	if engine_plugin_registry.command_ids().is_empty():
+		return true
+	var port := EnginePluginPortScript.new()
+	port.bind_registry(engine_plugin_registry)
+	if not command_router.register_port(port):
+		push_error(command_router.last_error)
+		return false
 	return true
 
 
@@ -361,6 +403,63 @@ func run_behavior_attachments(
 			return result
 		results.append(result)
 	return {"status": "ok", "handled": true, "results": results}
+
+
+func run_behavior_binding(
+	behavior_id: String,
+	role: String,
+	hook: String,
+	target_kind: String,
+	target_id: String,
+	slot: int,
+	request: Dictionary
+) -> Dictionary:
+	if runtime == null or runtime.interpreter == null:
+		return {
+			"status": "error",
+			"message": "Scenario behavior runtime is unavailable",
+		}
+	var bindings: Array = runtime.interpreter.matching_scenario_behavior_bindings(
+		role,
+		hook,
+		target_kind,
+		[target_id],
+		slot
+	)
+	var selected_binding := {}
+	for binding_value: Variant in bindings:
+		if binding_value is Dictionary \
+				and str(binding_value.get("behaviorId", "")) == behavior_id:
+			selected_binding = binding_value
+			break
+	if selected_binding.is_empty():
+		return {
+			"status": "error",
+			"message": (
+				"Scenario behavior '%s' is not attached to %s '%s' at %s/%s"
+				% [behavior_id, target_kind, target_id, role, hook]
+			),
+		}
+	var context := {
+		"role": role,
+		"hook": hook,
+		"targetKind": target_kind,
+		"targetId": target_id,
+		"request": request.duplicate(true),
+	}
+	var arguments_result: Dictionary = (
+		runtime.interpreter.resolve_scenario_behavior_arguments(
+			selected_binding.get("arguments", {}),
+			context
+		)
+	)
+	if str(arguments_result.get("status", "")) != "ok":
+		return arguments_result
+	return await run_bound_behavior(
+		behavior_id,
+		arguments_result.get("arguments", {}),
+		context
+	)
 
 
 func run_behavior_attachments_pure(
@@ -803,7 +902,7 @@ func resolve_rule_modifiers(
 ) -> Dictionary:
 	if rule_modifier_pipeline == null:
 		return {"status": "ok", "value": base_value, "applied": []}
-	return await rule_modifier_pipeline.resolve(event_id, base_value, context)
+	return rule_modifier_pipeline.resolve(event_id, base_value, context)
 
 
 func resume_scenario_debugger(action: String) -> Dictionary:

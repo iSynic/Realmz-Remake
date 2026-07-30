@@ -81,7 +81,8 @@ static func apply_party_recovery(
 	player_allies: Array,
 	previous_time: int,
 	current_time: int,
-	consume_iron_ration := Callable()
+	consume_iron_ration := Callable(),
+	recovery_modifier := Callable()
 ) -> Dictionary:
 	var hour_boundaries := elapsed_hour_boundaries(previous_time, current_time)
 	var half_day_boundaries := elapsed_half_day_boundaries(previous_time, current_time)
@@ -97,20 +98,30 @@ static func apply_party_recovery(
 
 	for _hour: int in range(hour_boundaries):
 		for character: Variant in player_characters:
-			report["playerSpellPoints"] += _restore_player_spell_points(character)
+			report["playerSpellPoints"] += _restore_player_spell_points(
+				character,
+				recovery_modifier
+			)
 		for ally: Variant in player_allies:
-			report["allySpellPoints"] += _restore_ally_spell_points(ally)
+			report["allySpellPoints"] += _restore_ally_spell_points(
+				ally,
+				recovery_modifier
+			)
 
 	for _half_day: int in range(half_day_boundaries):
 		for character: Variant in player_characters:
 			var recovery: Dictionary = _restore_player_hit_points(
 				character,
-				consume_iron_ration
+				consume_iron_ration,
+				recovery_modifier
 			)
 			report["playerHitPoints"] += int(recovery["amount"])
 			report["ironRationsConsumed"] += int(recovery["rationsConsumed"])
 		for ally: Variant in player_allies:
-			report["allyHitPoints"] += _restore_ally_hit_points(ally)
+			report["allyHitPoints"] += _restore_ally_hit_points(
+				ally,
+				recovery_modifier
+			)
 	return report
 
 
@@ -155,27 +166,46 @@ static func random_battle_area_contains(
 	return true
 
 
-static func _restore_player_spell_points(character: Variant) -> int:
+static func _restore_player_spell_points(
+	character: Variant,
+	recovery_modifier: Callable
+) -> int:
 	if not _can_change_stat(character, "curSP", "maxSP") \
 			or _stat(character, "curSP") >= _stat(character, "maxSP") \
 			or _stat(character, "curHP") <= 0 \
 			or _classic_condition(character, ANIMATED_CONDITION_INDEX) != 0:
 		return 0
 	var amount := maxi(1, int(_level(character) / 2.0))
+	amount = _modified_recovery_amount(
+		amount,
+		character,
+		"player-spell-points",
+		recovery_modifier
+	)
 	return _change_stat(character, "curSP", "maxSP", amount)
 
 
-static func _restore_ally_spell_points(ally: Variant) -> int:
+static func _restore_ally_spell_points(
+	ally: Variant,
+	recovery_modifier: Callable
+) -> int:
 	if not _can_change_stat(ally, "curSP", "maxSP") \
 			or _stat(ally, "curSP") >= _stat(ally, "maxSP"):
 		return 0
 	var amount := maxi(1, int(_hit_dice(ally) / 2.0))
+	amount = _modified_recovery_amount(
+		amount,
+		ally,
+		"ally-spell-points",
+		recovery_modifier
+	)
 	return _change_stat(ally, "curSP", "maxSP", amount)
 
 
 static func _restore_player_hit_points(
 	character: Variant,
-	consume_iron_ration: Callable
+	consume_iron_ration: Callable,
+	recovery_modifier: Callable
 ) -> Dictionary:
 	if not _can_change_stat(character, "curHP", "maxHP") \
 			or _stat(character, "curHP") >= _stat(character, "maxHP") \
@@ -195,22 +225,63 @@ static func _restore_player_hit_points(
 			"amount": 0,
 			"rationsConsumed": 1 if ration_consumed else 0,
 		}
+	amount = _modified_recovery_amount(
+		amount,
+		character,
+		"player-hit-points",
+		recovery_modifier
+	)
 	return {
 		"amount": _change_stat(character, "curHP", "maxHP", amount),
 		"rationsConsumed": 1 if ration_consumed else 0,
 	}
 
 
-static func _restore_ally_hit_points(ally: Variant) -> int:
+static func _restore_ally_hit_points(
+	ally: Variant,
+	recovery_modifier: Callable
+) -> int:
 	if not _can_change_stat(ally, "curHP", "maxHP") \
 			or _stat(ally, "curHP") >= _stat(ally, "maxHP"):
 		return 0
+	var amount := _modified_recovery_amount(
+		int(_hit_dice(ally) / 4.0) + 1,
+		ally,
+		"ally-hit-points",
+		recovery_modifier
+	)
 	return _change_stat(
 		ally,
 		"curHP",
 		"maxHP",
-		int(_hit_dice(ally) / 4.0) + 1
+		amount
 	)
+
+
+static func _modified_recovery_amount(
+	amount: int,
+	character: Object,
+	recovery_kind: String,
+	recovery_modifier: Callable
+) -> int:
+	if not recovery_modifier.is_valid():
+		return amount
+	return maxi(0, roundi(float(recovery_modifier.call(
+		"rest-recovery",
+		float(amount),
+		{
+			"recoveryKind": recovery_kind,
+			"target": {
+				"name": str(character.get("name")),
+				"level": int(character.get("level")),
+				"health": _stat(character, "curHP"),
+				"maximumHealth": _stat(character, "maxHP"),
+				"spellPoints": _stat(character, "curSP"),
+				"maximumSpellPoints": _stat(character, "maxSP"),
+			},
+			"minimum": 0.0,
+		}
+	))))
 
 
 static func _can_change_stat(character: Variant, current_name: String, max_name: String) -> bool:

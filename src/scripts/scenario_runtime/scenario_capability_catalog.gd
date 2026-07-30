@@ -94,6 +94,57 @@ func operation_ids() -> Array:
 	return result
 
 
+func register_external_operations(
+	plugin_id: String,
+	rows: Variant
+) -> bool:
+	if plugin_id.begins_with("core.") or not (rows is Array):
+		return _fail("Scenario plug-in capability registration is invalid")
+	for row_value: Variant in rows:
+		if not (row_value is Dictionary):
+			return _fail("Scenario plug-in capability must be an object")
+		var row: Dictionary = row_value
+		var operation_id := str(row.get("id", ""))
+		if not operation_id.begins_with(plugin_id + ".") \
+				or operations.has(operation_id):
+			return _fail(
+				"Scenario plug-in capability IDs must be unique and namespaced"
+			)
+		for required_field: String in [
+			"label",
+			"category",
+			"owningPort",
+			"minimumTier",
+			"roles",
+			"yields",
+			"mutates",
+			"parameters",
+			"result",
+			"summary",
+			"reference",
+			"example",
+		]:
+			if not row.has(required_field):
+				return _fail(
+					"Scenario plug-in capability '%s' has no %s"
+					% [operation_id, required_field]
+				)
+		var allowed_roles: Variant = row.get("roles", [])
+		if not (allowed_roles is Array):
+			return _fail(
+				"Scenario plug-in capability '%s' has invalid roles"
+				% operation_id
+			)
+		for role_id: Variant in allowed_roles:
+			if not roles.has(str(role_id)):
+				return _fail(
+					"Scenario plug-in capability '%s' uses an unknown role"
+					% operation_id
+				)
+		operations[operation_id] = row.duplicate(true)
+	return true
+
+
 func has_role(role_id: String) -> bool:
 	return roles.has(role_id)
 

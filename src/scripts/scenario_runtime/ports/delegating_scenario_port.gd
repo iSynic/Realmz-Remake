@@ -303,7 +303,7 @@ func apply_rule_modifiers(
 	if behavior_runner == null \
 			or not behavior_runner.has_method("resolve_rule_modifiers"):
 		return {"status": "ok", "value": base_value, "applied": []}
-	return await behavior_runner.call(
+	return behavior_runner.call(
 		"resolve_rule_modifiers",
 		event_id,
 		base_value,

@@ -603,7 +603,10 @@ func after_spell_anim_finished(castercrea : Creature, spell, power:int, main_tar
 			cb.creature,
 			spell,
 			power,
-			randi_range(1, 100)
+			randi_range(1, 100),
+			0,
+			false,
+			Callable(GameGlobal, "apply_scenario_rule_modifier")
 		)
 		if str(save_resolution.get("status", "")) == "error" :
 			UI.ow_hud.creatureRect.logrect.log_spell_no_effect(castercrea, cb, spell)
@@ -719,7 +722,10 @@ func _resolve_classic_repeated_missile_hits(
 			cb.creature,
 			spell,
 			power,
-			randi_range(1, 100)
+			randi_range(1, 100),
+			0,
+			false,
+			Callable(GameGlobal, "apply_scenario_rule_modifier")
 		)
 		if str(save_resolution.get("status", "")) == "error" \
 				or (
@@ -908,7 +914,8 @@ func perform_melee_attack(msg : Dictionary) -> Array:
 			item_resources.legacy_item_view_for_adapter(weapon_instance)
 				if weapon_instance != null else weapon,
 			-1,
-			GameGlobal.classic_party_charm_resistance_bonus(defender.creature)
+			GameGlobal.classic_party_charm_resistance_bonus(defender.creature),
+			Callable(GameGlobal, "apply_scenario_rule_modifier")
 		)
 		if str(classic_special.get("status", "ok")) == "error":
 			push_error(str(classic_special.get(

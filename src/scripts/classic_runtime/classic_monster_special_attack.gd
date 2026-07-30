@@ -28,7 +28,8 @@ static func apply_from_weapon(
 	target: Object,
 	weapon: Dictionary,
 	save_roll := -1,
-	party_charm_bonus := 0
+	party_charm_bonus := 0,
+	chance_modifier := Callable()
 ) -> Dictionary:
 	var extra_data: Variant = weapon.get("extra_data", {})
 	if not (extra_data is Dictionary):
@@ -36,7 +37,14 @@ static func apply_from_weapon(
 	var special_code := int(extra_data.get("classicSpecialAttack", 0))
 	if not supports(special_code):
 		return {"handled": false}
-	return apply(attacker, target, special_code, save_roll, party_charm_bonus)
+	return apply(
+		attacker,
+		target,
+		special_code,
+		save_roll,
+		party_charm_bonus,
+		chance_modifier
+	)
 
 
 static func apply(
@@ -44,10 +52,18 @@ static func apply(
 	target: Object,
 	special_code: int,
 	save_roll := -1,
-	party_charm_bonus := 0
+	party_charm_bonus := 0,
+	chance_modifier := Callable()
 ) -> Dictionary:
 	if StatusAttackScript.supports(special_code):
-		return StatusAttackScript.apply(attacker, target, special_code, -1, save_roll)
+		return StatusAttackScript.apply(
+			attacker,
+			target,
+			special_code,
+			-1,
+			save_roll,
+			chance_modifier
+		)
 	if not SAVE_BY_SPECIAL.has(special_code):
 		return {"handled": false}
 	if attacker == null or target == null \
@@ -78,6 +94,23 @@ static func apply(
 		int(result["saveIndex"]),
 		party_charm_bonus if special_code == 10 else 0
 	)
+	if chance_modifier.is_valid():
+		save_chance = clampf(
+			float(chance_modifier.call(
+				"condition-resistance",
+				save_chance,
+				{
+					"source": "monster-special-attack",
+					"specialCode": special_code,
+					"attacker": _rule_subject(attacker),
+					"target": _rule_subject(target),
+					"minimum": 0.0,
+					"maximum": 100.0,
+				}
+			)),
+			0.0,
+			100.0
+		)
 	result["saveChance"] = save_chance
 	result["saveRoll"] = actual_save_roll
 	result["saved"] = actual_save_roll <= save_chance
@@ -182,6 +215,21 @@ static func _property_value(value: Object, property_name: String) -> Variant:
 
 static func _has_property(value: Object, property_name: String) -> bool:
 	return _property_value(value, property_name) != null
+
+
+static func _rule_subject(value: Object) -> Dictionary:
+	if value == null:
+		return {}
+	var result := {}
+	for property: Dictionary in value.get_property_list():
+		var property_name := str(property.get("name", ""))
+		if property_name == "name":
+			result["name"] = str(value.get(property_name))
+		elif property_name == "level":
+			result["level"] = int(value.get(property_name))
+	if value.has_meta("classic_monster_id"):
+		result["classicMonsterId"] = int(value.get_meta("classic_monster_id"))
+	return result
 
 
 static func _error(message: String) -> Dictionary:

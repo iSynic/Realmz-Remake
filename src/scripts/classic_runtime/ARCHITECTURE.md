@@ -167,12 +167,12 @@ Every operation declares:
 - whether it yields or mutates state;
 - minimum security tier and deprecation state.
 
-Role descriptors distinguish their complete reserved hook vocabulary from
-`runtimeHooks`, the hooks that currently have an authoritative gameplay
-boundary. Providence export and Remake readiness both reject a behavior that
-targets a reserved-but-unconnected hook. Current reserved seams are spell
-tick/expiration, item equip/unequip/attack/defense/passive, and campaign
-completion.
+Role descriptors distinguish their hook vocabulary from `runtimeHooks`, the
+hooks that have an authoritative gameplay boundary. Providence export and
+Remake readiness both reject a behavior that targets a
+reserved-but-unconnected hook. The current catalog connects every declared
+action, encounter, spell, item, AI, lifecycle, and rule-modifier hook; future
+vocabulary still has to enter through this gate.
 
 Queries produce immutable values, snapshots, or opaque stable references.
 Mutations become validated commands. Public operations never return live
@@ -288,6 +288,28 @@ version, namespaced registrations, and duplicate ownership. A campaign can
 declare a required plug-in, but cannot package its executable code. Missing or
 incompatible requirements block readiness.
 
+The installed catalog is user-local at
+`user://scenario_plugins/installed.json`. Each descriptor names an exact
+`contentHash`, safe relative `.gd` `entryPoint`, a manifest of every installed
+file, API version, approval state, providers, and public operations. The
+content hash covers canonical relative paths, byte sizes, and per-file
+SHA-256 values. Approved metadata is pinned by `approvedHash`, the SHA-256 of
+the canonical descriptor with `approved` and `approvedHash` removed. Changing
+any declared file or approved metadata invalidates activation.
+
+`ScenarioEnginePluginStore` owns non-executing package inspection, atomic
+installation/update, exact-package approval, revocation, and removal. Remake's
+Settings screen is the user-facing manager. Updating a package replaces its
+complete directory and always revokes approval. Plug-in source is loaded only
+when an approved plug-in is required by the selected campaign.
+
+Plug-in IDs need a non-core namespace. Provider, operation, and command IDs
+must remain below that plug-in ID. Public operations use the
+`engine.plugins` bridge port and carry the same typed roles, parameters,
+result, yield/mutation flags, reference, and example fields as built-in
+catalog operations. The bridge validates JSON-compatible results before they
+return to the interpreter.
+
 The word “extension” in runtime JSON therefore means a built-in provider that
 ships with Remake. It does not mean a script loaded from a campaign folder.
 
@@ -364,7 +386,7 @@ Providence never bypasses sandbox feasibility or engine plug-in readiness.
 | Godot services | `scenario_runtime/godot/` |
 | Capability catalog | `Data/remake-scenario-capabilities.v2.json` |
 | Extension registry | `scenario_runtime/scenario_extension_registry.gd` |
-| Engine plug-ins | `scenario_runtime/scenario_engine_plugin_registry.gd` |
+| Engine plug-ins | `scenario_runtime/scenario_engine_plugin_registry.gd`, `scenario_runtime/scenario_engine_plugin_store.gd` |
 | Rule modifiers | `scenario_runtime/scenario_rule_modifier_pipeline.gd` |
 | Sandbox runner | `scenario_runtime/sandbox/` |
 | Preview host | `scenario_runtime/preview/scenario_preview_host.gd` |
@@ -385,6 +407,18 @@ Providence never bypasses sandbox feasibility or engine plug-in readiness.
    undeclared capability, save/restore, and deterministic export.
 
 Do not add a host special case or expose a native object to avoid this path.
+
+The Windows sandbox boundary has a process-level acceptance suite:
+
+```powershell
+pwsh -NoProfile -File tools/scenario-sandbox-host/run-security-acceptance.ps1 `
+  -GodotExecutable "C:\path\to\Godot_console.exe"
+```
+
+It exercises file, network, process, reflection, resource-loading, runaway,
+oversized-state, and undeclared-command fixtures through the real
+AppContainer/Job Object host. Static scanner unit tests are not a substitute
+for this gate.
 
 ## Invariants
 

@@ -59,6 +59,17 @@ func apply_classic_scaled_effect(
 			or not target.has_method("change_cur_hp"):
 		return 0
 	var healing := floori(get_damage_roll(power, caster) * effect_scale)
+	healing = maxi(0, roundi(GameGlobal.apply_scenario_rule_modifier(
+		"healing",
+		float(healing),
+		{
+			"attackKind": "classic-healing-spell",
+			"attacker": GameGlobal.scenario_rule_subject(caster),
+			"defender": GameGlobal.scenario_rule_subject(target),
+			"spell": GameGlobal.scenario_rule_spell(self, power),
+			"minimum": 0.0,
+		}
+	)))
 	var previous_health: Variant = target.get_stat("curHP") \
 		if target.has_method("get_stat") else null
 	target.change_cur_hp(healing)
