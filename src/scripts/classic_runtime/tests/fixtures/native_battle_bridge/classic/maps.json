@@ -1,1 +1,1 @@
-{"schemaVersion":2,"maps":[{"id":"land:0","levelType":"land","index":0,"name":"Native bridge land","width":90,"height":90,"render":{"landlook":0,"mode":"outdoor-landlook","tilesetId":"landlook-0"}}]}
+{"maps":[{"height":90,"id":"land:0","index":0,"levelType":"land","name":"Native bridge land","render":{"landlook":0,"mode":"outdoor-landlook","tilesetId":"landlook-0"},"width":90}],"schemaVersion":3}

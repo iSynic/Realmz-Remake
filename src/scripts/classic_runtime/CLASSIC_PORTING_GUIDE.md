@@ -39,11 +39,11 @@ campaign completion are separate results.
 
 | Layer | Current accepted version | Compatibility rule |
 | --- | --- | --- |
-| Providence project | Schema `8` | The compatibility exporter reads the canonical project directly. It does not consume Providence's native Realmz compiler output. |
-| Remake bundle | Manifest `formatVersion: 3`; Classic documents and `remake/scripts.json` use `schemaVersion: 2` | Remake accepts only the current pre-release contract before indexing any runtime record. The required runtime and behavior documents declare rules, built-in extensions, capabilities, bindings, installed plug-ins, and target support. |
+| Providence project | Schema `9` | The compatibility exporter reads the canonical project directly. It does not consume Providence's native Realmz compiler output. |
+| Remake bundle | Manifest `formatVersion: 3`; campaign documents use `schemaVersion: 3`, while independently versioned `remake/scripts.json` remains schema 2 | Remake accepts only the current pre-release contract before indexing any runtime record. The required runtime and behavior documents declare rules, built-in extensions, capabilities, bindings, installed plug-ins, and target support. |
 | Compatibility profile | `realmz-7.1` | A different or missing profile is rejected. |
 | Realmz Remake Godot project | `4.7` | The commands below are currently verified with Godot `4.7.1`. |
-| Classic save envelope | Schema `5` | An older package state is restored only through a complete compatible content and state migration chain. |
+| Classic save envelope | Schema `6` | An older package state is restored only through a complete compatible content and state migration chain. |
 | Regression corpus | Manifest schema `1`; shared suite `1` | Every member runs through the same bundle loader, execution audit, interpreter, and state path. |
 
 The bundle version is the compiler/runtime interchange contract. Providence and

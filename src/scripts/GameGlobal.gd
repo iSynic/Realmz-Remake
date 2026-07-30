@@ -21,7 +21,7 @@ const CLASSIC_CAMPAIGN_ADMISSION_PATH := (
 	"res://scripts/classic_runtime/classic_campaign_admission.gd"
 )
 const CLASSIC_CAMPAIGN_SESSION_PATH := (
-	"res://scripts/classic_runtime/classic_campaign_session.gd"
+	"res://scripts/scenario_runtime/scenario_campaign_session.gd"
 )
 const SCENARIO_GODOT_SERVICES_PATH := (
 	"res://scripts/scenario_runtime/godot/scenario_godot_services.gd"

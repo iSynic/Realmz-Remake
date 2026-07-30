@@ -341,7 +341,7 @@ GDScript.
 
 ## Saves and content updates
 
-Campaign save schema 5 records:
+Campaign save schema 6 records:
 
 - campaign identity, content version, and package hash;
 - API catalog hash;

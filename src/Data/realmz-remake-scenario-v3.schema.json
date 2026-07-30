@@ -15,7 +15,9 @@
   "properties": {
     "format": { "const": "realmz-remake-scenario" },
     "formatVersion": { "const": 3 },
-    "campaignKind": { "enum": ["classic-compiled", "remake-authored"] },
+    "campaignKind": {
+      "enum": ["classic-interpreted", "classic-enhanced", "remake-authored"]
+    },
     "id": { "type": "string", "minLength": 1 },
     "name": { "type": "string", "minLength": 1 },
     "files": {
@@ -62,6 +64,6 @@
     "canonicalization": "RFC-8259 JSON with object keys sorted recursively, no insignificant whitespace, and integrity.packageHash omitted",
     "payload": "canonical campaign.json manifest containing the complete integrity.files index"
   },
-  "x-documentSchemaVersion": 2,
-  "x-saveSchemaVersion": 4
+  "x-documentSchemaVersion": 3,
+  "x-saveSchemaVersion": 6
 }

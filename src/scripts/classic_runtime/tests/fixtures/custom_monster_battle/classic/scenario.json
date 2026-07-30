@@ -1,1 +1,1 @@
-{"schemaVersion":2,"identity":{"id":"fixture-custom-monster-battle","name":"Custom Monster Battle Fixture"},"shell":{"recLevel":6,"maxLevel":18,"landLevel":0,"lookX":6,"lookY":6,"creatorUser":"Realmz Remake"}}
+{"identity":{"id":"fixture-custom-monster-battle","name":"Custom Monster Battle Fixture"},"schemaVersion":3,"shell":{"creatorUser":"Realmz Remake","landLevel":0,"lookX":6,"lookY":6,"maxLevel":18,"recLevel":6}}

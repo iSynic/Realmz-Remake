@@ -207,12 +207,12 @@ func _run_member(member: Dictionary) -> Dictionary:
 			_empty_classifications(),
 			failures
 		)
-	if str(bundle.manifest.get("campaignKind", "")) != "classic-compiled":
+	if str(bundle.manifest.get("campaignKind", "")) != "classic-interpreted":
 		failures.append(_failure(
 			scenario_id,
 			"",
 			"campaign.json",
-			"Corpus member is not a classic-compiled campaign bundle"
+			"Corpus member is not a classic-interpreted campaign bundle"
 		))
 	if str(bundle.manifest.get("id", "")) != scenario_id:
 		failures.append(_failure(

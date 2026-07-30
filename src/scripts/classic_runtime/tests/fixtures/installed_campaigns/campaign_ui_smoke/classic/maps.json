@@ -1,1 +1,1 @@
-{"schemaVersion":2,"maps":[{"id":"land:0","levelType":"land","index":0,"name":"UI smoke land","width":30,"height":30,"render":{"landlook":0,"mode":"outdoor-landlook","tilesetId":"landlook-0"}}]}
+{"maps":[{"height":30,"id":"land:0","index":0,"levelType":"land","name":"UI smoke land","render":{"landlook":0,"mode":"outdoor-landlook","tilesetId":"landlook-0"},"width":30}],"schemaVersion":3}

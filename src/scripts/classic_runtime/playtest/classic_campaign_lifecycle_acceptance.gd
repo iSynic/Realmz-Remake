@@ -71,7 +71,7 @@ func _load_manifest() -> bool:
 		_fail("manifest", "campaign.json is not a JSON object")
 		return false
 	campaign_manifest = parsed
-	if str(campaign_manifest.get("campaignKind", "")) != "classic-compiled":
+	if str(campaign_manifest.get("campaignKind", "")) != "classic-interpreted":
 		_fail("manifest", "The installed campaign is not a Classic package")
 		return false
 	var start: Variant = campaign_manifest.get("start")

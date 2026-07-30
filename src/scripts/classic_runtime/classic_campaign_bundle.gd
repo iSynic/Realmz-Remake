@@ -13,12 +13,19 @@ const ScenarioScriptRuntimeScript = preload(
 
 const FORMAT := "realmz-remake-scenario"
 const FORMAT_VERSION := 3
-const CAMPAIGN_KIND := "classic-compiled"
+const CAMPAIGN_KIND_CLASSIC_INTERPRETED := "classic-interpreted"
+const CAMPAIGN_KIND_CLASSIC_ENHANCED := "classic-enhanced"
+const CLASSIC_CAMPAIGN_KINDS := [
+	CAMPAIGN_KIND_CLASSIC_INTERPRETED,
+	CAMPAIGN_KIND_CLASSIC_ENHANCED,
+]
+# Kept as the default fixture kind while callers migrate to the explicit constants.
+const CAMPAIGN_KIND := CAMPAIGN_KIND_CLASSIC_INTERPRETED
 const COMPATIBILITY_PROFILE := "realmz-7.1"
-const DOCUMENT_SCHEMA_VERSION := 2
-const RUNTIME_DOCUMENT_SCHEMA_VERSION := 2
+const DOCUMENT_SCHEMA_VERSION := 3
+const RUNTIME_DOCUMENT_SCHEMA_VERSION := 3
 const RULE_TABLE_SOURCES := ["shared", "scenario-local", "unresolved"]
-const REQUIRED_DOCUMENTS := [
+const CLASSIC_DOCUMENTS := [
 	"scenario",
 	"maps",
 	"scripts",
@@ -29,9 +36,9 @@ const REQUIRED_DOCUMENTS := [
 	"runtime",
 	"remakeScripts",
 ]
-const REQUIRED_MANIFEST_FILES := REQUIRED_DOCUMENTS + ["evidence"]
 
 var root_directory := ""
+var campaign_kind := ""
 var manifest: Dictionary = {}
 var documents: Dictionary = {}
 var last_error := ""
@@ -68,6 +75,20 @@ var _evidence_records_by_key: Dictionary = {}
 var _evidence_loaded := false
 
 
+func _required_documents() -> Array[String]:
+	var required: Array[String] = []
+	required.assign(CLASSIC_DOCUMENTS)
+	if campaign_kind == CAMPAIGN_KIND_CLASSIC_ENHANCED:
+		required.append("remakeLogic")
+	return required
+
+
+func _required_manifest_files() -> Array[String]:
+	var required := _required_documents()
+	required.append("evidence")
+	return required
+
+
 func load_from_directory(directory: String) -> bool:
 	_reset()
 	root_directory = directory.trim_suffix("/").trim_suffix("\\")
@@ -84,7 +105,7 @@ func load_from_directory(directory: String) -> bool:
 		return _fail(extension_registry.last_error)
 
 	var file_map: Variant = manifest.get("files", {})
-	for document_name: String in REQUIRED_DOCUMENTS:
+	for document_name: String in _required_documents():
 		var document_value: Variant = _read_json(
 			root_directory.path_join(str(file_map[document_name]))
 		)
@@ -109,8 +130,14 @@ func _validate_manifest_contract() -> bool:
 			"Unsupported scenario campaign format version: %s" % \
 				manifest.get("formatVersion", "<missing>")
 		)
-	if str(manifest.get("campaignKind", "")) != CAMPAIGN_KIND:
-		return _fail("campaign.json campaignKind must be '%s'" % CAMPAIGN_KIND)
+	campaign_kind = str(manifest.get("campaignKind", ""))
+	if campaign_kind not in CLASSIC_CAMPAIGN_KINDS:
+		return _fail(
+			"campaign.json campaignKind must be '%s' or '%s'" % [
+				CAMPAIGN_KIND_CLASSIC_INTERPRETED,
+				CAMPAIGN_KIND_CLASSIC_ENHANCED,
+			]
+		)
 	if str(manifest.get("compatibilityProfile", "")) != COMPATIBILITY_PROFILE:
 		return _fail(
 			"Unsupported classic compatibility profile: %s" % \
@@ -134,7 +161,7 @@ func _validate_manifest_contract() -> bool:
 	if not (file_map is Dictionary):
 		return _fail("campaign.json files must be a JSON object")
 	var seen_paths: Dictionary = {}
-	for document_name: String in REQUIRED_MANIFEST_FILES:
+	for document_name: String in _required_manifest_files():
 		if not file_map.has(document_name):
 			return _fail("campaign.json is missing the '%s' document path" % document_name)
 		var path_value: Variant = file_map[document_name]
@@ -170,7 +197,7 @@ func _validate_integrity() -> bool:
 	var entries: Variant = integrity.get("files")
 	if not (entries is Dictionary) or entries.is_empty():
 		return _fail("campaign.json integrity.files must describe the package payload")
-	for required_name: String in REQUIRED_MANIFEST_FILES:
+	for required_name: String in _required_manifest_files():
 		var required_path := str(manifest["files"].get(required_name, ""))
 		if not entries.has(required_path):
 			return _fail(
@@ -303,16 +330,21 @@ func _validate_document_contract() -> bool:
 		extension_registry = ExtensionRegistryScript.new()
 		if not extension_registry.load_builtin_catalog():
 			return _fail(extension_registry.last_error)
-	for document_name: String in REQUIRED_DOCUMENTS:
+	for document_name: String in _required_documents():
 		var document: Variant = documents.get(document_name, {})
 		if not (document is Dictionary):
 			return _fail("The '%s' classic document must contain a JSON object" % document_name)
 		var schema_version: Variant = document.get("schemaVersion")
-		if not _is_integer(schema_version) or int(schema_version) != DOCUMENT_SCHEMA_VERSION:
+		var expected_schema_version := (
+			ScenarioScriptRuntimeScript.SCHEMA_VERSION
+			if document_name == "remakeScripts"
+			else DOCUMENT_SCHEMA_VERSION
+		)
+		if not _is_integer(schema_version) or int(schema_version) != expected_schema_version:
 			return _fail(
 				"%s.schemaVersion must be %d, got %s" % [
 					document_name,
-					DOCUMENT_SCHEMA_VERSION,
+					expected_schema_version,
 					document.get("schemaVersion", "<missing>"),
 				]
 			)
@@ -322,6 +354,9 @@ func _validate_document_contract() -> bool:
 	if not _validate_scenario_selection_metadata():
 		return false
 	if not _validate_runtime_document():
+		return false
+	if campaign_kind == CAMPAIGN_KIND_CLASSIC_ENHANCED \
+			and not _validate_remake_logic_document():
 		return false
 	var script_validation: Dictionary = ScenarioScriptRuntimeScript.validate_document(
 		documents.get("remakeScripts"),
@@ -834,6 +869,13 @@ func _validate_runtime_document() -> bool:
 		return _fail(
 			"runtime.schemaVersion must be %d" % RUNTIME_DOCUMENT_SCHEMA_VERSION
 		)
+	var expected_logic := (
+		CAMPAIGN_KIND_CLASSIC_ENHANCED
+		if campaign_kind == CAMPAIGN_KIND_CLASSIC_ENHANCED
+		else "classic"
+	)
+	if str(runtime.get("scenarioLogic", "")) != expected_logic:
+		return _fail("runtime.scenarioLogic must be '%s'" % expected_logic)
 	var recommended_profile: Variant = runtime.get("recommendedGameplayProfile")
 	if not (recommended_profile is String) \
 			or not _is_namespaced_identifier(recommended_profile):
@@ -951,6 +993,28 @@ func _validate_runtime_document() -> bool:
 			return _fail("runtime.targetSupport.%s must be a boolean" % target_name)
 	if not (target_support.get("remakeOnlyReasons") is Array):
 		return _fail("runtime.targetSupport.remakeOnlyReasons must be an array")
+	return true
+
+
+func _validate_remake_logic_document() -> bool:
+	var logic: Variant = documents.get("remakeLogic")
+	if not (logic is Dictionary):
+		return _fail("remake/logic.json must contain a JSON object")
+	if int(logic.get("schemaVersion", 0)) != DOCUMENT_SCHEMA_VERSION:
+		return _fail(
+			"remakeLogic.schemaVersion must be %d" % DOCUMENT_SCHEMA_VERSION
+		)
+	if str(logic.get("kind", "")) != CAMPAIGN_KIND_CLASSIC_ENHANCED:
+		return _fail("remakeLogic.kind must be 'classic-enhanced'")
+	for collection_name: String in [
+		"replacements",
+		"mapTriggers",
+		"eventTriggers",
+		"scheduledTriggers",
+		"encounters",
+	]:
+		if not (logic.get(collection_name) is Array):
+			return _fail("remakeLogic.%s must be an array" % collection_name)
 	return true
 
 
@@ -1426,6 +1490,7 @@ func is_dispatcher_noop(trigger: Dictionary, action: Dictionary) -> bool:
 
 func _reset() -> void:
 	root_directory = ""
+	campaign_kind = ""
 	manifest.clear()
 	documents.clear()
 	last_error = ""

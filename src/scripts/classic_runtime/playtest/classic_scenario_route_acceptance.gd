@@ -135,7 +135,7 @@ func _load_inputs() -> bool:
 		"campaignName": str(campaign_manifest.get("name", "")),
 		"campaignDirectory": campaign_directory.get_file(),
 	})
-	if str(campaign_manifest.get("campaignKind", "")) != "classic-compiled":
+	if str(campaign_manifest.get("campaignKind", "")) != "classic-interpreted":
 		_fail("manifest", "The installed campaign is not a Classic package")
 	if int(route.get("schemaVersion", 0)) != 1:
 		_fail("route", "The route definition does not use schema version 1")

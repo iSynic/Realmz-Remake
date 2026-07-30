@@ -159,6 +159,9 @@ const NativeResourcesScript = preload("res://scripts/Resources.gd")
 const CampaignSessionScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_session.gd"
 )
+const ScenarioCampaignBundleScript = preload(
+	"res://scripts/scenario_runtime/scenario_campaign_bundle.gd"
+)
 const TimedEncounterSchedulerScript = preload(
 	"res://scripts/classic_runtime/classic_timed_encounter_scheduler.gd"
 )
@@ -2821,6 +2824,63 @@ func _test_bundle_contract_validation() -> void:
 		absolute_bundle.last_error
 	)
 
+	var generic_bundle = ScenarioCampaignBundleScript.new()
+	_expect(
+		generic_bundle.load_from_directory(absolute_path),
+		"generic campaign bundle delegates Classic packages to the proven loader: %s"
+			% generic_bundle.last_error
+	)
+	_expect_equal(
+		generic_bundle.manifest.get("campaignKind"),
+		BundleScript.CAMPAIGN_KIND_CLASSIC_INTERPRETED,
+		"generic campaign bundle preserves the interpreted campaign kind"
+	)
+
+	var enhanced_bundle = BundleScript.new()
+	enhanced_bundle.manifest = _minimal_contract_manifest()
+	enhanced_bundle.manifest["campaignKind"] = BundleScript.CAMPAIGN_KIND_CLASSIC_ENHANCED
+	enhanced_bundle.manifest["files"]["remakeLogic"] = "remake/logic.json"
+	_expect(
+		enhanced_bundle._validate_manifest_contract(),
+		"bundle contract accepts the Classic Enhanced package kind: %s"
+			% enhanced_bundle.last_error
+	)
+	enhanced_bundle.documents = _minimal_contract_documents()
+	enhanced_bundle.documents["runtime"]["scenarioLogic"] = (
+		BundleScript.CAMPAIGN_KIND_CLASSIC_ENHANCED
+	)
+	enhanced_bundle.documents["remakeLogic"] = {
+		"schemaVersion": BundleScript.DOCUMENT_SCHEMA_VERSION,
+		"kind": BundleScript.CAMPAIGN_KIND_CLASSIC_ENHANCED,
+		"replacements": [],
+		"mapTriggers": [],
+		"eventTriggers": [],
+		"scheduledTriggers": [],
+		"encounters": [],
+	}
+	_expect(
+		enhanced_bundle._validate_document_contract(),
+		"bundle contract accepts an empty Classic Enhanced semantic layer: %s"
+			% enhanced_bundle.last_error
+	)
+
+	var mismatched_logic_bundle = BundleScript.new()
+	mismatched_logic_bundle.manifest = enhanced_bundle.manifest.duplicate(true)
+	_expect(
+		mismatched_logic_bundle._validate_manifest_contract(),
+		"mismatched logic fixture has an otherwise valid Enhanced manifest"
+	)
+	mismatched_logic_bundle.documents = enhanced_bundle.documents.duplicate(true)
+	mismatched_logic_bundle.documents["runtime"]["scenarioLogic"] = "classic"
+	_expect(
+		not mismatched_logic_bundle._validate_document_contract(),
+		"Enhanced package rejects a runtime document that declares Classic logic"
+	)
+	_expect(
+		mismatched_logic_bundle.last_error.contains("runtime.scenarioLogic"),
+		"Enhanced logic mismatch identifies the runtime field"
+	)
+
 	var unsafe_path_bundle = BundleScript.new()
 	unsafe_path_bundle.manifest = _minimal_contract_manifest()
 	unsafe_path_bundle.manifest["files"]["scripts"] = "../classic/scripts.json"
@@ -3704,6 +3764,7 @@ func _minimal_contract_manifest() -> Dictionary:
 			"assets": "classic/assets.json",
 			"evidence": "classic/evidence.json",
 			"runtime": "runtime.json",
+			"remakeScripts": "remake/scripts.json",
 		},
 	}
 
@@ -3752,6 +3813,7 @@ func _minimal_contract_documents() -> Dictionary:
 		},
 		"runtime": {
 			"schemaVersion": BundleScript.RUNTIME_DOCUMENT_SCHEMA_VERSION,
+			"scenarioLogic": "classic",
 			"recommendedGameplayProfile": "core.classic",
 			"requiredExtensions": [],
 			"bindings": {
@@ -4272,7 +4334,14 @@ func _test_installed_classic_campaign_layout() -> void:
 		"invalid installed campaign preserves its actionable diagnostic"
 	)
 
-	var session = CampaignSessionScript.new()
+	var generic_session_script: GDScript = load(
+		"res://scripts/scenario_runtime/scenario_campaign_session.gd"
+	)
+	_expect(
+		generic_session_script != null,
+		"generic campaign session script loads through the production boundary"
+	)
+	var session = generic_session_script.new()
 	get_tree().root.add_child(session)
 	var adapter = StartLocationAdapter.new()
 	var load_result: Dictionary = session.load_installed_campaign(
@@ -4281,6 +4350,16 @@ func _test_installed_classic_campaign_layout() -> void:
 		adapter
 	)
 	_expect_equal(load_result.get("status"), "ok", "normal campaign session creates a runtime host")
+	_expect_equal(
+		load_result.get("campaignKind"),
+		BundleScript.CAMPAIGN_KIND_CLASSIC_INTERPRETED,
+		"generic campaign session reports the loaded campaign kind"
+	)
+	_expect_equal(
+		load_result.get("implementationKind"),
+		CampaignSessionScript.IMPLEMENTATION_KIND,
+		"generic campaign session reports the interpreter implementation"
+	)
 	_expect_equal(
 		adapter.configured_bundle,
 		session.install.bundle,

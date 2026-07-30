@@ -1,1 +1,1 @@
-{"schemaVersion":2,"battles":[{"id":24,"dist":0,"messageBefore":0,"messageAfter":0,"battleMacro":0,"grid":[],"authored":true}],"treasures":[],"shops":[],"simpleEncounters":[],"complexEncounters":[],"thiefEncounters":[],"timedEncounters":[]}
+{"battles":[{"authored":true,"battleMacro":0,"dist":0,"grid":[],"id":24,"messageAfter":0,"messageBefore":0}],"complexEncounters":[],"schemaVersion":3,"shops":[],"simpleEncounters":[],"thiefEncounters":[],"timedEncounters":[],"treasures":[]}

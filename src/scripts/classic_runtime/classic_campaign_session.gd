@@ -18,7 +18,8 @@ const GameplayRuleRegistryScript = preload(
 const GameplayRuleSetScript = preload(
 	"res://scripts/scenario_runtime/gameplay_rule_set.gd"
 )
-const SAVE_SCHEMA_VERSION := 5
+const SAVE_SCHEMA_VERSION := 6
+const IMPLEMENTATION_KIND := "scenario-interpreter"
 
 var install: Object
 var host: Object
@@ -332,6 +333,8 @@ func make_save_result() -> Dictionary:
 		"payload": {
 			"schemaVersion": SAVE_SCHEMA_VERSION,
 			"campaignId": _campaign_id(),
+			"campaignKind": _campaign_kind(),
+			"implementationKind": IMPLEMENTATION_KIND,
 			"campaignContentVersion": _campaign_content_version(),
 			"campaignPackageHash": _campaign_package_hash(),
 			"scriptApiVersions": {"scenarioScripts": 2},
@@ -340,6 +343,7 @@ func make_save_result() -> Dictionary:
 			"runtimeState": runtime_state.call("snapshot"),
 			"portState": port_state,
 			"continuationState": continuation_result["snapshot"],
+			"activeSemanticReplacements": _active_semantic_replacements(),
 			"gameplayRules": gameplay_rule_set.snapshot(),
 		},
 	}
@@ -354,7 +358,8 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 		prepared_payload,
 		_campaign_id(),
 		_campaign_package_hash(),
-		_scenario_script_contract()
+		_scenario_script_contract(),
+		_campaign_kind()
 	)
 	if str(validation.get("status", "")) != "ok":
 		return validation
@@ -454,7 +459,10 @@ func _prepare_save_payload(payload: Dictionary) -> Dictionary:
 	prepared["continuationState"] = continuation
 	prepared["campaignContentVersion"] = to_version
 	prepared["campaignPackageHash"] = _campaign_package_hash()
+	prepared["campaignKind"] = _campaign_kind()
+	prepared["implementationKind"] = IMPLEMENTATION_KIND
 	prepared["scenarioScriptContract"] = _scenario_script_contract()
+	prepared["activeSemanticReplacements"] = _active_semantic_replacements()
 	prepared["requiredPlugins"] = _required_plugins()
 	return {
 		"status": "ok",
@@ -558,7 +566,8 @@ static func validate_save_payload(
 	payload: Variant,
 	expected_campaign_id := "",
 	expected_package_hash := "",
-	expected_script_contract := {}
+	expected_script_contract := {},
+	expected_campaign_kind := ""
 ) -> Dictionary:
 	if payload is Dictionary and payload.is_empty():
 		return _error(
@@ -589,6 +598,23 @@ static func validate_save_payload(
 					expected_campaign_id,
 				]
 			)
+	var saved_campaign_kind := str(payload.get("campaignKind", ""))
+	if saved_campaign_kind not in [
+		"classic-interpreted",
+		"classic-enhanced",
+		"remake-authored",
+	]:
+		return _error("Scenario save has an unsupported campaign kind")
+	if not expected_campaign_kind.is_empty() \
+			and saved_campaign_kind != expected_campaign_kind:
+		return _error(
+			"Scenario save belongs to campaign kind '%s', not '%s'" % [
+				saved_campaign_kind,
+				expected_campaign_kind,
+			]
+		)
+	if str(payload.get("implementationKind", "")) != IMPLEMENTATION_KIND:
+		return _error("Scenario save has an incompatible interpreter implementation")
 	if not expected_package_hash.is_empty():
 		var saved_package_hash := str(payload.get("campaignPackageHash", ""))
 		if saved_package_hash != expected_package_hash:
@@ -611,6 +637,8 @@ static func validate_save_payload(
 		return _error("Classic save data has no runtime state")
 	if not (payload.get("portState") is Dictionary):
 		return _error("Scenario runtime save data has invalid port state")
+	if not (payload.get("activeSemanticReplacements") is Array):
+		return _error("Scenario runtime save data has invalid semantic replacements")
 	var continuation_value: Variant = payload.get("continuationState")
 	var continuation_result: Dictionary = RuntimeScript.validate_continuation_snapshot(
 		continuation_value
@@ -635,6 +663,22 @@ func _campaign_id() -> String:
 	if install == null or install.bundle == null:
 		return ""
 	return str(install.bundle.manifest.get("id", ""))
+
+
+func _campaign_kind() -> String:
+	if install == null or install.bundle == null:
+		return ""
+	return str(install.bundle.manifest.get("campaignKind", ""))
+
+
+func _active_semantic_replacements() -> Array:
+	if install == null or install.bundle == null:
+		return []
+	var logic: Variant = install.bundle.documents.get("remakeLogic", {})
+	if not (logic is Dictionary):
+		return []
+	var replacements: Variant = logic.get("replacements", [])
+	return replacements.duplicate(true) if replacements is Array else []
 
 
 func _campaign_package_hash() -> String:
