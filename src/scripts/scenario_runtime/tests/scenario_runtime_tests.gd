@@ -110,6 +110,7 @@ func _ready() -> void:
 	_test_classic_enhanced_encounter_completion()
 	_test_classic_enhanced_gosub_attachments()
 	await _test_city_of_bywater_enhanced_ap()
+	await _test_classic_enhanced_global_triggers()
 	_test_safe_script_quest_slice()
 	_test_guided_source_node_assignment()
 	_test_nested_safe_behavior_execution()
@@ -1208,6 +1209,201 @@ func _test_city_of_bywater_enhanced_ap() -> void:
 		"City of Bywater resumes into original Classic encounter slot 2: %s"
 			% str(result)
 	)
+
+
+func _test_classic_enhanced_global_triggers() -> void:
+	var bundle := BundleScript.new()
+	_expect(
+		bundle.load_from_directory(PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE),
+		"Classic Enhanced global-trigger fixture loads"
+	)
+	if not bundle.last_error.is_empty():
+		return
+	var script_document: Dictionary = bundle.documents.get(
+		"remakeScripts",
+		{}
+	).duplicate(true)
+	var template: Dictionary = {}
+	for behavior_value: Variant in script_document.get("behaviors", []):
+		if behavior_value is Dictionary \
+				and behavior_value.get("id") \
+					== "scenario.providence.before-extra-action":
+			template = behavior_value
+			break
+	_expect(not template.is_empty(), "Enhanced global-trigger Behavior template exists")
+	if template.is_empty():
+		return
+	var behavior_ids := [
+		"scenario.providence.global.first",
+		"scenario.providence.global.second",
+		"scenario.providence.global.scheduled",
+	]
+	for behavior_id: String in behavior_ids:
+		var behavior := template.duplicate(true)
+		behavior["id"] = behavior_id
+		behavior["name"] = behavior_id.get_slice(".", 3).capitalize()
+		behavior["description"] = "Classic Enhanced global-trigger test Behavior."
+		behavior["hook"] = "run"
+		behavior["requestedCapabilities"] = []
+		behavior["program"] = {
+			"kind": "function",
+			"name": behavior_id.replace(".", "_"),
+			"parameters": [],
+			"returnType": "action-outcome",
+			"body": [{
+				"kind": "return",
+				"sourceNode": "%s-return" % behavior_id,
+				"value": {
+					"kind": "record",
+					"fields": {
+						"kind": {"kind": "literal", "value": "continue"},
+					},
+				},
+			}],
+		}
+		behavior["sourceMap"] = {
+			"schemaVersion": 1,
+			"nodes": {
+				"%s-return" % behavior_id: {"line": 1, "column": 1},
+			},
+		}
+		behavior["contentHash"] = ScenarioScriptRuntimeScript._sha256_json(
+			behavior["program"]
+		)
+		script_document["behaviors"].append(behavior)
+	bundle.documents["remakeScripts"] = script_document
+	bundle.documents["remakeLogic"] = {
+		"schemaVersion": 3,
+		"kind": "classic-enhanced",
+		"replacements": [],
+		"eventTriggers": [
+			{
+				"id": "scenario.providence.event.second",
+				"name": "Second movement action",
+				"event": "movement",
+				"enabled": true,
+				"priority": 20,
+				"conditionBehaviorId": null,
+				"behaviorId": behavior_ids[1],
+			},
+			{
+				"id": "scenario.providence.event.first",
+				"name": "First movement action",
+				"event": "movement",
+				"enabled": true,
+				"priority": 10,
+				"conditionBehaviorId": null,
+				"behaviorId": behavior_ids[0],
+			},
+		],
+		"scheduledTriggers": [{
+			"id": "scenario.providence.schedule.hourly",
+			"name": "Hourly action",
+			"enabled": true,
+			"priority": 30,
+			"schedule": {
+				"kind": "recurring",
+				"day": null,
+				"minute": null,
+				"elapsedMinutes": null,
+				"intervalMinutes": 60,
+			},
+			"location": null,
+			"conditionBehaviorId": null,
+			"behaviorId": behavior_ids[2],
+		}],
+	}
+	var host := HostScript.new()
+	add_child(host)
+	host.configure(RefCounted.new())
+	host.use_campaign(bundle)
+	host.cancel_pending_campaign_start()
+	_expect(
+		host.has_event_trigger("scenario.providence.event.first")
+			and host.has_scheduled_trigger("scenario.providence.schedule.hourly"),
+		"Classic Enhanced host indexes exported Event and Scheduled Triggers"
+	)
+	host.runtime.interpreter.scenario_script_runtime.trace.clear()
+	var event_result: Dictionary = await host.emit_lifecycle_event(
+		"party-moved",
+		{"location": {"mapId": "land:0", "x": 2, "y": 2}}
+	)
+	_expect(
+		event_result.get("status") == "ok"
+			and bool(event_result.get("handled", false)),
+		"Classic lifecycle events dispatch Enhanced Event Triggers: %s"
+			% str(event_result)
+	)
+	var executed_behaviors := _global_trigger_trace_behaviors(host)
+	_expect(
+		executed_behaviors == [behavior_ids[0], behavior_ids[1]],
+		"Enhanced Event Triggers execute by priority and stable ID: %s"
+			% str(executed_behaviors)
+	)
+	var hour_one := {"elapsedMinutes": 60, "day": 1, "minute": 60}
+	var schedule_result: Dictionary = await host.run_scheduled(hour_one)
+	_expect(
+		schedule_result.get("status") == "ok"
+			and bool(schedule_result.get("handled", false)),
+		"Due Enhanced Scheduled Trigger executes through the central interpreter"
+	)
+	var first_snapshot: Dictionary = host.snapshot_enhanced_trigger_state()
+	_expect(
+		first_snapshot.get("scheduledMarkers", {}).get(
+			"scenario.providence.schedule.hourly"
+		) == 60,
+		"Enhanced schedule records its completed recurrence"
+	)
+	var duplicate_result: Dictionary = await host.run_scheduled(hour_one)
+	_expect(
+		duplicate_result.get("status") == "ok"
+			and not bool(duplicate_result.get("handled", true)),
+		"Enhanced schedule does not repeat the same recurrence"
+	)
+	var restored_host := HostScript.new()
+	add_child(restored_host)
+	restored_host.configure(RefCounted.new())
+	restored_host.use_campaign(bundle)
+	restored_host.cancel_pending_campaign_start()
+	var restore_result: Dictionary = restored_host.restore_enhanced_trigger_state(
+		first_snapshot
+	)
+	_expect(
+		restore_result.get("status") == "ok",
+		"Enhanced trigger state restores from a save boundary"
+	)
+	var restored_duplicate: Dictionary = await restored_host.run_scheduled(
+		hour_one
+	)
+	_expect(
+		not bool(restored_duplicate.get("handled", true)),
+		"Restored Enhanced schedule preserves its completed recurrence"
+	)
+	var hour_two_result: Dictionary = await restored_host.run_scheduled({
+		"elapsedMinutes": 120,
+		"day": 1,
+		"minute": 120,
+	})
+	_expect(
+		hour_two_result.get("status") == "ok"
+			and bool(hour_two_result.get("handled", false)),
+		"Restored recurring schedule advances to the next due recurrence"
+	)
+	host.queue_free()
+	restored_host.queue_free()
+
+
+func _global_trigger_trace_behaviors(host: Object) -> Array:
+	var behavior_ids: Array = []
+	for trace_value: Variant in host.runtime.interpreter \
+			.scenario_script_runtime.trace:
+		if trace_value is Dictionary \
+				and trace_value.get("event") == "script-execute":
+			var behavior_id := str(trace_value.get("scriptId", ""))
+			if behavior_id.begins_with("scenario.providence.global.") \
+					and behavior_id not in behavior_ids:
+				behavior_ids.append(behavior_id)
+	return behavior_ids
 
 
 func _test_extension_registry() -> void:

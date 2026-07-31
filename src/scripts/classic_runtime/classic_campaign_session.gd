@@ -343,6 +343,7 @@ func make_save_result() -> Dictionary:
 			"runtimeState": runtime_state.call("snapshot"),
 			"portState": port_state,
 			"continuationState": continuation_result["snapshot"],
+			"enhancedTriggerState": host.snapshot_enhanced_trigger_state(),
 			"activeSemanticReplacements": _active_semantic_replacements(),
 			"gameplayRules": gameplay_rule_set.snapshot(),
 		},
@@ -369,6 +370,10 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 	if str(rules_restore.get("status", "")) != "ok":
 		return rules_restore
 	gameplay_rule_set = rules_restore["ruleset"]
+	host.cancel_pending_campaign_start()
+	var previous_enhanced_trigger_state: Dictionary = (
+		host.snapshot_enhanced_trigger_state()
+	)
 	host.configure(command_adapter, gameplay_rule_set)
 	var runtime_state: Object = host.runtime.runtime_state
 	var previous_runtime_state: Dictionary = runtime_state.call("snapshot")
@@ -377,6 +382,18 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 		return previous_continuation_result
 	var previous_port_state: Dictionary = host.snapshot_port_state()
 	runtime_state.call("restore", prepared_payload["runtimeState"])
+	var enhanced_result: Dictionary = host.restore_enhanced_trigger_state(
+		prepared_payload.get("enhancedTriggerState", {})
+	)
+	if str(enhanced_result.get("status", "")) == "error":
+		_rollback_restore(
+			runtime_state,
+			previous_runtime_state,
+			previous_port_state,
+			previous_continuation_result["snapshot"],
+			previous_enhanced_trigger_state
+		)
+		return enhanced_result
 	var port_result: Dictionary = host.restore_port_state(
 		prepared_payload.get("portState", {})
 	)
@@ -385,7 +402,8 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 			runtime_state,
 			previous_runtime_state,
 			previous_port_state,
-			previous_continuation_result["snapshot"]
+			previous_continuation_result["snapshot"],
+			previous_enhanced_trigger_state
 		)
 		return port_result
 	var continuation_state: Dictionary = prepared_payload.get("continuationState", {
@@ -398,7 +416,8 @@ func restore_save_payload(payload: Dictionary) -> Dictionary:
 			runtime_state,
 			previous_runtime_state,
 			previous_port_state,
-			previous_continuation_result["snapshot"]
+			previous_continuation_result["snapshot"],
+			previous_enhanced_trigger_state
 		)
 	if str(continuation_result.get("status", "")) == "ok":
 		host.call_deferred("emit_lifecycle_event", "campaign-resume", {
@@ -477,11 +496,13 @@ func _rollback_restore(
 	runtime_state: Object,
 	previous_runtime_state: Dictionary,
 	previous_port_state: Dictionary,
-	previous_continuation_state: Dictionary
+	previous_continuation_state: Dictionary,
+	previous_enhanced_trigger_state: Dictionary
 ) -> void:
 	runtime_state.call("restore", previous_runtime_state)
 	host.restore_port_state(previous_port_state)
 	host.restore_continuation(previous_continuation_state)
+	host.restore_enhanced_trigger_state(previous_enhanced_trigger_state)
 
 
 func has_pending_continuation() -> bool:
@@ -637,6 +658,8 @@ static func validate_save_payload(
 		return _error("Classic save data has no runtime state")
 	if not (payload.get("portState") is Dictionary):
 		return _error("Scenario runtime save data has invalid port state")
+	if not (payload.get("enhancedTriggerState") is Dictionary):
+		return _error("Scenario runtime save data has invalid Enhanced trigger state")
 	if not (payload.get("activeSemanticReplacements") is Array):
 		return _error("Scenario runtime save data has invalid semantic replacements")
 	var continuation_value: Variant = payload.get("continuationState")

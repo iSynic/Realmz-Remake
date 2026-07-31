@@ -13,6 +13,11 @@ const EnginePluginRegistryScript = preload(
 const EnginePluginPortScript = preload(
 	"res://scripts/scenario_runtime/ports/scenario_engine_plugin_port.gd"
 )
+const SemanticStateScript = preload(
+	"res://scripts/scenario_runtime/scenario_semantic_state.gd"
+)
+
+const ENHANCED_DISPATCH_TRIGGER_ID := "__scenario_enhanced_global_dispatch__"
 
 signal command_started(command: String, payload: Dictionary)
 signal command_finished(command: String, response: Dictionary)
@@ -34,6 +39,10 @@ var _bound_behavior_active := false
 var _bound_behavior_depth := 0
 var _campaign_completion_active := false
 var _script_event_queue_draining := false
+var _campaign_start_pending := false
+var enhanced_trigger_state: ScenarioSemanticState
+var enhanced_event_triggers_by_id: Dictionary = {}
+var enhanced_scheduled_triggers_by_id: Dictionary = {}
 
 
 func _init() -> void:
@@ -74,6 +83,7 @@ func load_campaign(directory: String) -> bool:
 	nested_trigger_active = false
 	restored_continuation_pending = false
 	command_context.clear()
+	_clear_enhanced_global_triggers()
 	if not runtime.load_campaign(directory):
 		return false
 	_create_command_router()
@@ -88,6 +98,7 @@ func use_campaign(campaign_bundle: ClassicCampaignBundle) -> void:
 	nested_trigger_active = false
 	restored_continuation_pending = false
 	command_context.clear()
+	_clear_enhanced_global_triggers()
 	var loaded_state := ClassicRuntimeState.new()
 	loaded_state.configure_from_bundle(campaign_bundle)
 	runtime.use_shared_campaign(campaign_bundle, loaded_state)
@@ -132,7 +143,10 @@ func _configure_extensions(invoke_lifecycle := true) -> bool:
 		extension_registry,
 		runtime.bundle.documents.get("runtime", {}).get("bindings", {})
 	)
+	if not _configure_enhanced_global_triggers():
+		return false
 	if invoke_lifecycle:
+		_campaign_start_pending = true
 		call_deferred("_run_campaign_loaded_behaviors")
 	return true
 
@@ -158,6 +172,414 @@ func _configure_engine_plugins() -> bool:
 		push_error(command_router.last_error)
 		return false
 	return true
+
+
+func _clear_enhanced_global_triggers() -> void:
+	enhanced_event_triggers_by_id.clear()
+	enhanced_scheduled_triggers_by_id.clear()
+	enhanced_trigger_state = null
+	_campaign_start_pending = false
+
+
+func _configure_enhanced_global_triggers() -> bool:
+	enhanced_event_triggers_by_id.clear()
+	enhanced_scheduled_triggers_by_id.clear()
+	enhanced_trigger_state = null
+	if runtime == null \
+			or runtime.bundle == null \
+			or str(runtime.bundle.manifest.get("campaignKind", "")) != "classic-enhanced":
+		return true
+	var logic: Variant = runtime.bundle.documents.get("remakeLogic", {})
+	if not (logic is Dictionary) \
+			or str(logic.get("kind", "")) != "classic-enhanced":
+		push_error("Classic Enhanced campaign has no compatible scenario logic")
+		return false
+	if runtime.interpreter == null \
+			or runtime.interpreter.scenario_script_runtime == null:
+		push_error("Classic Enhanced global triggers require the scenario interpreter")
+		return false
+	var trigger_ids: Dictionary = {}
+	for trigger_value: Variant in logic.get("eventTriggers", []):
+		if not (trigger_value is Dictionary):
+			push_error("Classic Enhanced Event Trigger must be an object")
+			return false
+		var trigger: Dictionary = trigger_value.duplicate(true)
+		var trigger_id := str(trigger.get("id", ""))
+		var event_name := _normalize_enhanced_event_name(
+			str(trigger.get("event", ""))
+		)
+		if trigger_id.is_empty() or trigger_ids.has(trigger_id):
+			push_error("Classic Enhanced global trigger IDs must be unique")
+			return false
+		if event_name.is_empty():
+			push_error("Classic Enhanced Event Trigger '%s' has an invalid event" % trigger_id)
+			return false
+		if not _enhanced_behavior_available(str(trigger.get("behaviorId", ""))):
+			push_error("Classic Enhanced Event Trigger '%s' has no behavior" % trigger_id)
+			return false
+		if not _enhanced_condition_available(trigger.get("conditionBehaviorId")):
+			push_error("Classic Enhanced Event Trigger '%s' has an invalid condition" % trigger_id)
+			return false
+		trigger_ids[trigger_id] = true
+		trigger["event"] = event_name
+		enhanced_event_triggers_by_id[trigger_id] = trigger
+	for trigger_value: Variant in logic.get("scheduledTriggers", []):
+		if not (trigger_value is Dictionary):
+			push_error("Classic Enhanced Scheduled Trigger must be an object")
+			return false
+		var trigger: Dictionary = trigger_value.duplicate(true)
+		var trigger_id := str(trigger.get("id", ""))
+		if trigger_id.is_empty() or trigger_ids.has(trigger_id):
+			push_error("Classic Enhanced global trigger IDs must be unique")
+			return false
+		if not _validate_enhanced_schedule(trigger.get("schedule", {})):
+			push_error("Classic Enhanced Scheduled Trigger '%s' has an invalid schedule" % trigger_id)
+			return false
+		if not _enhanced_behavior_available(str(trigger.get("behaviorId", ""))):
+			push_error("Classic Enhanced Scheduled Trigger '%s' has no behavior" % trigger_id)
+			return false
+		if not _enhanced_condition_available(trigger.get("conditionBehaviorId")):
+			push_error("Classic Enhanced Scheduled Trigger '%s' has an invalid condition" % trigger_id)
+			return false
+		trigger_ids[trigger_id] = true
+		enhanced_scheduled_triggers_by_id[trigger_id] = trigger
+	enhanced_trigger_state = SemanticStateScript.new()
+	enhanced_trigger_state.configure(runtime.bundle.package_hash())
+	return true
+
+
+func _enhanced_behavior_available(behavior_id: String) -> bool:
+	return not behavior_id.is_empty() \
+		and runtime.interpreter.scenario_script_runtime.scripts_by_id.has(behavior_id)
+
+
+func _enhanced_condition_available(value: Variant) -> bool:
+	var behavior_id := str(value) if value != null else ""
+	return behavior_id.is_empty() or (
+		_enhanced_behavior_available(behavior_id)
+		and runtime.interpreter.scenario_script_runtime.behavior_hook_is_pure(
+			behavior_id
+		)
+	)
+
+
+func has_event_trigger(trigger_id: String) -> bool:
+	return enhanced_event_triggers_by_id.has(trigger_id)
+
+
+func has_scheduled_trigger(trigger_id: String) -> bool:
+	return enhanced_scheduled_triggers_by_id.has(trigger_id)
+
+
+func run_event(event_name: String, context := {}) -> Dictionary:
+	return await run_enhanced_event_triggers(event_name, context)
+
+
+func run_scheduled(clock: Dictionary, context := {}) -> Dictionary:
+	return await run_enhanced_scheduled_triggers(clock, context)
+
+
+func run_enhanced_event_triggers(
+	event_name: String,
+	context := {}
+) -> Dictionary:
+	if enhanced_trigger_state == null:
+		return {"status": "ok", "handled": false}
+	var normalized_event := _normalize_enhanced_event_name(event_name)
+	if normalized_event.is_empty():
+		return {
+			"status": "error",
+			"message": "Classic Enhanced event '%s' is unsupported" % event_name,
+		}
+	var event_context: Dictionary = (
+		context.duplicate(true) if context is Dictionary else {}
+	)
+	event_context["event"] = normalized_event
+	var only_trigger_id := str(event_context.get("onlyTriggerId", ""))
+	var candidates: Array = []
+	for trigger_value: Variant in enhanced_event_triggers_by_id.values():
+		var trigger: Dictionary = trigger_value
+		if bool(trigger.get("enabled", true)) \
+				and str(trigger.get("event", "")) == normalized_event \
+				and (
+					only_trigger_id.is_empty()
+					or str(trigger.get("id", "")) == only_trigger_id
+				):
+			candidates.append({
+				"kind": "event",
+				"trigger": trigger.duplicate(true),
+				"marker": -1,
+			})
+	var scheduled_clock: Variant = event_context.get("scheduledClock")
+	if normalized_event == "time" and scheduled_clock is Dictionary:
+		candidates.append_array(_enhanced_scheduled_candidates(
+			scheduled_clock,
+			event_context
+		))
+	return await _run_enhanced_trigger_candidates(
+		candidates,
+		event_context
+	)
+
+
+func run_enhanced_scheduled_triggers(
+	clock: Dictionary,
+	context := {}
+) -> Dictionary:
+	if enhanced_trigger_state == null:
+		return {"status": "ok", "handled": false}
+	if not _validate_enhanced_clock(clock):
+		return {"status": "error", "message": "Scheduled Trigger clock is invalid"}
+	var schedule_context: Dictionary = (
+		context.duplicate(true) if context is Dictionary else {}
+	)
+	schedule_context["clock"] = clock.duplicate(true)
+	return await _run_enhanced_trigger_candidates(
+		_enhanced_scheduled_candidates(clock, schedule_context),
+		schedule_context
+	)
+
+
+func _enhanced_scheduled_candidates(
+	clock: Dictionary,
+	context: Dictionary
+) -> Array:
+	var only_trigger_id := str(context.get("onlyTriggerId", ""))
+	var candidates: Array = []
+	for trigger_value: Variant in enhanced_scheduled_triggers_by_id.values():
+		var trigger: Dictionary = trigger_value
+		if not bool(trigger.get("enabled", true)) \
+				or (
+					not only_trigger_id.is_empty()
+					and str(trigger.get("id", "")) != only_trigger_id
+				) \
+				or not _enhanced_schedule_location_matches(
+					trigger.get("location"),
+					context
+				):
+			continue
+		var marker := enhanced_trigger_state.scheduled_due_marker(trigger, clock)
+		if marker >= 0:
+			candidates.append({
+				"kind": "scheduled",
+				"trigger": trigger.duplicate(true),
+				"marker": marker,
+			})
+	return candidates
+
+
+func _run_enhanced_trigger_candidates(
+	candidates: Array,
+	context: Dictionary
+) -> Dictionary:
+	if candidates.is_empty():
+		return {"status": "ok", "handled": false}
+	candidates.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		var left_trigger: Dictionary = left.get("trigger", {})
+		var right_trigger: Dictionary = right.get("trigger", {})
+		var left_priority := int(left_trigger.get("priority", 0))
+		var right_priority := int(right_trigger.get("priority", 0))
+		if left_priority != right_priority:
+			return left_priority < right_priority
+		return str(left_trigger.get("id", "")) < str(right_trigger.get("id", ""))
+	)
+	var previous_markers := enhanced_trigger_state.scheduled_markers.duplicate(true)
+	var actions: Array = []
+	for candidate_value: Variant in candidates:
+		var candidate: Dictionary = candidate_value
+		var kind := str(candidate.get("kind", "event"))
+		var trigger: Dictionary = candidate.get("trigger", {})
+		var trigger_id := str(trigger.get("id", ""))
+		var invocation_context := context.duplicate(true)
+		invocation_context["trigger"] = trigger.duplicate(true)
+		invocation_context["triggerKind"] = kind
+		var condition_value = trigger.get("conditionBehaviorId")
+		var condition_id := str(condition_value) if condition_value != null else ""
+		if not condition_id.is_empty():
+			var condition_result := run_bound_behavior_pure(
+				condition_id,
+				{},
+				{
+					"role": "helper",
+					"hook": "",
+					"request": invocation_context,
+				}
+			)
+			if str(condition_result.get("status", "")) == "error":
+				enhanced_trigger_state.scheduled_markers = previous_markers
+				return condition_result
+			if not bool(condition_result.get("value", false)):
+				continue
+		var marker := int(candidate.get("marker", -1))
+		if marker >= 0:
+			enhanced_trigger_state.mark_scheduled_trigger(trigger_id, marker)
+		actions.append({
+			"kind": "semantic",
+			"slot": actions.size(),
+			"operation": "core.script.call",
+			"parameters": {
+				"behaviorId": str(trigger.get("behaviorId", "")),
+				"arguments": {},
+				"attachment": {
+					"role": "action",
+					"hook": "run",
+					"request": invocation_context,
+				},
+			},
+		})
+	if actions.is_empty():
+		return {"status": "ok", "handled": false}
+	runtime.runtime_state.set_action_point_override(
+		ENHANCED_DISPATCH_TRIGGER_ID,
+		{
+			"id": ENHANCED_DISPATCH_TRIGGER_ID,
+			"active": true,
+			"percent": 100,
+			"actions": actions,
+		}
+	)
+	var result: Dictionary = await run_trigger(
+		ENHANCED_DISPATCH_TRIGGER_ID,
+		0,
+		{
+			"source": "classic-enhanced-global-trigger",
+			"eventContext": context.duplicate(true),
+		}
+	)
+	if str(result.get("status", "")) == "error":
+		enhanced_trigger_state.scheduled_markers = previous_markers
+		return result
+	return {
+		"status": "ok",
+		"handled": true,
+		"result": result,
+	}
+
+
+func _validate_enhanced_schedule(value: Variant) -> bool:
+	if not (value is Dictionary):
+		return false
+	match str(value.get("kind", "")):
+		"absolute":
+			return int(value.get("day", -1)) >= 1 \
+				and int(value.get("minute", -1)) in range(0, 1440)
+		"elapsed":
+			return int(value.get("elapsedMinutes", -1)) >= 0
+		"recurring":
+			return int(value.get("intervalMinutes", 0)) > 0
+	return false
+
+
+func _validate_enhanced_clock(clock: Variant) -> bool:
+	return clock is Dictionary \
+		and int(clock.get("elapsedMinutes", -1)) >= 0 \
+		and int(clock.get("day", -1)) >= 1 \
+		and int(clock.get("minute", -1)) in range(0, 1440)
+
+
+func _enhanced_schedule_location_matches(
+	required_value: Variant,
+	context: Dictionary
+) -> bool:
+	if required_value == null:
+		return true
+	if not (required_value is Dictionary):
+		return false
+	var required: Dictionary = required_value
+	var current := _enhanced_current_location(context)
+	if current.is_empty():
+		return false
+	var required_map_id := str(required.get("mapId", ""))
+	var current_map_id := str(current.get(
+		"mapId",
+		"%s:%d" % [
+			current.get("levelType", "land"),
+			current.get("levelIndex", 0),
+		]
+	))
+	if required_map_id != current_map_id:
+		return false
+	var x := int(current.get("x", 0))
+	var y := int(current.get("y", 0))
+	var left := int(required.get("x", 0))
+	var top := int(required.get("y", 0))
+	if str(required.get("kind", "point")) == "point":
+		return x == left and y == top
+	var width := maxi(1, int(required.get("width", 1)))
+	var height := maxi(1, int(required.get("height", 1)))
+	return x >= left and x < left + width and y >= top and y < top + height
+
+
+func _enhanced_current_location(context: Dictionary) -> Dictionary:
+	var location_value: Variant = context.get("location")
+	if location_value is Dictionary:
+		return location_value.duplicate(true)
+	if context.has("levelType") and context.has("levelIndex"):
+		return context.duplicate(true)
+	if command_adapter != null \
+			and command_adapter.has_method("get_classic_execution_context"):
+		var adapter_context: Variant = command_adapter.call(
+			"get_classic_execution_context"
+		)
+		if adapter_context is Dictionary:
+			return adapter_context.duplicate(true)
+	return {}
+
+
+func _normalize_enhanced_event_name(value: String) -> String:
+	var normalized := value.strip_edges().to_lower()
+	var aliases := {
+		"campaign-loaded": "campaign-start",
+		"campaign-complete": "campaign-end",
+		"party-moved": "movement",
+		"rest-complete": "rest",
+		"time-advanced": "time",
+		"battle-complete": "battle-end",
+		"character-defeated": "character-defeat",
+		"party-defeated": "party-defeat",
+	}
+	normalized = str(aliases.get(normalized, normalized))
+	return normalized if normalized in [
+		"campaign-start",
+		"campaign-end",
+		"map-enter",
+		"map-leave",
+		"movement",
+		"rest-start",
+		"rest",
+		"time",
+		"battle-start",
+		"battle-end",
+		"character-defeat",
+		"party-defeat",
+		"spell",
+		"item",
+		"combat-round",
+	] else ""
+
+
+func snapshot_enhanced_trigger_state() -> Dictionary:
+	return (
+		enhanced_trigger_state.snapshot()
+		if enhanced_trigger_state != null else {}
+	)
+
+
+func restore_enhanced_trigger_state(value: Variant) -> Dictionary:
+	if enhanced_trigger_state == null:
+		return (
+			{"status": "ok"}
+			if value is Dictionary and value.is_empty()
+			else {
+				"status": "error",
+				"message": "Save contains unavailable Classic Enhanced trigger state",
+			}
+		)
+	return enhanced_trigger_state.restore(value)
+
+
+func cancel_pending_campaign_start() -> void:
+	_campaign_start_pending = false
 
 
 func run_bound_behavior(
@@ -347,6 +769,11 @@ func _drain_script_event_queue() -> void:
 			)
 		elif str(event.get("kind", "")) == "spell-effects":
 			result = await process_spell_effect_event(
+				str(event.get("hook", "")),
+				event.get("request", {})
+			)
+		elif str(event.get("kind", "")) == "enhanced-global":
+			result = await _dispatch_enhanced_lifecycle_triggers(
 				str(event.get("hook", "")),
 				event.get("request", {})
 			)
@@ -936,6 +1363,9 @@ func resume_scenario_debugger(action: String) -> Dictionary:
 
 
 func _run_campaign_loaded_behaviors() -> void:
+	if not _campaign_start_pending:
+		return
+	_campaign_start_pending = false
 	var request := {
 		"event": "campaign-loaded",
 		"campaignId": str(runtime.bundle.manifest.get("id", "")),
@@ -998,6 +1428,12 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 	)
 	if str(attachment_result.get("status", "")) == "error":
 		return attachment_result
+	var enhanced_result := await _dispatch_or_queue_enhanced_lifecycle_triggers(
+		hook,
+		event_request
+	)
+	if str(enhanced_result.get("status", "")) == "error":
+		return enhanced_result
 	var lifecycle_bindings: Variant = runtime.bundle.documents.get(
 		"runtime",
 		{}
@@ -1009,6 +1445,7 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 				bool(attachment_result.get("handled", false))
 				or bool(battle_attachment_result.get("handled", false))
 				or bool(spell_effect_result.get("handled", false))
+				or bool(enhanced_result.get("handled", false))
 			),
 		}
 	var candidate_keys: Array = [hook, str(event_request.get("event", ""))]
@@ -1048,7 +1485,42 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 			bool(attachment_result.get("handled", false))
 			or bool(battle_attachment_result.get("handled", false))
 			or bool(spell_effect_result.get("handled", false))
+			or bool(enhanced_result.get("handled", false))
 		),
+	}
+
+
+func _dispatch_or_queue_enhanced_lifecycle_triggers(
+	hook: String,
+	request: Dictionary
+) -> Dictionary:
+	if enhanced_trigger_state == null:
+		return {"status": "ok", "handled": false}
+	if active or _bound_behavior_active:
+		return _queue_script_event("enhanced-global", hook, request)
+	return await _dispatch_enhanced_lifecycle_triggers(hook, request)
+
+
+func _dispatch_enhanced_lifecycle_triggers(
+	hook: String,
+	request: Dictionary
+) -> Dictionary:
+	var context := request.duplicate(true)
+	if hook == "time-advanced":
+		context["scheduledClock"] = _enhanced_clock_from_request(request)
+	return await run_enhanced_event_triggers(hook, context)
+
+
+func _enhanced_clock_from_request(request: Dictionary) -> Dictionary:
+	var supplied: Variant = request.get("clock")
+	if supplied is Dictionary and _validate_enhanced_clock(supplied):
+		return supplied.duplicate(true)
+	var current_time := maxi(0, int(request.get("currentTime", 0)))
+	var elapsed_minutes := floori(float(current_time) / 60.0)
+	return {
+		"elapsedMinutes": elapsed_minutes,
+		"day": floori(float(elapsed_minutes) / 1440.0) + 1,
+		"minute": elapsed_minutes % 1440,
 	}
 
 
@@ -1526,17 +1998,38 @@ func _resume_after_command(command: String, payload: Dictionary, response: Dicti
 func _on_trigger_completed(result: Dictionary) -> void:
 	if not active:
 		return
+	var enhanced_dispatch := (
+		str(command_context.get("source", ""))
+			== "classic-enhanced-global-trigger"
+	)
 	active = false
 	command_context.clear()
+	if enhanced_dispatch and runtime != null and runtime.runtime_state != null:
+		runtime.runtime_state.action_point_overrides.erase(
+			ENHANCED_DISPATCH_TRIGGER_ID
+		)
 	playthrough_completed.emit(result)
 	playthrough_finished.emit(result)
+	if runtime != null \
+			and runtime.interpreter != null \
+			and runtime.interpreter.scenario_script_runtime != null \
+			and not runtime.interpreter.scenario_script_runtime.event_queue.is_empty():
+		call_deferred("_drain_script_event_queue")
 
 
 func _on_runtime_stopped(result: Dictionary) -> void:
 	if not active:
 		return
+	var enhanced_dispatch := (
+		str(command_context.get("source", ""))
+			== "classic-enhanced-global-trigger"
+	)
 	active = false
 	command_context.clear()
+	if enhanced_dispatch and runtime != null and runtime.runtime_state != null:
+		runtime.runtime_state.action_point_overrides.erase(
+			ENHANCED_DISPATCH_TRIGGER_ID
+		)
 	playthrough_stopped.emit(result)
 	playthrough_finished.emit(result)
 

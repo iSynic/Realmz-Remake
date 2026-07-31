@@ -142,6 +142,11 @@ func load_installed_campaign(
 			"message": "Campaign kind '%s' has no registered session implementation"
 				% loaded_kind,
 		}
+	if loaded_kind == "classic-enhanced" and host != null:
+		event_triggers_by_id = host.enhanced_event_triggers_by_id.duplicate(true)
+		scheduled_triggers_by_id = (
+			host.enhanced_scheduled_triggers_by_id.duplicate(true)
+		)
 	result["campaignKind"] = loaded_kind
 	result["implementationKind"] = IMPLEMENTATION_KIND
 	return result
