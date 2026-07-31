@@ -25,14 +25,11 @@
       "required": [
         "scenario",
         "maps",
-        "scripts",
-        "encounters",
         "content",
         "rules",
         "assets",
         "runtime",
-        "remakeScripts",
-        "evidence"
+        "remakeScripts"
       ],
       "additionalProperties": { "type": "string", "minLength": 1 }
     },
@@ -58,6 +55,35 @@
       "additionalProperties": false
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "campaignKind": { "const": "remake-authored" } },
+        "required": ["campaignKind"]
+      },
+      "then": {
+        "properties": {
+          "files": { "required": ["remakeLogic"] }
+        }
+      },
+      "else": {
+        "properties": {
+          "files": { "required": ["scripts", "encounters", "evidence"] }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "campaignKind": { "const": "classic-enhanced" } },
+        "required": ["campaignKind"]
+      },
+      "then": {
+        "properties": {
+          "files": { "required": ["remakeLogic"] }
+        }
+      }
+    }
+  ],
   "additionalProperties": true,
   "x-packageHash": {
     "algorithm": "sha256",

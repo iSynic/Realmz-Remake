@@ -45,8 +45,8 @@ var debug_pause_on_invocation := false
 var debug_step_mode := "run"
 var debug_depth_target := -1
 var debug_pause: Dictionary = {}
-var runtime_state: ClassicRuntimeState
-var bundle: ClassicCampaignBundle
+var runtime_state: Object
+var bundle: Object
 var capability_catalog: ScenarioCapabilityCatalog
 var sandbox_client: ScenarioSandboxClient
 var rng_state := 1
@@ -70,15 +70,15 @@ static func empty_document() -> Dictionary:
 
 func configure(
 	script_document: Dictionary,
-	classic_state: ClassicRuntimeState,
-	campaign_bundle: ClassicCampaignBundle
+	scenario_state: Object,
+	campaign_bundle: Object
 ) -> bool:
 	clear()
 	var validation := validate_document(script_document, campaign_bundle)
 	if not bool(validation.get("valid", false)):
 		last_error = str(validation.get("message", "Invalid scenario script document"))
 		return false
-	runtime_state = classic_state
+	runtime_state = scenario_state
 	bundle = campaign_bundle
 	capability_catalog = CapabilityCatalogScript.new()
 	if not capability_catalog.load_builtin():
@@ -112,7 +112,11 @@ func configure(
 			persistent_values[key] = variable.get("defaultValue")
 	behavior_bindings = script_document.get("bindings", []).duplicate(true)
 	migrations = script_document.get("migrations", []).duplicate(true)
-	var hash_text := campaign_bundle.package_hash()
+	var hash_text := (
+		str(campaign_bundle.call("package_hash"))
+		if campaign_bundle != null and campaign_bundle.has_method("package_hash")
+		else ""
+	)
 	if hash_text.length() >= 8:
 		rng_state = maxi(1, hash_text.substr(0, 8).hex_to_int() & 0x7fffffff)
 	return true
@@ -987,7 +991,7 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 
 static func validate_document(
 	document: Variant,
-	campaign_bundle: ClassicCampaignBundle = null
+	campaign_bundle: Object = null
 ) -> Dictionary:
 	if not (document is Dictionary):
 		return _invalid("remake/scripts.json must contain an object")
@@ -1180,7 +1184,7 @@ static func validate_document(
 
 static func _register_plugin_capabilities(
 	catalog: ScenarioCapabilityCatalog,
-	campaign_bundle: ClassicCampaignBundle
+	campaign_bundle: Object
 ) -> Dictionary:
 	if campaign_bundle == null:
 		return {"valid": true}
@@ -2477,7 +2481,7 @@ func clear() -> void:
 
 
 static func _source_hash_matches(
-	campaign_bundle: ClassicCampaignBundle,
+	campaign_bundle: Object,
 	source_path: String,
 	content_hash: String
 ) -> bool:

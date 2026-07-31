@@ -150,22 +150,13 @@ func _configure_classic_compatibility(
 	_classic_executor = ClassicOpcodeRuntimeScript.new()
 	_classic_executor.bind_execution_state(classic_execution_state)
 	_classic_executor.configure(campaign_bundle, state)
-	scenario_script_runtime = ScenarioScriptRuntimeScript.new()
-	var script_document: Dictionary = campaign_bundle.documents.get(
-		"remakeScripts",
-		{}
-	)
-	if script_document.is_empty():
-		script_document = ScenarioScriptRuntimeScript.empty_document()
-	if not scenario_script_runtime.configure(
-		script_document,
+	var script_result := configure_scenario_scripts(
+		campaign_bundle.documents.get("remakeScripts", {}),
 		state,
 		campaign_bundle
-	):
-		last_result = {
-			"status": "error",
-			"message": scenario_script_runtime.last_error,
-		}
+	)
+	if str(script_result.get("status", "")) != "ok":
+		last_result = script_result
 		halted = true
 		return
 	_classic_continuation_router = ClassicContinuationRouterScript.new()
@@ -606,6 +597,29 @@ func restore_execution_snapshot(saved: Variant) -> Dictionary:
 				return script_restore
 	_sync_classic_observability()
 	return result
+
+
+func configure_scenario_scripts(
+	script_document_value: Variant,
+	state: Object,
+	campaign_bundle: Object
+) -> Dictionary:
+	var script_document: Dictionary = (
+		script_document_value if script_document_value is Dictionary else {}
+	)
+	if script_document.is_empty():
+		script_document = ScenarioScriptRuntimeScript.empty_document()
+	scenario_script_runtime = ScenarioScriptRuntimeScript.new()
+	if not scenario_script_runtime.configure(
+		script_document,
+		state,
+		campaign_bundle
+	):
+		return {
+			"status": "error",
+			"message": scenario_script_runtime.last_error,
+		}
+	return {"status": "ok"}
 
 
 func execute_scenario_script(
@@ -1632,7 +1646,7 @@ func snapshot() -> Dictionary:
 	var pending_value: Variant = null
 	if pending_command != null:
 		pending_value = pending_command.to_dictionary()
-	return {
+	var result := {
 		"schemaVersion": SNAPSHOT_SCHEMA_VERSION,
 		"currentTriggerId": current_trigger_id,
 		"currentActionIndex": current_action_index,
@@ -1644,6 +1658,9 @@ func snapshot() -> Dictionary:
 		"halted": halted,
 		"lastResult": last_result.duplicate(true),
 	}
+	if scenario_script_runtime != null:
+		result["scenarioScriptRuntime"] = scenario_script_runtime.snapshot()
+	return result
 
 
 func restore(value: Variant) -> Dictionary:
@@ -1663,6 +1680,14 @@ func restore(value: Variant) -> Dictionary:
 	trace = saved["trace"].duplicate(true)
 	halted = bool(saved["halted"])
 	last_result = saved["lastResult"].duplicate(true)
+	if scenario_script_runtime != null:
+		if not saved.has("scenarioScriptRuntime"):
+			return _error("Saved scenario has no Safe behavior state")
+		var script_restore := scenario_script_runtime.restore(
+			saved["scenarioScriptRuntime"]
+		)
+		if str(script_restore.get("status", "")) != "ok":
+			return script_restore
 	return {"status": "ok"}
 
 
@@ -1692,6 +1717,12 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 		var pending_validation := ScenarioPendingCommand.validate(saved["pendingCommand"])
 		if not bool(pending_validation.get("valid", false)):
 			return pending_validation
+	if saved.has("scenarioScriptRuntime"):
+		var script_validation := ScenarioScriptRuntimeScript.validate_snapshot(
+			saved["scenarioScriptRuntime"]
+		)
+		if not bool(script_validation.get("valid", false)):
+			return script_validation
 	return {"valid": true}
 
 

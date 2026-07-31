@@ -53,7 +53,7 @@ static func feasibility() -> Dictionary:
 	return {"available": true, "message": ""}
 
 
-func start(bundle: ClassicCampaignBundle) -> bool:
+func start(bundle: Object) -> bool:
 	close()
 	var gate := feasibility()
 	if not bool(gate.get("available", false)):
