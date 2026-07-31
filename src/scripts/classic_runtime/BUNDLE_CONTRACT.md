@@ -8,6 +8,12 @@ Bundle v3 is still pre-release. The current contract is completed in place:
 Remake accepts only the current document shapes, Providence exports only those
 shapes, and the 13 built-in campaigns are regenerated with the app.
 
+`campaignKind` is one of `classic-interpreted`, `classic-enhanced`, or
+`remake-authored`. Classic Enhanced packages retain source-preserving Classic
+instructions and add typed behavior anchors and encounter overlays. Remake
+Authored packages contain semantic triggers and behaviors without active
+Classic CODE/ID records.
+
 ## Manifest and package identity
 
 Every package contains `campaign.json`:
@@ -16,7 +22,7 @@ Every package contains `campaign.json`:
 {
   "format": "realmz-remake-scenario",
   "formatVersion": 3,
-  "campaignKind": "classic-compiled",
+  "campaignKind": "classic-interpreted",
   "compatibilityProfile": "realmz-7.1",
   "id": "scenario-city-of-bywater-classic",
   "name": "City of Bywater (Classic)",
@@ -63,7 +69,7 @@ invalid.
 
 ## Runtime data and evidence
 
-All Classic runtime documents use `schemaVersion: 2`. Runtime records keep
+Gameplay/runtime documents use `schemaVersion: 4`. Classic records keep
 stable IDs and gameplay fields. Source paths, record indices, byte ranges,
 confidence, source hashes, decoding evidence, and diagnostics live in
 `classic/evidence.json`, keyed by record kind and stable record ID.
@@ -76,7 +82,7 @@ Evidence is not an execution dependency. Fields needed to execute a record,
 including authoritative dispatcher no-op classification, remain in runtime
 data under stable trigger and slot identities.
 
-`runtime.json` uses schema 2 and declares:
+`runtime.json` uses schema 4 and declares:
 
 - the recommended gameplay profile;
 - required built-in extensions and their API versions;
@@ -116,8 +122,9 @@ An authored Remake operation is explicit and namespaced:
 }
 ```
 
-Opening a Classic project does not rewrite its actions. Adding an Action Point
-behavior deliberately places `core.script.call` in the selected slot.
+Opening a Classic project does not rewrite its actions. Classic Enhanced
+behavior calls are exported beside the preserved actions with typed anchors;
+they do not consume or replace one of the eight Classic slots.
 
 `ScenarioInterpreter` is the only AP/XAP and behavior execution authority. It
 owns the instruction cursor, GOSUB frames, behavior frames, locals, iterators,
@@ -126,7 +133,7 @@ continuation state. Script execution never creates a second map-script engine.
 
 ## Behavior document
 
-`remake/scripts.json` uses schema 2 and contains:
+`remake/scripts.json` uses schema 3 and contains:
 
 - the Scenario API catalog version and hash;
 - shared deterministic execution limits;
@@ -142,10 +149,12 @@ kind, role and hook, API and behavior versions, state-schema version, typed
 parameters and result, generated or declared capabilities, and either a Safe
 program or exact sandboxed source.
 
-A `BehaviorBinding` declares a target record reference, hook or action
-position, implementation (`script` or `extension`), typed argument bindings,
-and deterministic priority. The owning port validates role, hook, target, and
-arguments before dispatch.
+A `BehaviorBinding` declares a target record reference, role and contract hook,
+typed anchor, script ID, typed arguments, deterministic order, and optional
+modifier priority. Encounter overlays add named Enhanced Results and explicit
+response routing without copying the preserved Classic result actions. The
+owning port validates role, hook, target, anchor, order, and arguments before
+dispatch.
 
 State may be scoped to Campaign, Map, Encounter, Character, Item Instance, or
 Combat. Script locals are transient. Classic quest flags are exposed through a
@@ -158,7 +167,7 @@ Entry behaviors use immutable typed contexts and typed results:
 | Role | Typical hooks | Result |
 | --- | --- | --- |
 | Action | AP/XAP action | Continue, halt, call, replace, or return |
-| Encounter | entry, option, result, completion | Continue, resolve, repeat, close, or branch |
+| Encounter | entry, availability, response, result, completion | Boolean availability, or continue, resolve, repeat, close, or branch |
 | Spell | validation, casting, effect, duration, expiration | Validation or effect outcome |
 | Item | use, equip, unequip, attack, defense, passive | Use, equip, or effect outcome |
 | Monster AI | decision | Validated combat decision |

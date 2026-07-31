@@ -87,7 +87,7 @@ interpreter.
 ## Behavior runtime
 
 `ScenarioScriptRuntime` executes the behavior document in
-`remake/scripts.json` schema 2. A behavior is either:
+`remake/scripts.json` schema 3. A behavior is either:
 
 - an entry behavior attached to a typed gameplay role and hook; or
 - a helper with typed parameters and return value.
@@ -97,13 +97,12 @@ Rule Modifier, and Helper. Each role receives an immutable context and returns
 a role-specific typed outcome. A result with the wrong shape is an execution
 error, not an implicit continuation.
 
-Behavior bindings identify:
-
-- the target record;
-- hook or action position;
-- behavior or extension provider;
-- typed argument mapping;
-- deterministic priority.
+Behavior bindings identify the target record, behavior contract, typed
+arguments, deterministic order, and one typed anchor. Record anchors cover
+start/completion, Classic-action anchors cover before/after a reached slot,
+Encounter anchors cover response availability/selection and result sequence
+positions, and domain anchors cover spell, item, monster, lifecycle, and rule
+hooks. Placement is not encoded in the behavior definition itself.
 
 Argument values can come from constants, declared state, current context, or
 selected record references. The runtime validates the complete mapping before
@@ -238,7 +237,7 @@ startup error.
 The host exposes typed entry dispatch so native systems do not need to know
 how a behavior executes.
 
-- Encounter entry, selected option/result, and completion hooks run around the
+- Encounter entry, response availability/selection, result, and completion hooks run around the
   native encounter flow. A plain Continue does not suppress the native
   encounter.
 - Spell validation runs before resolution. Cast and effect hooks may own
@@ -253,19 +252,20 @@ how a behavior executes.
   defeat, and party defeat enter the Lifecycle role through one serialized
   event queue.
 
-Bindings may include an action/result slot. Matching filters that slot before
-priority ordering so one encounter result cannot fire another result's
-behavior.
+For APs and XAPs, `ScenarioInterpreter` projects one mixed sequence from
+record-start behaviors, the eight preserved Classic slots, ordered
+before/after-slot behaviors, and record-complete behaviors. A yielding Classic
+action resumes before its after-slot behaviors are eligible. Save restoration
+pins the exact mixed cursor and never replays a completed action or behavior.
 
-`ScenarioInterpreter` owns the complete Classic Enhanced encounter sequence:
-Encounter Entry (`enter`), native encounter presentation, After Choice
-(`option`), Before Result (`result`), preserved Classic result actions, and
-After Result (`complete`). Each behavior is injected as `core.script.call`.
-The selected option, result, pending Classic continuation, and current phase
-are serialized in the interpreter snapshot, so a yielding behavior or the
-native encounter prompt can be saved and restored without replaying an earlier
-phase. `PresentationPort` only presents the encounter (or delegates to a
-built-in encounter resolver); it does not run a nested behavior loop.
+The interpreter also owns the complete Classic Enhanced encounter sequence:
+entry behaviors, pure response availability, native presentation, selected
+response behaviors, result routing, the mixed Classic or named Enhanced result
+sequence, result completion, terminal transition, and encounter completion.
+Presentation returns a stable response reference as well as the Classic numeric
+outcome. The selected response/result, local Classic result slot, pending
+behavior, transition count, and attachment order are serialized. Redirected
+paths displace the original result rather than double-running it.
 
 ## Rules and modifiers
 
@@ -337,8 +337,8 @@ Bundle v3 contains:
 - `classic/evidence.json`, with source/provenance/decoding evidence;
 - `runtime.json`, with profiles, requirements, provider bindings, and target
   support;
-- `remake/scripts.json` schema 2, with behaviors, state, bindings, migrations,
-  and sandbox source manifests;
+- `remake/scripts.json` schema 3, with behaviors, state, typed anchors,
+  Encounter overlays, migrations, and sandbox source manifests;
 - immutable scenario-owned assets and decoded runtime media.
 
 The evidence file is verified at installation but not loaded in normal play.
@@ -351,13 +351,15 @@ GDScript.
 
 ## Saves and content updates
 
-Campaign save schema 6 records:
+Campaign save schema 7 records:
 
 - campaign identity, content version, and package hash;
 - API catalog hash;
 - behavior versions, hashes, and state-schema versions;
 - interpreter and behavior frames;
 - pending command and event queue;
+- mixed-sequence cursor, active response/result reference, pending behavior,
+  result-transition count, and attachment order;
 - sandbox reducer state;
 - Classic mutations and port state;
 - resolved gameplay rules;
