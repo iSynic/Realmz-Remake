@@ -25,6 +25,7 @@ const MAX_REDUCER_STEPS := 32
 var scripts_by_id: Dictionary = {}
 var variable_definitions: Dictionary = {}
 var persistent_values: Dictionary = {}
+var transient_values: Dictionary = {}
 var full_script_states: Dictionary = {}
 var active_full_script_id := ""
 var trace: Array = []
@@ -108,8 +109,13 @@ func configure(
 			str(variable.get("name", ""))
 		)
 		variable_definitions[key] = variable.duplicate(true)
-		if str(variable.get("scope", "campaign")) != "transient":
-			persistent_values[key] = variable.get("defaultValue")
+		var default_value: Variant = _duplicate_state_value(
+			variable.get("defaultValue")
+		)
+		if str(variable.get("scope", "campaign")) == "transient":
+			transient_values[key] = default_value
+		else:
+			persistent_values[key] = default_value
 	behavior_bindings = script_document.get("bindings", []).duplicate(true)
 	migrations = script_document.get("migrations", []).duplicate(true)
 	var hash_text := (
@@ -786,10 +792,19 @@ func restore(value: Variant) -> Dictionary:
 		}
 	var saved: Dictionary = value
 	for name: Variant in saved["persistentValues"]:
-		if not variable_definitions.has(str(name)):
+		var definition := _definition_for_state_key(str(name))
+		if definition.is_empty():
 			return {
 				"status": "error",
 				"message": "Saved scenario variable '%s' is unavailable" % name,
+			}
+		if not _state_value_matches_definition(
+			saved["persistentValues"][name],
+			definition
+		):
+			return {
+				"status": "error",
+				"message": "Saved scenario variable '%s' has the wrong type" % name,
 			}
 	persistent_values = saved["persistentValues"].duplicate(true)
 	full_script_states = saved["fullScriptStates"].duplicate(true)
@@ -864,7 +879,7 @@ func migrate_snapshot(
 		}
 	var defaults := persistent_values.duplicate(true)
 	for key: Variant in saved.get("persistentValues", {}):
-		if variable_definitions.has(str(key)):
+		if not _definition_for_state_key(str(key)).is_empty():
 			persistent_values[str(key)] = saved["persistentValues"][key]
 	for migration: Dictionary in chain:
 		var behavior_id := str(migration.get("behaviorId", ""))
@@ -1018,6 +1033,64 @@ static func validate_document(
 	)
 	if not bool(plugin_catalog_result.get("valid", false)):
 		return plugin_catalog_result
+	var seen_state_definitions: Dictionary = {}
+	for index: int in range(document["stateDefinitions"].size()):
+		var state_value: Variant = document["stateDefinitions"][index]
+		var state_context := "remake/scripts.json.stateDefinitions[%d]" % index
+		if not (state_value is Dictionary):
+			return _invalid("%s must be an object" % state_context)
+		var state: Dictionary = state_value
+		var state_name := str(state.get("name", ""))
+		var state_scope := str(state.get("scope", ""))
+		var owner_id := str(state.get("ownerId", ""))
+		var value_type := str(state.get("valueType", ""))
+		if not state_name.is_valid_identifier():
+			return _invalid("%s has an invalid name" % state_context)
+		if state_scope not in [
+			"campaign",
+			"map",
+			"encounter",
+			"character",
+			"item-instance",
+			"combat",
+			"transient",
+		]:
+			return _invalid("%s has an unsupported scope" % state_context)
+		if int(state.get("schemaVersion", 0)) < 1:
+			return _invalid("%s has an invalid schema version" % state_context)
+		if value_type not in [
+			"bool",
+			"int",
+			"float",
+			"string",
+			"bool-array",
+			"int-array",
+			"float-array",
+			"string-array",
+		]:
+			return _invalid("%s has an unsupported persistent type" % state_context)
+		var max_length_value: Variant = state.get("maxLength")
+		if value_type.ends_with("-array"):
+			if not (max_length_value is int) \
+					or int(max_length_value) < 1 \
+					or int(max_length_value) > MAX_ARRAY_LENGTH:
+				return _invalid(
+					"%s requires maxLength from 1 through %d"
+					% [state_context, MAX_ARRAY_LENGTH]
+				)
+		elif max_length_value != null:
+			return _invalid(
+				"%s cannot declare maxLength for a scalar" % state_context
+			)
+		if not _state_value_matches_definition(
+			state.get("defaultValue"),
+			state
+		):
+			return _invalid("%s has an invalid default value" % state_context)
+		var state_key := _state_key(state_scope, owner_id, state_name)
+		if seen_state_definitions.has(state_key):
+			return _invalid("%s duplicates another state definition" % state_context)
+		seen_state_definitions[state_key] = true
 	var seen_scripts: Dictionary = {}
 	var declared_sources: Dictionary = {}
 	for index: int in range(document["behaviors"].size()):
@@ -1512,12 +1585,16 @@ func _execute_statement(statement: Dictionary) -> ScenarioStepResult:
 			if str(value_result.get("status", "")) == "error":
 				return StepResultScript.failed(str(value_result.get("message", "")))
 			if str(statement.get("scope", "local")) == "persistent":
-				var state_key := _state_key("campaign", "", name)
-				if not variable_definitions.has(state_key):
-					return StepResultScript.failed(
-						"Persistent scenario variable '%s' is unavailable" % name
-					)
-				persistent_values[state_key] = value_result.get("value")
+				var write_result := _write_named_state(
+					str(statement.get("stateScope", "campaign")),
+					str(statement.get("ownerId", "")),
+					name,
+					value_result.get("value")
+				)
+				if str(write_result.get("status", "")) == "error":
+					return StepResultScript.failed(str(
+						write_result.get("message", "")
+					))
 			else:
 				_set_local(name, value_result.get("value"))
 		"if":
@@ -1840,26 +1917,18 @@ func _read_state(arguments: Dictionary) -> Dictionary:
 				"value": runtime_state.get_quest_value(int(arguments.get("id", 0))),
 			}
 		"persistent":
-			var legacy_key := _state_key(
+			return _read_named_state(
 				"campaign",
 				"",
 				str(arguments.get("name", ""))
 			)
-			if not persistent_values.has(legacy_key):
-				return {
-					"status": "error",
-					"message": "Unknown variable '%s'" % arguments.get("name", ""),
-				}
-			return {"status": "ok", "value": persistent_values[legacy_key]}
-		"campaign", "map", "encounter", "character", "item-instance", "combat":
-			var key := _state_key(
+		"campaign", "map", "encounter", "character", "item-instance", "combat", \
+				"transient":
+			return _read_named_state(
 				str(arguments.get("scope", "campaign")),
 				str(arguments.get("ownerId", "")),
 				str(arguments.get("name", ""))
 			)
-			if not persistent_values.has(key):
-				return {"status": "error", "message": "Unknown scenario state '%s'" % key}
-			return {"status": "ok", "value": persistent_values[key]}
 	return {"status": "error", "message": "Unsupported scenario state scope"}
 
 
@@ -1872,29 +1941,163 @@ func _write_state(arguments: Dictionary) -> Dictionary:
 			)
 			return {"status": "ok"}
 		"persistent":
-			var legacy_key := _state_key(
+			return _write_named_state(
 				"campaign",
 				"",
-				str(arguments.get("name", ""))
+				str(arguments.get("name", "")),
+				arguments.get("value")
 			)
-			if not persistent_values.has(legacy_key):
-				return {
-					"status": "error",
-					"message": "Unknown variable '%s'" % arguments.get("name", ""),
-				}
-			persistent_values[legacy_key] = arguments.get("value")
-			return {"status": "ok"}
-		"campaign", "map", "encounter", "character", "item-instance", "combat":
-			var key := _state_key(
+		"campaign", "map", "encounter", "character", "item-instance", "combat", \
+				"transient":
+			return _write_named_state(
 				str(arguments.get("scope", "campaign")),
 				str(arguments.get("ownerId", "")),
-				str(arguments.get("name", ""))
+				str(arguments.get("name", "")),
+				arguments.get("value")
 			)
-			if not variable_definitions.has(key):
-				return {"status": "error", "message": "Unknown scenario state '%s'" % key}
-			persistent_values[key] = arguments.get("value")
-			return {"status": "ok"}
 	return {"status": "error", "message": "Unsupported scenario state scope"}
+
+
+func _read_named_state(
+	scope: String,
+	owner_id: String,
+	name: String
+) -> Dictionary:
+	var resolved_owner := _resolve_state_owner(scope, owner_id)
+	var key := _state_key(scope, resolved_owner, name)
+	var definition := _definition_for_state(scope, resolved_owner, name)
+	if definition.is_empty():
+		return {
+			"status": "error",
+			"message": "Unknown scenario state '%s'" % key,
+		}
+	var values: Dictionary = (
+		transient_values if scope == "transient" else persistent_values
+	)
+	if not values.has(key):
+		values[key] = _duplicate_state_value(definition.get("defaultValue"))
+	return {
+		"status": "ok",
+		"value": _duplicate_state_value(values[key]),
+	}
+
+
+func _write_named_state(
+	scope: String,
+	owner_id: String,
+	name: String,
+	value: Variant
+) -> Dictionary:
+	var resolved_owner := _resolve_state_owner(scope, owner_id)
+	var key := _state_key(scope, resolved_owner, name)
+	var definition := _definition_for_state(scope, resolved_owner, name)
+	if definition.is_empty():
+		return {
+			"status": "error",
+			"message": "Unknown scenario state '%s'" % key,
+		}
+	if not _state_value_matches_definition(value, definition):
+		return {
+			"status": "error",
+			"message": (
+				"Scenario state '%s' requires %s"
+				% [key, definition.get("valueType", "a declared type")]
+			),
+		}
+	var values: Dictionary = (
+		transient_values if scope == "transient" else persistent_values
+	)
+	values[key] = _duplicate_state_value(value)
+	return {"status": "ok"}
+
+
+func _definition_for_state(
+	scope: String,
+	owner_id: String,
+	name: String
+) -> Dictionary:
+	var exact_key := _state_key(scope, owner_id, name)
+	var exact: Variant = variable_definitions.get(exact_key)
+	if exact is Dictionary:
+		return exact
+	if not owner_id.is_empty():
+		var template: Variant = variable_definitions.get(
+			_state_key(scope, "", name)
+		)
+		if template is Dictionary:
+			return template
+	return {}
+
+
+func _definition_for_state_key(key: String) -> Dictionary:
+	var parts := key.split("\u001f", true)
+	if parts.size() != 3:
+		return {}
+	return _definition_for_state(str(parts[0]), str(parts[1]), str(parts[2]))
+
+
+func _resolve_state_owner(scope: String, explicit_owner: String) -> String:
+	if scope in ["campaign", "transient"] or not explicit_owner.is_empty():
+		return explicit_owner
+	var context: Variant = active_invocation.get("context", {})
+	if not (context is Dictionary):
+		return ""
+	var contexts: Array[Dictionary] = [context]
+	var trigger_context: Variant = context.get("trigger", {})
+	if trigger_context is Dictionary:
+		var execution_context: Variant = trigger_context.get(
+			"executionContext",
+			{}
+		)
+		if execution_context is Dictionary:
+			contexts.append(execution_context)
+	match scope:
+		"map":
+			for owner_context: Dictionary in contexts:
+				var map_trigger: Variant = owner_context.get("mapTrigger", {})
+				if map_trigger is Dictionary:
+					var location: Variant = map_trigger.get("location", {})
+					if location is Dictionary and not str(
+						location.get("mapId", "")
+					).is_empty():
+						return str(location.get("mapId", ""))
+				var world: Variant = owner_context.get("world", {})
+				if world is Dictionary:
+					var location: Variant = world.get("location", {})
+					if location is Dictionary:
+						return str(location.get("mapId", ""))
+		"encounter":
+			for owner_context: Dictionary in contexts:
+				var encounter: Variant = owner_context.get("encounter", {})
+				if encounter is Dictionary:
+					return str(encounter.get("id", ""))
+		"character":
+			for owner_context: Dictionary in contexts:
+				for field_name: String in [
+					"character",
+					"caster",
+					"user",
+					"target",
+				]:
+					var character: Variant = owner_context.get(field_name, {})
+					if character is Dictionary:
+						var character_id := str(character.get(
+							"id",
+							character.get("characterId", "")
+						))
+						if not character_id.is_empty():
+							return character_id
+		"item-instance":
+			for owner_context: Dictionary in contexts:
+				var item: Variant = owner_context.get("item", {})
+				if item is Dictionary:
+					return str(item.get("instanceId", item.get("id", "")))
+		"combat":
+			for owner_context: Dictionary in contexts:
+				var combat: Variant = owner_context.get("combat", {})
+				if combat is Dictionary:
+					return str(combat.get("id", combat.get("battleId", "")))
+	return ""
 
 
 func _evaluate(value: Variant) -> Dictionary:
@@ -1913,10 +2116,11 @@ func _evaluate(value: Variant) -> Dictionary:
 						return {"status": "error", "message": "Unknown local '%s'" % name}
 					return {"status": "ok", "value": locals[name]}
 				"persistent":
-					var state_key := _state_key("campaign", "", name)
-					if not persistent_values.has(state_key):
-						return {"status": "error", "message": "Unknown variable '%s'" % name}
-					return {"status": "ok", "value": persistent_values[state_key]}
+					return _read_named_state(
+						str(expression.get("stateScope", "campaign")),
+						str(expression.get("ownerId", "")),
+						name
+					)
 				"quest":
 					return {
 						"status": "ok",
@@ -2446,10 +2650,32 @@ static func _state_key(scope: String, owner_id: String, name: String) -> String:
 	return "%s\u001f%s\u001f%s" % [scope, owner_id, name]
 
 
+static func _state_value_matches_definition(
+	value: Variant,
+	definition: Dictionary
+) -> bool:
+	var value_type := str(definition.get("valueType", ""))
+	if not _value_matches_script_type(value, value_type):
+		return false
+	if value_type.ends_with("-array"):
+		return (
+			value is Array
+			and value.size() <= int(definition.get("maxLength", 0))
+		)
+	return true
+
+
+static func _duplicate_state_value(value: Variant) -> Variant:
+	if value is Dictionary or value is Array:
+		return value.duplicate(true)
+	return value
+
+
 func clear() -> void:
 	scripts_by_id.clear()
 	variable_definitions.clear()
 	persistent_values.clear()
+	transient_values.clear()
 	full_script_states.clear()
 	active_full_script_id = ""
 	active_invocation.clear()

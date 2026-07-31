@@ -31,7 +31,7 @@ func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
 		"semanticEncounter": true,
 		"encounter": encounter.duplicate(true),
 		"nodeId": str(encounter.get("entryNodeId", "")),
-		"phase": "entry",
+		"phase": "variant",
 		"outcome": "continue",
 		"availableChoiceIds": [],
 		"selectedChoiceId": "",
@@ -101,6 +101,19 @@ func _advance_semantic(state: Dictionary, context: Object) -> ScenarioStepResult
 		var encounter: Dictionary = state.get("encounter", {})
 		var phase := str(state.get("phase", ""))
 		match phase:
+			"variant":
+				state["phase"] = "entry"
+				var variant_behavior := _optional_id(
+					encounter.get("variantBehaviorId")
+				)
+				if not variant_behavior.is_empty():
+					return _run_behavior(
+						variant_behavior,
+						"enter",
+						"variant",
+						state,
+						context
+					)
 			"entry":
 				state["phase"] = "node-picture"
 				var entry_behavior := _optional_id(

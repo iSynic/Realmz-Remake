@@ -28,6 +28,14 @@ func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
 			if context.has_method("current_trigger_identity") else {},
 		"action": instruction.duplicate(true),
 	}
+	var execution_context: Variant = invocation_context["trigger"].get(
+		"executionContext",
+		{}
+	)
+	if execution_context is Dictionary:
+		for key: Variant in execution_context:
+			if not invocation_context.has(key):
+				invocation_context[key] = execution_context[key]
 	if not attachment.is_empty():
 		invocation_context["attachment"] = attachment
 		var attachment_request: Variant = attachment.get("request")

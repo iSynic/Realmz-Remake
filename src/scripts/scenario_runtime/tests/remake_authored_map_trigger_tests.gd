@@ -25,6 +25,7 @@ var failures := 0
 func _ready() -> void:
 	await _test_map_trigger_execution_and_restore()
 	await _test_modern_encounter_execution_and_restore()
+	await _test_typed_state_and_named_variants()
 	if failures == 0:
 		print("Remake Authored scenario logic tests passed")
 		get_tree().quit(0)
@@ -136,6 +137,13 @@ func _test_modern_encounter_execution_and_restore() -> void:
 	var result := session.begin_encounter("scenario.fixture.encounter")
 	_expect(
 		result.get("status") == "yield"
+			and result.get("commandId") == "show_text"
+			and result.get("request", {}).get("text") == "The city remembers you.",
+		"Modern Encounter selects and runs its first matching named variant"
+	)
+	result = await _route_and_resume(session, result)
+	_expect(
+		result.get("status") == "yield"
 			and result.get("commandId") == "show_picture",
 		"Modern Encounter presents its opening picture"
 	)
@@ -217,6 +225,7 @@ func _test_modern_encounter_execution_and_restore() -> void:
 	)
 	_expect(
 		restored_services.transcript == [
+			"The city remembers you.",
 			"A man offers work involving a stable of wild beasts.",
 			"The beasts turn on you.",
 			"The job is done.",
@@ -234,6 +243,99 @@ func _test_modern_encounter_execution_and_restore() -> void:
 	)
 	session.queue_free()
 	restored.queue_free()
+
+
+func _test_typed_state_and_named_variants() -> void:
+	var bundle := _state_variant_bundle()
+	var services := PreviewServicesScript.new()
+	var session := SessionScript.new()
+	add_child(session)
+	_expect(
+		session.configure_remake_bundle(bundle, services),
+		"typed-state variant fixture configures"
+	)
+	var result := session.begin_map_trigger("scenario.fixture.stateful-trigger")
+	_expect(
+		result.get("status") == "yield"
+			and result.get("commandId") == "show_text"
+			and result.get("request", {}).get("text") == "First visit",
+		"default variant runs before map-scoped state is set"
+	)
+	result = await _route_and_resume(session, result)
+	_expect(
+		result.get("status") == "complete",
+		"default stateful variant completes"
+	)
+	var script_state: Dictionary = (
+		session.interpreter.scenario_script_runtime.snapshot()
+	)
+	_expect(
+		script_state.get("persistentValues", {}).get(
+			"map\u001fland:0\u001fopened",
+			false
+		) == true,
+		"context-owned map state is stored under the current map: %s"
+			% script_state.get("persistentValues", {})
+	)
+	var save_result := session.make_save_result()
+	var restored_services := PreviewServicesScript.new()
+	var restored := SessionScript.new()
+	add_child(restored)
+	var restored_configured := restored.configure_remake_bundle(
+		bundle,
+		restored_services
+	)
+	var restore_result := (
+		restored.restore_save_payload(save_result.get("save", {}))
+		if restored_configured
+		else {"status": "error", "message": restored.semantic_last_error}
+	)
+	_expect(
+		restored_configured and restore_result.get("status") == "ok",
+		"typed map state restores through save schema 6: %s"
+			% restore_result
+	)
+	result = restored.begin_map_trigger("scenario.fixture.stateful-trigger")
+	_expect(
+		result.get("status") == "yield"
+			and result.get("commandId") == "show_text"
+			and result.get("request", {}).get("text") == "Already opened",
+		"restored state selects the first matching named variant"
+	)
+	result = await _route_and_resume(restored, result)
+	_expect(
+		result.get("status") == "complete",
+		"selected named variant completes"
+	)
+	var bad_write: Dictionary = restored.interpreter.scenario_script_runtime.call(
+		"_write_state",
+		{
+			"scope": "map",
+			"ownerId": "land:0",
+			"name": "opened",
+			"value": "not a bool",
+		}
+	)
+	_expect(
+		bad_write.get("status") == "error",
+		"typed state rejects a value that does not match its definition"
+	)
+	var invalid_bundle := _state_variant_bundle()
+	invalid_bundle.documents["remakeScripts"]["stateDefinitions"][0][
+		"defaultValue"
+	] = "not a bool"
+	var invalid := SessionScript.new()
+	add_child(invalid)
+	_expect(
+		not invalid.configure_remake_bundle(
+			invalid_bundle,
+			PreviewServicesScript.new()
+		),
+		"runtime readiness rejects invalid typed-state defaults"
+	)
+	session.queue_free()
+	restored.queue_free()
+	invalid.queue_free()
 
 
 func _route_and_resume(
@@ -389,6 +491,8 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 	var result_behavior_id := "scenario.fixture.encounter.stable.fight.result"
 	var completion_behavior_id := "scenario.fixture.encounter.complete"
 	var availability_behavior_id := "scenario.fixture.encounter.refuse.available"
+	var remembered_behavior_id := "scenario.fixture.encounter.remembered"
+	var remembered_condition_id := "%s.condition" % remembered_behavior_id
 	var program := {
 		"kind": "function",
 		"name": "fixture_encounter_default",
@@ -535,6 +639,55 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"contentHash": ScriptRuntimeScript._sha256_json(availability_program),
 		"program": availability_program,
 	}
+	var remembered_program := {
+		"kind": "function",
+		"name": "fixture_encounter_remembered",
+		"parameters": [],
+		"returnType": "encounter-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {"text": _literal("The city remembers you.")},
+			},
+			{
+				"kind": "return",
+				"value": {
+					"kind": "record",
+					"fields": {"kind": _literal("continue")},
+				},
+			},
+		],
+	}
+	var remembered_behavior := _safe_behavior(
+		remembered_behavior_id,
+		"Remembered Arrival",
+		"entry",
+		"encounter",
+		"enter",
+		"encounter-outcome",
+		["core.presentation.text"],
+		remembered_program,
+		state_schema
+	)
+	var remembered_condition_program := {
+		"kind": "function",
+		"name": "fixture_encounter_is_remembered",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{"kind": "return", "value": _literal(true)}],
+	}
+	var remembered_condition := _safe_behavior(
+		remembered_condition_id,
+		"City Remembers Party",
+		"helper",
+		"helper",
+		"",
+		"bool",
+		[],
+		remembered_condition_program,
+		state_schema
+	)
 	var encounter_id := "scenario.fixture.encounter"
 	var opening_id := "%s.opening" % encounter_id
 	var stable_id := "%s.stable" % encounter_id
@@ -566,12 +719,20 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 				"completionBehaviorId": completion_behavior_id,
 				"repeatPolicy": "once",
 				"defaultVariantId": "%s.default" % encounter_id,
-				"variants": [{
-					"id": "%s.default" % encounter_id,
-					"name": "Default",
-					"conditionBehaviorId": null,
-					"behaviorId": behavior_id,
-				}],
+				"variants": [
+					{
+						"id": "%s.remembered" % encounter_id,
+						"name": "Remembered",
+						"conditionBehaviorId": remembered_condition_id,
+						"behaviorId": remembered_behavior_id,
+					},
+					{
+						"id": "%s.default" % encounter_id,
+						"name": "Default",
+						"conditionBehaviorId": null,
+						"behaviorId": behavior_id,
+					},
+				],
 				"nodes": [
 					{
 						"id": opening_id,
@@ -629,6 +790,8 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 				result_behavior,
 				completion_behavior,
 				availability_behavior,
+				remembered_behavior,
+				remembered_condition,
 			],
 			"bindings": [],
 			"stateDefinitions": [],
@@ -640,6 +803,227 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		},
 	}
 	return bundle
+
+
+func _state_variant_bundle() -> ScenarioCampaignBundle:
+	var catalog := CapabilityCatalogScript.new()
+	catalog.load_builtin()
+	var trigger_id := "scenario.fixture.stateful-trigger"
+	var default_id := "%s.default" % trigger_id
+	var opened_id := "%s.opened" % trigger_id
+	var default_program := {
+		"kind": "function",
+		"name": "open_the_gate",
+		"parameters": [],
+		"returnType": "action-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.state.write",
+				"arguments": {
+					"scope": _literal("map"),
+					"name": _literal("opened"),
+					"value": _literal(true),
+				},
+			},
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {"text": _literal("First visit")},
+			},
+			_action_return(),
+		],
+	}
+	var opened_program := {
+		"kind": "function",
+		"name": "return_to_the_gate",
+		"parameters": [],
+		"returnType": "action-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {"text": _literal("Already opened")},
+			},
+			_action_return(),
+		],
+	}
+	var condition_program := {
+		"kind": "function",
+		"name": "gate_is_open",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{
+			"kind": "return",
+			"value": {
+				"kind": "variable",
+				"scope": "persistent",
+				"stateScope": "map",
+				"ownerId": "",
+				"name": "opened",
+			},
+		}],
+	}
+	var state_schema := {}
+	var default_behavior := _safe_behavior(
+		"%s.run" % default_id,
+		"Open the Gate",
+		"entry",
+		"action",
+		"run",
+		"action-outcome",
+		["core.state.write", "core.presentation.text"],
+		default_program,
+		state_schema
+	)
+	var opened_behavior := _safe_behavior(
+		"%s.run" % opened_id,
+		"Already Open",
+		"entry",
+		"action",
+		"run",
+		"action-outcome",
+		["core.presentation.text"],
+		opened_program,
+		state_schema
+	)
+	var condition_behavior := _safe_behavior(
+		"%s.condition" % opened_id,
+		"Gate Is Open",
+		"helper",
+		"helper",
+		"",
+		"bool",
+		[],
+		condition_program,
+		state_schema
+	)
+	var bundle := BundleScript.new()
+	bundle.manifest = {
+		"format": "realmz-remake-scenario",
+		"formatVersion": 3,
+		"campaignKind": "remake-authored",
+		"id": "fixture.remake-authored-state-variants",
+		"name": "Typed State and Variants Fixture",
+		"contentVersion": "0.1.0",
+		"integrity": {"packageHash": "d".repeat(64)},
+	}
+	bundle.documents = {
+		"scenario": {
+			"startup": {"mapId": "land:0", "x": 2, "y": 2},
+		},
+		"remakeLogic": {
+			"schemaVersion": 3,
+			"kind": "remake-authored",
+			"mapTriggers": [{
+				"id": trigger_id,
+				"name": "Stateful Gate",
+				"location": {
+					"kind": "point",
+					"mapId": "land:0",
+					"x": 2,
+					"y": 2,
+					"width": 1,
+					"height": 1,
+				},
+				"event": "enter",
+				"enabled": true,
+				"chance": 100,
+				"priority": 0,
+				"repeatPolicy": "always",
+				"defaultVariantId": default_id,
+				"variants": [
+					{
+						"id": opened_id,
+						"name": "Already Open",
+						"conditionBehaviorId": condition_behavior["id"],
+						"behaviorId": opened_behavior["id"],
+					},
+					{
+						"id": default_id,
+						"name": "First Visit",
+						"conditionBehaviorId": null,
+						"behaviorId": default_behavior["id"],
+					},
+				],
+				"activationConditionBehaviorId": null,
+			}],
+			"eventTriggers": [],
+			"scheduledTriggers": [],
+			"encounters": [],
+		},
+		"remakeScripts": {
+			"schemaVersion": 2,
+			"apiVersion": 2,
+			"capabilityCatalogHash": catalog.catalog_hash(),
+			"behaviors": [
+				default_behavior,
+				opened_behavior,
+				condition_behavior,
+			],
+			"bindings": [],
+			"stateDefinitions": [{
+				"name": "opened",
+				"displayName": "Gate Opened",
+				"documentation": "Tracks the gate independently on each map.",
+				"scope": "map",
+				"ownerId": "",
+				"schemaVersion": 1,
+				"valueType": "bool",
+				"maxLength": null,
+				"defaultValue": false,
+			}],
+			"migrations": [],
+		},
+		"runtime": {
+			"recommendedGameplayProfile": "core.classic",
+			"requiredPlugins": [],
+		},
+	}
+	return bundle
+
+
+static func _safe_behavior(
+	id: String,
+	name: String,
+	kind: String,
+	role: String,
+	hook: String,
+	return_type: String,
+	capabilities: Array,
+	program: Dictionary,
+	state_schema: Dictionary
+) -> Dictionary:
+	return {
+		"id": id,
+		"name": name,
+		"description": name,
+		"kind": kind,
+		"role": role,
+		"hook": hook,
+		"tier": "safe",
+		"apiVersion": 2,
+		"behaviorVersion": 1,
+		"stateSchemaVersion": 1,
+		"parameters": [],
+		"returnType": return_type,
+		"requestedCapabilities": capabilities,
+		"stateSchema": state_schema,
+		"stateSchemaHash": ScriptRuntimeScript._sha256_json(state_schema),
+		"sourceMap": {},
+		"contentHash": ScriptRuntimeScript._sha256_json(program),
+		"program": program,
+	}
+
+
+static func _action_return() -> Dictionary:
+	return {
+		"kind": "return",
+		"value": {
+			"kind": "record",
+			"fields": {"kind": _literal("continue")},
+		},
+	}
 
 
 static func _literal(value: Variant) -> Dictionary:

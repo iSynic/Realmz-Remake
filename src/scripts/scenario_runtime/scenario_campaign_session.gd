@@ -233,7 +233,11 @@ func begin_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 		trigger.get("activationConditionBehaviorId")
 	)
 	if not activation_id.is_empty():
-		var activation := _evaluate_condition(activation_id, trigger)
+		var activation := _evaluate_condition(
+			activation_id,
+			{"mapTrigger": trigger.duplicate(true)},
+			"Map Trigger activation"
+		)
 		if str(activation.get("status", "")) == "error":
 			return activation
 		if not bool(activation.get("value", false)):
@@ -242,15 +246,26 @@ func begin_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 	if chance <= 0 \
 			or (chance < 100 and semantic_state.roll_percent() > chance):
 		return {"status": "skipped", "reason": "chance"}
-	var behavior_result := _select_variant_behavior(trigger)
-	if str(behavior_result.get("status", "")) == "error":
-		return behavior_result
-	_set_vm_behavior(trigger_id, str(behavior_result.get("behaviorId", "")))
+	var variant_result := _select_named_variant(
+		trigger,
+		{"mapTrigger": trigger.duplicate(true)},
+		"Map Trigger"
+	)
+	if str(variant_result.get("status", "")) == "error":
+		return variant_result
+	var selected_variant: Dictionary = variant_result.get("variant", {})
+	_set_vm_behavior(
+		trigger_id,
+		str(selected_variant.get("behaviorId", ""))
+	)
 	active_trigger_id = trigger_id
 	active_encounter_id = ""
 	var execution_context := context.duplicate(true) \
 		if context is Dictionary else {}
 	execution_context["mapTrigger"] = trigger.duplicate(true)
+	execution_context["activeVariantId"] = str(
+		selected_variant.get("id", "")
+	)
 	var started := interpreter.start(trigger_id, 0, execution_context)
 	if str(started.get("status", "")) != "ok":
 		return started
@@ -272,6 +287,20 @@ func begin_encounter(
 	if not semantic_state.can_run_encounter(encounter):
 		return {"status": "skipped", "reason": "repeat-policy"}
 	var active_encounter := encounter.duplicate(true)
+	var variant_result := _select_named_variant(
+		active_encounter,
+		{"encounter": active_encounter.duplicate(true)},
+		"Modern Encounter"
+	)
+	if str(variant_result.get("status", "")) == "error":
+		return variant_result
+	var selected_variant: Dictionary = variant_result.get("variant", {})
+	active_encounter["activeVariantId"] = str(
+		selected_variant.get("id", "")
+	)
+	active_encounter["variantBehaviorId"] = str(
+		selected_variant.get("behaviorId", "")
+	)
 	if not start_node_id.is_empty():
 		var found := false
 		for node_value: Variant in active_encounter.get("nodes", []):
@@ -291,6 +320,9 @@ func begin_encounter(
 	var execution_context := context.duplicate(true) \
 		if context is Dictionary else {}
 	execution_context["encounter"] = active_encounter.duplicate(true)
+	execution_context["activeVariantId"] = str(
+		selected_variant.get("id", "")
+	)
 	var started := interpreter.start(encounter_id, 0, execution_context)
 	if str(started.get("status", "")) != "ok":
 		return started
@@ -511,6 +543,11 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 		if encounter_id.is_empty() or result.has(encounter_id):
 			_semantic_fail("Semantic trigger and Encounter IDs must be unique")
 			return {}
+		if _default_variant(encounter).is_empty():
+			_semantic_fail(
+				"Modern Encounter '%s' has no default variant" % encounter_id
+			)
+			return {}
 		encounters_by_id[encounter_id] = encounter.duplicate(true)
 		result[encounter_id] = {
 			"id": encounter_id,
@@ -519,60 +556,67 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 	return result
 
 
-func _select_variant_behavior(trigger: Dictionary) -> Dictionary:
-	for variant_value: Variant in trigger.get("variants", []):
+func _select_named_variant(
+	record: Dictionary,
+	condition_context: Dictionary,
+	label: String
+) -> Dictionary:
+	for variant_value: Variant in record.get("variants", []):
 		if not (variant_value is Dictionary):
 			continue
 		var variant: Dictionary = variant_value
 		if str(variant.get("id", "")) == str(
-			trigger.get("defaultVariantId", "")
+			record.get("defaultVariantId", "")
 		):
 			continue
 		var condition_id := _optional_id(variant.get("conditionBehaviorId"))
 		if condition_id.is_empty():
 			continue
-		var condition := _evaluate_condition(condition_id, trigger)
+		var condition := _evaluate_condition(
+			condition_id,
+			condition_context,
+			"%s variant '%s'" % [label, variant.get("name", "")]
+		)
 		if str(condition.get("status", "")) == "error":
 			return condition
 		if bool(condition.get("value", false)):
 			return {
 				"status": "ok",
-				"behaviorId": str(variant.get("behaviorId", "")),
+				"variant": variant.duplicate(true),
 			}
-	var default_variant := _default_variant(trigger)
+	var default_variant := _default_variant(record)
+	if default_variant.is_empty():
+		return _semantic_error("%s has no default variant" % label)
 	return {
 		"status": "ok",
-		"behaviorId": str(default_variant.get("behaviorId", "")),
+		"variant": default_variant.duplicate(true),
 	}
 
 
 func _evaluate_condition(
 	behavior_id: String,
-	trigger: Dictionary
+	condition_context: Dictionary,
+	label: String
 ) -> Dictionary:
 	var step := interpreter.execute_scenario_script(
 		behavior_id,
 		{},
-		{
-			"role": "helper",
-			"hook": "",
-			"mapTrigger": trigger.duplicate(true),
-		}
+		condition_context
 	)
 	if step == null:
-		return _semantic_error("Map Trigger condition returned no result")
+		return _semantic_error("%s returned no result" % label)
 	if step.kind == ScenarioStepResult.ERROR:
 		return _semantic_error(str(step.data.get(
 			"message",
-			"Map Trigger condition failed"
+			"%s failed" % label
 		)))
 	if step.kind != ScenarioStepResult.CONTINUE:
 		return _semantic_error(
-			"Map Trigger condition must be pure and non-yielding"
+			"%s must be pure and non-yielding" % label
 		)
 	var value: Variant = step.data.get("value")
 	if not (value is bool):
-		return _semantic_error("Map Trigger condition must return bool")
+		return _semantic_error("%s must return bool" % label)
 	return {"status": "ok", "value": value}
 
 
