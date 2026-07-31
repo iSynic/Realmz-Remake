@@ -286,6 +286,62 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 			})
 			return
 		await _run_preview_trigger(trigger_id, int(entry.get("slot", 0)))
+	elif kind == "event-trigger":
+		var trigger_id := str(entry.get("triggerId", ""))
+		if trigger_id.is_empty() \
+				or not session.host.has_method("has_event_trigger") \
+				or not session.host.has_event_trigger(trigger_id):
+			_launching = false
+			_respond(request_id, {
+				"status": "error",
+				"message": "Preview Event Trigger is unavailable",
+			})
+			return
+		var trigger: Dictionary = session.event_triggers_by_id.get(
+			trigger_id,
+			{}
+		)
+		var event_context: Dictionary = (
+			entry.get("context", {}).duplicate(true)
+			if entry.get("context", {}) is Dictionary else {}
+		)
+		event_context["onlyTriggerId"] = trigger_id
+		var event_result: Dictionary = await session.host.run_event(
+			str(trigger.get("event", "")),
+			event_context
+		)
+		if str(event_result.get("status", "")) == "error":
+			_launching = false
+			_respond(request_id, event_result)
+			return
+	elif kind == "scheduled-trigger":
+		var trigger_id := str(entry.get("triggerId", ""))
+		if trigger_id.is_empty() \
+				or not session.host.has_method("has_scheduled_trigger") \
+				or not session.host.has_scheduled_trigger(trigger_id):
+			_launching = false
+			_respond(request_id, {
+				"status": "error",
+				"message": "Preview Scheduled Trigger is unavailable",
+			})
+			return
+		var schedule_context: Dictionary = (
+			entry.get("context", {}).duplicate(true)
+			if entry.get("context", {}) is Dictionary else {}
+		)
+		schedule_context["onlyTriggerId"] = trigger_id
+		var clock: Dictionary = (
+			entry.get("clock", {}).duplicate(true)
+			if entry.get("clock", {}) is Dictionary else {}
+		)
+		var scheduled_result: Dictionary = await session.host.run_scheduled(
+			clock,
+			schedule_context
+		)
+		if str(scheduled_result.get("status", "")) == "error":
+			_launching = false
+			_respond(request_id, scheduled_result)
+			return
 	elif kind == "battle":
 		var battle_id := int(entry.get("battleId", -1))
 		if install.bundle.get_battle(battle_id).is_empty():

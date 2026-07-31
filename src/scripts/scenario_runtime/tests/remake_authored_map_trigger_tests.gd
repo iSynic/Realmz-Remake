@@ -26,6 +26,7 @@ func _ready() -> void:
 	await _test_map_trigger_execution_and_restore()
 	await _test_modern_encounter_execution_and_restore()
 	await _test_typed_state_and_named_variants()
+	await _test_event_and_scheduled_triggers()
 	if failures == 0:
 		print("Remake Authored scenario logic tests passed")
 		get_tree().quit(0)
@@ -336,6 +337,142 @@ func _test_typed_state_and_named_variants() -> void:
 	session.queue_free()
 	restored.queue_free()
 	invalid.queue_free()
+
+
+func _test_event_and_scheduled_triggers() -> void:
+	var bundle := _event_schedule_bundle()
+	var services := PreviewServicesScript.new()
+	var session := SessionScript.new()
+	add_child(session)
+	_expect(
+		session.configure_remake_bundle(bundle, services),
+		"Event and Scheduled Trigger fixture configures"
+	)
+	var result := session.begin_event_dispatch("map-enter", {
+		"location": {
+			"levelType": "land",
+			"levelIndex": 0,
+			"x": 2,
+			"y": 2,
+		},
+	})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("request", {}).get("text") == "First map event",
+		"Event Triggers begin in priority and stable-ID order"
+	)
+	var queued_lifecycle: Dictionary = await session.host.emit_lifecycle_event(
+		"time-advanced",
+		{
+			"event": "time-advanced",
+			"previousTime": 0,
+			"currentTime": 60,
+		}
+	)
+	_expect(
+		queued_lifecycle.get("queued") == true,
+		"lifecycle events raised while a trigger yields join the bounded queue"
+	)
+	var save_result := session.make_save_result()
+	_expect(
+		save_result.get("status") == "ok"
+			and save_result.get("save", {}).get(
+				"interpreter",
+				{}
+			).get("pendingTriggerQueue", []).size() == 1
+			and save_result.get("save", {}).get(
+				"interpreter",
+				{}
+			).get("lifecycleEventQueue", []).size() == 1,
+		"pending Trigger and lifecycle-event queues are serialized"
+	)
+	var restored_services := PreviewServicesScript.new()
+	var restored := SessionScript.new()
+	add_child(restored)
+	_expect(
+		restored.configure_remake_bundle(bundle, restored_services)
+			and restored.restore_save_payload(
+				save_result.get("save", {})
+			).get("status") == "ok"
+			and restored.host.lifecycle_event_queue_snapshot().size() == 1,
+		"Trigger and lifecycle-event queues restore at a yielded command"
+	)
+	result = await _route_and_resume(restored, restored.interpreter.last_result)
+	_expect(
+		result.get("status") == "yield"
+			and result.get("request", {}).get("text") == "Second map event",
+		"resuming one Event Trigger advances into the next trigger"
+	)
+	result = await _route_and_resume(restored, result)
+	_expect(
+		result.get("status") == "complete"
+			and result.get("handled") == true,
+		"Event Trigger dispatch completes after all matching triggers"
+	)
+	await get_tree().process_frame
+	_expect(
+		restored.host.lifecycle_event_queue_snapshot().is_empty(),
+		"restored lifecycle events drain after the active trigger completes"
+	)
+
+	result = restored.begin_scheduled_dispatch({
+		"elapsedMinutes": 60,
+		"day": 1,
+		"minute": 60,
+	})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("request", {}).get("text") == "The hourly bell rings.",
+		"due recurring Scheduled Trigger runs at its first interval"
+	)
+	result = await _route_and_resume(restored, result)
+	_expect(
+		result.get("status") == "complete"
+			and restored.semantic_state.scheduled_markers.get(
+				"scenario.fixture.hourly",
+				-1
+			) == 60,
+		"Scheduled Trigger completion records its due marker"
+	)
+	_expect(
+		restored.begin_scheduled_dispatch({
+			"elapsedMinutes": 60,
+			"day": 1,
+			"minute": 60,
+		}).get("handled") == false,
+		"the same recurring interval cannot fire twice"
+	)
+	result = restored.begin_scheduled_dispatch({
+		"elapsedMinutes": 120,
+		"day": 1,
+		"minute": 120,
+	})
+	_expect(
+		result.get("status") == "yield",
+		"the next recurring interval becomes due"
+	)
+	await _route_and_resume(restored, result)
+	var absolute := {
+		"id": "scenario.fixture.absolute",
+		"schedule": {
+			"kind": "absolute",
+			"day": 2,
+			"minute": 30,
+		},
+	}
+	_expect(
+		restored.semantic_state.scheduled_due_marker(
+			absolute,
+			{"day": 1, "minute": 1439, "elapsedMinutes": 1439}
+		) == -1
+			and restored.semantic_state.scheduled_due_marker(
+				absolute,
+				{"day": 2, "minute": 30, "elapsedMinutes": 1470}
+			) == 1470,
+		"absolute schedules use the one-based scenario day shown in the game"
+	)
+	session.queue_free()
+	restored.queue_free()
 
 
 func _route_and_resume(
@@ -981,6 +1118,144 @@ func _state_variant_bundle() -> ScenarioCampaignBundle:
 		},
 	}
 	return bundle
+
+
+func _event_schedule_bundle() -> ScenarioCampaignBundle:
+	var catalog := CapabilityCatalogScript.new()
+	catalog.load_builtin()
+	var behaviors := [
+		_safe_behavior(
+			"scenario.fixture.event-first.run",
+			"First Map Event",
+			"entry",
+			"action",
+			"run",
+			"action-outcome",
+			["core.presentation.text"],
+			_text_action_program("event_first", "First map event"),
+			{}
+		),
+		_safe_behavior(
+			"scenario.fixture.event-second.run",
+			"Second Map Event",
+			"entry",
+			"action",
+			"run",
+			"action-outcome",
+			["core.presentation.text"],
+			_text_action_program("event_second", "Second map event"),
+			{}
+		),
+		_safe_behavior(
+			"scenario.fixture.hourly.run",
+			"Hourly Bell",
+			"entry",
+			"action",
+			"run",
+			"action-outcome",
+			["core.presentation.text"],
+			_text_action_program(
+				"hourly_bell",
+				"The hourly bell rings."
+			),
+			{}
+		),
+	]
+	var bundle := BundleScript.new()
+	bundle.manifest = {
+		"format": "realmz-remake-scenario",
+		"formatVersion": 3,
+		"campaignKind": "remake-authored",
+		"id": "fixture.remake-authored-events",
+		"name": "Event and Scheduled Trigger Fixture",
+		"contentVersion": "0.1.0",
+		"integrity": {"packageHash": "e".repeat(64)},
+	}
+	bundle.documents = {
+		"scenario": {
+			"startup": {"mapId": "land:0", "x": 2, "y": 2},
+		},
+		"remakeLogic": {
+			"schemaVersion": 3,
+			"kind": "remake-authored",
+			"mapTriggers": [],
+			"eventTriggers": [
+				{
+					"id": "scenario.fixture.event-second",
+					"name": "Second Map Event",
+					"event": "map-enter",
+					"enabled": true,
+					"priority": 20,
+					"conditionBehaviorId": null,
+					"behaviorId": "scenario.fixture.event-second.run",
+				},
+				{
+					"id": "scenario.fixture.event-first",
+					"name": "First Map Event",
+					"event": "map-enter",
+					"enabled": true,
+					"priority": 10,
+					"conditionBehaviorId": null,
+					"behaviorId": "scenario.fixture.event-first.run",
+				},
+			],
+			"scheduledTriggers": [{
+				"id": "scenario.fixture.hourly",
+				"name": "Hourly Bell",
+				"enabled": true,
+				"priority": 0,
+				"schedule": {
+					"kind": "recurring",
+					"day": null,
+					"minute": null,
+					"elapsedMinutes": null,
+					"intervalMinutes": 60,
+				},
+				"location": {
+					"kind": "point",
+					"mapId": "land:0",
+					"x": 2,
+					"y": 2,
+					"width": 1,
+					"height": 1,
+				},
+				"conditionBehaviorId": null,
+				"behaviorId": "scenario.fixture.hourly.run",
+			}],
+			"encounters": [],
+		},
+		"remakeScripts": {
+			"schemaVersion": 2,
+			"apiVersion": 2,
+			"capabilityCatalogHash": catalog.catalog_hash(),
+			"behaviors": behaviors,
+			"bindings": [],
+			"stateDefinitions": [],
+			"migrations": [],
+		},
+		"runtime": {
+			"recommendedGameplayProfile": "core.classic",
+			"requiredPlugins": [],
+		},
+	}
+	return bundle
+
+
+static func _text_action_program(name: String, text: String) -> Dictionary:
+	return {
+		"kind": "function",
+		"name": name,
+		"parameters": [],
+		"returnType": "action-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {"text": _literal(text)},
+			},
+			_action_return(),
+		],
+	}
 
 
 static func _safe_behavior(

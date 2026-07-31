@@ -1,13 +1,14 @@
 class_name ScenarioSemanticState
 extends RefCounted
 
-const SNAPSHOT_SCHEMA_VERSION := 2
+const SNAPSHOT_SCHEMA_VERSION := 3
 
 var quest_values: Dictionary = {}
 var completed_triggers: Dictionary = {}
 var completed_encounters: Dictionary = {}
 var completed_map_entries: Dictionary = {}
 var map_entry_sequences: Dictionary = {}
+var scheduled_markers: Dictionary = {}
 var rng_state := 1
 var location: Dictionary = {}
 
@@ -18,6 +19,7 @@ func configure(package_hash: String) -> void:
 	completed_encounters.clear()
 	completed_map_entries.clear()
 	map_entry_sequences.clear()
+	scheduled_markers.clear()
 	location.clear()
 	rng_state = 1
 	if package_hash.length() >= 8:
@@ -98,6 +100,48 @@ func mark_encounter_completed(encounter: Dictionary) -> void:
 	completed_encounters[str(encounter.get("id", ""))] = true
 
 
+func scheduled_due_marker(trigger: Dictionary, clock: Dictionary) -> int:
+	var trigger_id := str(trigger.get("id", ""))
+	if trigger_id.is_empty():
+		return -1
+	var schedule: Variant = trigger.get("schedule", {})
+	if not (schedule is Dictionary):
+		return -1
+	var elapsed_minutes := int(clock.get("elapsedMinutes", -1))
+	var day := int(clock.get("day", -1))
+	var minute := int(clock.get("minute", -1))
+	if elapsed_minutes < 0 and day >= 0 and minute >= 0:
+		elapsed_minutes = day * 1440 + minute
+	var marker := -1
+	match str(schedule.get("kind", "")):
+		"absolute":
+			var target_day := int(schedule.get("day", -1))
+			var target_minute := int(schedule.get("minute", -1))
+			if day >= 0 and minute >= 0 \
+					and target_day >= 1 \
+					and target_minute >= 0 \
+					and day * 1440 + minute >= target_day * 1440 + target_minute:
+				marker = (target_day - 1) * 1440 + target_minute
+		"elapsed":
+			var target_elapsed := int(schedule.get("elapsedMinutes", -1))
+			if elapsed_minutes >= target_elapsed and target_elapsed >= 0:
+				marker = target_elapsed
+		"recurring":
+			var interval := int(schedule.get("intervalMinutes", 0))
+			if elapsed_minutes >= interval and interval > 0:
+				marker = floori(
+					float(elapsed_minutes) / float(interval)
+				) * interval
+	if marker < 0 or marker <= int(scheduled_markers.get(trigger_id, -1)):
+		return -1
+	return marker
+
+
+func mark_scheduled_trigger(trigger_id: String, marker: int) -> void:
+	if not trigger_id.is_empty() and marker >= 0:
+		scheduled_markers[trigger_id] = marker
+
+
 func roll_percent() -> int:
 	rng_state = int((1103515245 * rng_state + 12345) & 0x7fffffff)
 	return (rng_state % 100) + 1
@@ -111,6 +155,7 @@ func snapshot() -> Dictionary:
 		"completedEncounters": completed_encounters.duplicate(true),
 		"completedMapEntries": completed_map_entries.duplicate(true),
 		"mapEntrySequences": map_entry_sequences.duplicate(true),
+		"scheduledMarkers": scheduled_markers.duplicate(true),
 		"rngState": rng_state,
 		"location": location.duplicate(true),
 	}
@@ -129,6 +174,7 @@ func restore(value: Variant) -> Dictionary:
 	completed_encounters = saved["completedEncounters"].duplicate(true)
 	completed_map_entries = saved["completedMapEntries"].duplicate(true)
 	map_entry_sequences = saved["mapEntrySequences"].duplicate(true)
+	scheduled_markers = saved["scheduledMarkers"].duplicate(true)
 	rng_state = int(saved["rngState"])
 	location = saved.get("location", {}).duplicate(true)
 	return {"status": "ok"}
@@ -146,6 +192,7 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 		"completedEncounters",
 		"completedMapEntries",
 		"mapEntrySequences",
+		"scheduledMarkers",
 	]:
 		if not (saved.get(field_name) is Dictionary):
 			return _invalid("Semantic state snapshot has invalid %s" % field_name)

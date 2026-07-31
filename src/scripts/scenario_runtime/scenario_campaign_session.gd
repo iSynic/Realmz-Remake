@@ -42,8 +42,14 @@ var semantic_state: ScenarioSemanticState
 var semantic_services: Object
 var triggers_by_id: Dictionary = {}
 var encounters_by_id: Dictionary = {}
+var event_triggers_by_id: Dictionary = {}
+var scheduled_triggers_by_id: Dictionary = {}
 var active_trigger_id := ""
 var active_encounter_id := ""
+var active_trigger_kind := ""
+var active_scheduled_marker := -1
+var pending_trigger_queue: Array = []
+var active_dispatch_count := 0
 var semantic_mode := false
 var semantic_last_error := ""
 
@@ -196,6 +202,8 @@ func configure_remake_bundle(
 	var vm_triggers := _build_vm_triggers(logic)
 	if vm_triggers.is_empty() and (
 		not logic.get("mapTriggers", []).is_empty()
+		or not logic.get("eventTriggers", []).is_empty()
+		or not logic.get("scheduledTriggers", []).is_empty()
 		or not logic.get("encounters", []).is_empty()
 	):
 		return false
@@ -260,6 +268,8 @@ func begin_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 	)
 	active_trigger_id = trigger_id
 	active_encounter_id = ""
+	active_trigger_kind = "map"
+	active_scheduled_marker = -1
 	var execution_context := context.duplicate(true) \
 		if context is Dictionary else {}
 	execution_context["mapTrigger"] = trigger.duplicate(true)
@@ -317,6 +327,8 @@ func begin_encounter(
 	_set_vm_encounter(encounter_id, active_encounter)
 	active_encounter_id = encounter_id
 	active_trigger_id = ""
+	active_trigger_kind = "encounter"
+	active_scheduled_marker = -1
 	var execution_context := context.duplicate(true) \
 		if context is Dictionary else {}
 	execution_context["encounter"] = active_encounter.duplicate(true)
@@ -329,10 +341,110 @@ func begin_encounter(
 	return _finish_if_complete(interpreter.run(interpreter))
 
 
+func begin_event_dispatch(event_name: String, context := {}) -> Dictionary:
+	if not semantic_mode or interpreter == null:
+		return _semantic_error("Remake Authored session is not configured")
+	if interpreter.pending_command != null or not pending_trigger_queue.is_empty():
+		return _semantic_error("Another scenario dispatch is already active")
+	var normalized_event := _normalize_event_name(event_name)
+	var event_context := context.duplicate(true) if context is Dictionary else {}
+	event_context["event"] = normalized_event
+	var only_trigger_id := str(event_context.get("onlyTriggerId", ""))
+	var candidates: Array = []
+	for trigger_value: Variant in event_triggers_by_id.values():
+		var trigger: Dictionary = trigger_value
+		if bool(trigger.get("enabled", true)) \
+				and str(trigger.get("event", "")) == normalized_event \
+				and (
+					only_trigger_id.is_empty()
+					or str(trigger.get("id", "")) == only_trigger_id
+				):
+			candidates.append(trigger)
+	candidates.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		var left_priority := int(left.get("priority", 0))
+		var right_priority := int(right.get("priority", 0))
+		return (
+			left_priority < right_priority
+			if left_priority != right_priority
+			else str(left.get("id", "")) < str(right.get("id", ""))
+		)
+	)
+	pending_trigger_queue = candidates.map(
+		func(trigger: Dictionary) -> Dictionary:
+			return {
+				"kind": "event",
+				"id": str(trigger.get("id", "")),
+				"context": event_context.duplicate(true),
+				"scheduledMarker": -1,
+			}
+	)
+	active_dispatch_count = 0
+	return _start_next_queued_trigger()
+
+
+func begin_scheduled_dispatch(clock: Dictionary, context := {}) -> Dictionary:
+	if not semantic_mode or interpreter == null:
+		return _semantic_error("Remake Authored session is not configured")
+	if interpreter.pending_command != null or not pending_trigger_queue.is_empty():
+		return _semantic_error("Another scenario dispatch is already active")
+	var clock_validation := _validate_schedule_clock(clock)
+	if str(clock_validation.get("status", "")) == "error":
+		return clock_validation
+	var schedule_context := context.duplicate(true) if context is Dictionary else {}
+	schedule_context["clock"] = clock.duplicate(true)
+	schedule_context["location"] = _semantic_location()
+	var only_trigger_id := str(schedule_context.get("onlyTriggerId", ""))
+	var candidates: Array = []
+	for trigger_value: Variant in scheduled_triggers_by_id.values():
+		var trigger: Dictionary = trigger_value
+		if not bool(trigger.get("enabled", true)) \
+				or not _scheduled_location_matches(trigger) \
+				or (
+					not only_trigger_id.is_empty()
+					and str(trigger.get("id", "")) != only_trigger_id
+				):
+			continue
+		var marker := semantic_state.scheduled_due_marker(trigger, clock)
+		if marker < 0:
+			continue
+		candidates.append({
+			"trigger": trigger,
+			"marker": marker,
+		})
+	candidates.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+		var left_trigger: Dictionary = left.get("trigger", {})
+		var right_trigger: Dictionary = right.get("trigger", {})
+		var left_priority := int(left_trigger.get("priority", 0))
+		var right_priority := int(right_trigger.get("priority", 0))
+		return (
+			left_priority < right_priority
+			if left_priority != right_priority
+			else str(left_trigger.get("id", "")) < str(
+				right_trigger.get("id", "")
+			)
+		)
+	)
+	pending_trigger_queue = candidates.map(
+		func(candidate: Dictionary) -> Dictionary:
+			var trigger: Dictionary = candidate.get("trigger", {})
+			return {
+				"kind": "scheduled",
+				"id": str(trigger.get("id", "")),
+				"context": schedule_context.duplicate(true),
+				"scheduledMarker": int(candidate.get("marker", -1)),
+			}
+	)
+	active_dispatch_count = 0
+	return _start_next_queued_trigger()
+
+
 func resume_remake_command(response: Dictionary) -> Dictionary:
 	if not semantic_mode or interpreter == null:
 		return _semantic_error("Remake Authored session is not configured")
-	return _finish_if_complete(interpreter.resume(response, interpreter))
+	var result := _finish_if_complete(interpreter.resume(response, interpreter))
+	if host != null and host.has_method("_schedule_event_queue_drain"):
+		host.call_deferred("_schedule_event_queue_drain")
+	return result
 
 
 func run_map_trigger(trigger_id: String, context := {}) -> Dictionary:
@@ -354,6 +466,32 @@ func run_encounter(
 	start_node_id := ""
 ) -> Dictionary:
 	var result := begin_encounter(encounter_id, context, start_node_id)
+	while str(result.get("status", "")) == "yield":
+		var response: Dictionary = await command_router.route(
+			str(result.get("commandId", "")),
+			result.get("request", {})
+		)
+		if str(response.get("status", "")) == "error":
+			return response
+		result = resume_remake_command(response)
+	return result
+
+
+func run_event(event_name: String, context := {}) -> Dictionary:
+	var result := begin_event_dispatch(event_name, context)
+	while str(result.get("status", "")) == "yield":
+		var response: Dictionary = await command_router.route(
+			str(result.get("commandId", "")),
+			result.get("request", {})
+		)
+		if str(response.get("status", "")) == "error":
+			return response
+		result = resume_remake_command(response)
+	return result
+
+
+func run_scheduled(clock: Dictionary, context := {}) -> Dictionary:
+	var result := begin_scheduled_dispatch(clock, context)
 	while str(result.get("status", "")) == "yield":
 		var response: Dictionary = await command_router.route(
 			str(result.get("commandId", "")),
@@ -398,6 +536,9 @@ func state_summary() -> Dictionary:
 		"campaignKind": REMAKE_AUTHORED_KIND,
 		"activeTriggerId": active_trigger_id,
 		"activeEncounterId": active_encounter_id,
+		"activeTriggerKind": active_trigger_kind,
+		"activeScheduledMarker": active_scheduled_marker,
+		"pendingTriggerQueue": pending_trigger_queue.duplicate(true),
 		"location": _semantic_location(),
 		"semanticState": (
 			semantic_state.snapshot() if semantic_state != null else {}
@@ -436,7 +577,11 @@ func activate_start_location(force_reload := false) -> Dictionary:
 	if semantic_services == null \
 			or not semantic_services.has_method("activate_classic_start"):
 		return _semantic_error("Remake Authored map services are unavailable")
-	var location := semantic_bundle.start_location()
+	var location := (
+		_semantic_location()
+		if force_reload and not _semantic_location().is_empty()
+		else semantic_bundle.start_location()
+	)
 	if location.is_empty():
 		return _semantic_error("Remake Authored campaign start is invalid")
 	semantic_state.set_location(
@@ -449,15 +594,61 @@ func activate_start_location(force_reload := false) -> Dictionary:
 		location.get("levelType", "land"),
 		location.get("levelIndex", 0),
 	]
-	if force_reload or semantic_state.current_map_entry(map_id) == 0:
+	if not force_reload and semantic_state.current_map_entry(map_id) == 0:
 		semantic_state.begin_map_entry(map_id)
 	var result: Variant = semantic_services.call(
 		"activate_classic_start",
 		location
 	)
-	return result if result is Dictionary else {
+	var normalized: Dictionary = result if result is Dictionary else {
 		"status": "error",
 		"message": "Remake Authored campaign start returned an invalid result",
+	}
+	if (
+		str(normalized.get("status", "")) != "error"
+		and host != null
+		and not force_reload
+	):
+		host.call_deferred("emit_lifecycle_event", "campaign-start", {
+			"event": "campaign-start",
+			"campaignId": str(semantic_bundle.manifest.get("id", "")),
+		})
+		host.call_deferred("emit_lifecycle_event", "map-enter", {
+			"event": "map-enter",
+			"location": location.duplicate(true),
+		})
+	return normalized
+
+
+func on_native_time_advanced(
+	previous_time: int,
+	current_time: int,
+	native_location: Dictionary = {}
+) -> Dictionary:
+	if not semantic_mode:
+		return super.on_native_time_advanced(
+			previous_time,
+			current_time,
+			native_location
+		)
+	var location := native_location.duplicate(true)
+	var defer_dispatch := bool(location.get("deferDispatch", false))
+	location.erase("deferDispatch")
+	if not location.is_empty():
+		var location_result := sync_native_location(location)
+		if str(location_result.get("status", "")) == "error":
+			return location_result
+	if not defer_dispatch and host != null:
+		host.call_deferred("emit_lifecycle_event", "time-advanced", {
+			"event": "time-advanced",
+			"previousTime": previous_time,
+			"currentTime": current_time,
+			"elapsedSeconds": maxi(0, current_time - previous_time),
+			"location": location,
+		})
+	return {
+		"status": "ok",
+		"deferred": defer_dispatch,
 	}
 
 
@@ -506,8 +697,14 @@ func clear() -> void:
 	semantic_services = null
 	triggers_by_id.clear()
 	encounters_by_id.clear()
+	event_triggers_by_id.clear()
+	scheduled_triggers_by_id.clear()
 	active_trigger_id = ""
 	active_encounter_id = ""
+	active_trigger_kind = ""
+	active_scheduled_marker = -1
+	pending_trigger_queue.clear()
+	active_dispatch_count = 0
 	semantic_mode = false
 	semantic_last_error = ""
 
@@ -534,6 +731,54 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 				_script_call(str(default_variant.get("behaviorId", ""))),
 			],
 		}
+	for trigger_value: Variant in logic.get("eventTriggers", []):
+		if not (trigger_value is Dictionary):
+			_semantic_fail("Remake Event Trigger entry is invalid")
+			return {}
+		var trigger: Dictionary = trigger_value
+		var trigger_id := str(trigger.get("id", ""))
+		if trigger_id.is_empty() or result.has(trigger_id):
+			_semantic_fail("Semantic trigger IDs must be unique")
+			return {}
+		var event_name := _normalize_event_name(str(trigger.get("event", "")))
+		if event_name.is_empty():
+			_semantic_fail("Event Trigger '%s' has an invalid event" % trigger_id)
+			return {}
+		var behavior_id := str(trigger.get("behaviorId", ""))
+		if behavior_id.is_empty():
+			_semantic_fail("Event Trigger '%s' has no behavior" % trigger_id)
+			return {}
+		trigger["event"] = event_name
+		event_triggers_by_id[trigger_id] = trigger.duplicate(true)
+		result[trigger_id] = {
+			"id": trigger_id,
+			"actions": [_script_call(behavior_id)],
+		}
+	for trigger_value: Variant in logic.get("scheduledTriggers", []):
+		if not (trigger_value is Dictionary):
+			_semantic_fail("Remake Scheduled Trigger entry is invalid")
+			return {}
+		var trigger: Dictionary = trigger_value
+		var trigger_id := str(trigger.get("id", ""))
+		if trigger_id.is_empty() or result.has(trigger_id):
+			_semantic_fail("Semantic trigger IDs must be unique")
+			return {}
+		var schedule_validation := _validate_schedule(trigger.get("schedule", {}))
+		if str(schedule_validation.get("status", "")) == "error":
+			_semantic_fail(
+				"Scheduled Trigger '%s': %s"
+				% [trigger_id, schedule_validation.get("message", "invalid schedule")]
+			)
+			return {}
+		var behavior_id := str(trigger.get("behaviorId", ""))
+		if behavior_id.is_empty():
+			_semantic_fail("Scheduled Trigger '%s' has no behavior" % trigger_id)
+			return {}
+		scheduled_triggers_by_id[trigger_id] = trigger.duplicate(true)
+		result[trigger_id] = {
+			"id": trigger_id,
+			"actions": [_script_call(behavior_id)],
+		}
 	for encounter_value: Variant in logic.get("encounters", []):
 		if not (encounter_value is Dictionary):
 			_semantic_fail("Modern Encounter entry is invalid")
@@ -554,6 +799,162 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 			"actions": [_encounter_run(encounter)],
 		}
 	return result
+
+
+func _start_next_queued_trigger() -> Dictionary:
+	while not pending_trigger_queue.is_empty():
+		var queued_value: Variant = pending_trigger_queue.pop_front()
+		if not (queued_value is Dictionary):
+			continue
+		var queued: Dictionary = queued_value
+		var kind := str(queued.get("kind", ""))
+		var trigger_id := str(queued.get("id", ""))
+		var trigger: Dictionary = (
+			event_triggers_by_id.get(trigger_id, {})
+			if kind == "event"
+			else scheduled_triggers_by_id.get(trigger_id, {})
+		)
+		if trigger.is_empty() or not bool(trigger.get("enabled", true)):
+			continue
+		var condition_id := _optional_id(trigger.get("conditionBehaviorId"))
+		var context: Dictionary = (
+			queued.get("context", {}).duplicate(true)
+			if queued.get("context", {}) is Dictionary
+			else {}
+		)
+		context["trigger"] = trigger.duplicate(true)
+		context["triggerKind"] = kind
+		if not condition_id.is_empty():
+			var condition := _evaluate_condition(
+				condition_id,
+				context,
+				"%s Trigger '%s' condition"
+					% [kind.capitalize(), trigger.get("name", trigger_id)]
+			)
+			if str(condition.get("status", "")) == "error":
+				pending_trigger_queue.clear()
+				return condition
+			if not bool(condition.get("value", false)):
+				continue
+		_set_vm_behavior(trigger_id, str(trigger.get("behaviorId", "")))
+		active_trigger_id = trigger_id
+		active_encounter_id = ""
+		active_trigger_kind = kind
+		active_scheduled_marker = int(queued.get("scheduledMarker", -1))
+		context["activeTriggerId"] = trigger_id
+		var started := interpreter.start(trigger_id, 0, context)
+		if str(started.get("status", "")) != "ok":
+			pending_trigger_queue.clear()
+			return started
+		active_dispatch_count += 1
+		var result := interpreter.run(interpreter)
+		if str(result.get("status", "")) in ["complete", "halt"]:
+			_mark_active_execution_complete()
+			continue
+		return result
+	var handled := active_dispatch_count > 0
+	active_dispatch_count = 0
+	return {
+		"status": "complete",
+		"reason": "dispatch-complete",
+		"handled": handled,
+	}
+
+
+func _validate_schedule(value: Variant) -> Dictionary:
+	if not (value is Dictionary):
+		return _semantic_error("schedule must be an object")
+	var schedule: Dictionary = value
+	match str(schedule.get("kind", "")):
+		"absolute":
+			var day := int(schedule.get("day", -1))
+			var minute := int(schedule.get("minute", -1))
+			if day < 1 or minute < 0 or minute >= 1440:
+				return _semantic_error(
+					"absolute schedule requires a scenario day of 1 or later and a minute from 0 to 1439"
+				)
+		"elapsed":
+			if int(schedule.get("elapsedMinutes", -1)) < 0:
+				return _semantic_error(
+					"elapsed schedule requires non-negative elapsed minutes"
+				)
+		"recurring":
+			if int(schedule.get("intervalMinutes", 0)) <= 0:
+				return _semantic_error(
+					"recurring schedule requires a positive interval"
+				)
+		_:
+			return _semantic_error("schedule kind is unsupported")
+	return {"status": "ok"}
+
+
+func _validate_schedule_clock(clock: Variant) -> Dictionary:
+	if not (clock is Dictionary):
+		return _semantic_error("Schedule clock must be an object")
+	var value: Dictionary = clock
+	var elapsed := int(value.get("elapsedMinutes", -1))
+	var day := int(value.get("day", -1))
+	var minute := int(value.get("minute", -1))
+	if elapsed < 0 and (day < 0 or minute < 0 or minute >= 1440):
+		return _semantic_error(
+			"Schedule clock requires elapsed minutes or a valid day and minute"
+		)
+	return {"status": "ok"}
+
+
+func _scheduled_location_matches(trigger: Dictionary) -> bool:
+	var location_value: Variant = trigger.get("location")
+	if location_value == null:
+		return true
+	if not (location_value is Dictionary):
+		return false
+	var required: Dictionary = location_value
+	var current := _semantic_location()
+	var current_map_id := "%s:%d" % [
+		current.get("levelType", "land"),
+		current.get("levelIndex", 0),
+	]
+	if str(required.get("mapId", "")) != current_map_id:
+		return false
+	var x := int(current.get("x", 0))
+	var y := int(current.get("y", 0))
+	var left := int(required.get("x", 0))
+	var top := int(required.get("y", 0))
+	var width := maxi(1, int(required.get("width", 1)))
+	var height := maxi(1, int(required.get("height", 1)))
+	return x >= left and x < left + width and y >= top and y < top + height
+
+
+func _normalize_event_name(value: String) -> String:
+	var normalized := value.strip_edges().to_lower()
+	var aliases := {
+		"campaign-complete": "campaign-end",
+		"party-moved": "movement",
+		"rest-start": "rest-start",
+		"rest-complete": "rest",
+		"time-advanced": "time",
+		"battle-complete": "battle-end",
+		"character-defeated": "character-defeat",
+		"party-defeated": "party-defeat",
+	}
+	normalized = str(aliases.get(normalized, normalized))
+	return normalized if normalized in [
+		"campaign-start",
+		"campaign-end",
+		"map-enter",
+		"map-leave",
+		"movement",
+		"rest-start",
+		"rest",
+		"time",
+		"battle-start",
+		"battle-end",
+		"character-defeat",
+		"party-defeat",
+		"spell",
+		"item",
+		"combat-round",
+	] else ""
 
 
 func _select_named_variant(
@@ -633,17 +1034,41 @@ func _set_vm_encounter(encounter_id: String, encounter: Dictionary) -> void:
 
 
 func _finish_if_complete(result: Dictionary) -> Dictionary:
-	if str(result.get("status", "")) in ["complete", "halt"] \
-			and triggers_by_id.has(active_trigger_id):
-		semantic_state.mark_trigger_completed(
-			triggers_by_id[active_trigger_id]
+	if str(result.get("status", "")) not in ["complete", "halt"]:
+		return result
+	var completed_dispatch := active_trigger_kind in ["event", "scheduled"]
+	_mark_active_execution_complete()
+	if not pending_trigger_queue.is_empty():
+		return _start_next_queued_trigger()
+	if completed_dispatch:
+		var handled := active_dispatch_count > 0
+		active_dispatch_count = 0
+		return {
+			"status": "complete",
+			"reason": "dispatch-complete",
+			"handled": handled,
+		}
+	return result
+
+
+func _mark_active_execution_complete() -> void:
+	if active_trigger_kind == "map" and triggers_by_id.has(active_trigger_id):
+		semantic_state.mark_trigger_completed(triggers_by_id[active_trigger_id])
+	elif active_trigger_kind == "scheduled" \
+			and scheduled_triggers_by_id.has(active_trigger_id):
+		semantic_state.mark_scheduled_trigger(
+			active_trigger_id,
+			active_scheduled_marker
 		)
-	if str(result.get("status", "")) in ["complete", "halt"] \
+	if active_trigger_kind == "encounter" \
 			and encounters_by_id.has(active_encounter_id):
 		semantic_state.mark_encounter_completed(
 			encounters_by_id[active_encounter_id]
 		)
-	return result
+	active_trigger_id = ""
+	active_encounter_id = ""
+	active_trigger_kind = ""
+	active_scheduled_marker = -1
 
 
 func _make_semantic_save() -> Dictionary:
@@ -678,6 +1103,16 @@ func _make_semantic_save() -> Dictionary:
 			"services": service_snapshot,
 			"activeTriggerId": active_trigger_id,
 			"activeEncounterId": active_encounter_id,
+			"activeTriggerKind": active_trigger_kind,
+			"activeScheduledMarker": active_scheduled_marker,
+			"pendingTriggerQueue": pending_trigger_queue.duplicate(true),
+			"activeDispatchCount": active_dispatch_count,
+			"lifecycleEventQueue": (
+				host.lifecycle_event_queue_snapshot()
+				if host != null
+				and host.has_method("lifecycle_event_queue_snapshot")
+				else []
+			),
 		},
 		"pendingCommand": vm_snapshot.get("pendingCommand"),
 		"resolvedGameplayRules": {
@@ -740,6 +1175,21 @@ func _restore_semantic_save(payload: Variant) -> Dictionary:
 		return vm_result
 	active_trigger_id = str(session_state.get("activeTriggerId", ""))
 	active_encounter_id = str(session_state.get("activeEncounterId", ""))
+	active_trigger_kind = str(session_state.get("activeTriggerKind", ""))
+	active_scheduled_marker = int(
+		session_state.get("activeScheduledMarker", -1)
+	)
+	var saved_queue: Variant = session_state.get("pendingTriggerQueue", [])
+	if not (saved_queue is Array):
+		return _semantic_error("Saved scenario trigger queue is invalid")
+	pending_trigger_queue = saved_queue.duplicate(true)
+	active_dispatch_count = int(session_state.get("activeDispatchCount", 0))
+	if host != null and host.has_method("restore_lifecycle_event_queue"):
+		var event_queue_result: Dictionary = host.restore_lifecycle_event_queue(
+			session_state.get("lifecycleEventQueue", [])
+		)
+		if str(event_queue_result.get("status", "")) == "error":
+			return event_queue_result
 	return {"status": "ok"}
 
 
