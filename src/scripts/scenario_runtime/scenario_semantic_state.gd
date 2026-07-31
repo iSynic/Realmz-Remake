@@ -8,6 +8,7 @@ var completed_triggers: Dictionary = {}
 var completed_map_entries: Dictionary = {}
 var map_entry_sequences: Dictionary = {}
 var rng_state := 1
+var location: Dictionary = {}
 
 
 func configure(package_hash: String) -> void:
@@ -15,6 +16,7 @@ func configure(package_hash: String) -> void:
 	completed_triggers.clear()
 	completed_map_entries.clear()
 	map_entry_sequences.clear()
+	location.clear()
 	rng_state = 1
 	if package_hash.length() >= 8:
 		rng_state = maxi(1, package_hash.substr(0, 8).hex_to_int() & 0x7fffffff)
@@ -26,6 +28,20 @@ func get_quest_value(quest_id: int) -> int:
 
 func set_quest_value(quest_id: int, value: int) -> void:
 	quest_values[absi(quest_id)] = clampi(value, -127, 127)
+
+
+func set_location(
+	level_type: String,
+	level_index: int,
+	x: int,
+	y: int
+) -> void:
+	location = {
+		"levelType": level_type,
+		"levelIndex": level_index,
+		"x": x,
+		"y": y,
+	}
 
 
 func begin_map_entry(map_id: String) -> int:
@@ -80,6 +96,7 @@ func snapshot() -> Dictionary:
 		"completedMapEntries": completed_map_entries.duplicate(true),
 		"mapEntrySequences": map_entry_sequences.duplicate(true),
 		"rngState": rng_state,
+		"location": location.duplicate(true),
 	}
 
 
@@ -96,6 +113,7 @@ func restore(value: Variant) -> Dictionary:
 	completed_map_entries = saved["completedMapEntries"].duplicate(true)
 	map_entry_sequences = saved["mapEntrySequences"].duplicate(true)
 	rng_state = int(saved["rngState"])
+	location = saved.get("location", {}).duplicate(true)
 	return {"status": "ok"}
 
 
@@ -115,6 +133,8 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 			return _invalid("Semantic state snapshot has invalid %s" % field_name)
 	if not (saved.get("rngState") is int):
 		return _invalid("Semantic state snapshot has invalid RNG state")
+	if not (saved.get("location", {}) is Dictionary):
+		return _invalid("Semantic state snapshot has invalid location")
 	return {"valid": true}
 
 

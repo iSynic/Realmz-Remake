@@ -603,7 +603,14 @@ func _gameplay_domain_label(domain: String) -> String:
 func _campaign_display_name(campaign_name: String, selection_rules: Variant) -> String:
 	if selection_rules is Dictionary:
 		if bool(selection_rules.get("preview", false)):
-			return "%s — Classic" % selection_rules.get("title", campaign_name)
+			return "%s — %s" % [
+				selection_rules.get("title", campaign_name),
+				(
+					"Remake Authored"
+					if bool(selection_rules.get("remakeAuthored", false))
+					else "Classic"
+				),
+			]
 		return "%s — Classic: %s" % [
 			selection_rules.get("title", campaign_name),
 			selection_rules.get("readinessState", "Invalid"),

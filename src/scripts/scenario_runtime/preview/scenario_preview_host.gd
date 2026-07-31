@@ -3,7 +3,7 @@ extends Node
 
 const PROTOCOL_VERSION := 1
 const InstallScript = preload(
-	"res://scripts/classic_runtime/classic_campaign_install.gd"
+	"res://scripts/scenario_runtime/scenario_campaign_install.gd"
 )
 const MapMaterializerScript = preload(
 	"res://scripts/classic_runtime/classic_map_materializer.gd"
@@ -20,7 +20,7 @@ var port := 0
 var nonce := ""
 var package_directory := ""
 var profile_root := ""
-var install: ClassicCampaignInstall
+var install: Object
 var campaign_panel: Node
 var session: ClassicCampaignSession
 var _connected := false
@@ -189,7 +189,7 @@ func _load_package(path: String, request_id: String) -> void:
 	_evidence_index.clear()
 	Paths.campaignsfolderpath = normalized.get_base_dir() + "/"
 	GameGlobal.clear_classic_campaign_install_cache(normalized.get_file())
-	var rules := install.selection_rules()
+	var rules: Dictionary = install.selection_rules()
 	_respond(request_id, {
 		"status": "ok",
 		"packageHash": install.bundle.package_hash(),
@@ -234,7 +234,7 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 		_launching = false
 		_respond(request_id, {"status": "error", "message": "Preview package is not loaded"})
 		return
-	var rules := install.selection_rules()
+	var rules: Dictionary = install.selection_rules()
 	if not bool(rules.get("valid", false)):
 		_launching = false
 		_respond(request_id, {
@@ -272,19 +272,23 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 	if not session.host.command_finished.is_connected(_on_command_finished):
 		session.host.command_finished.connect(_on_command_finished)
 	var kind := str(entry.get("kind", "start"))
-	if kind == "ap":
+	if kind in ["ap", "map-trigger"]:
 		var trigger_id := str(entry.get("triggerId", ""))
 		if trigger_id.is_empty() or not session.host.has_trigger(trigger_id):
 			_launching = false
 			_respond(request_id, {
 				"status": "error",
-				"message": "Preview action point is unavailable",
+				"message": (
+					"Preview Map Trigger is unavailable"
+					if kind == "map-trigger"
+					else "Preview action point is unavailable"
+				),
 			})
 			return
 		await _run_preview_trigger(trigger_id, int(entry.get("slot", 0)))
 	elif kind == "battle":
 		var battle_id := int(entry.get("battleId", -1))
-		if not install.bundle.battles_by_id.has(battle_id):
+		if install.bundle.get_battle(battle_id).is_empty():
 			_launching = false
 			_respond(request_id, {
 				"status": "error",
@@ -912,8 +916,29 @@ func _entry_points() -> Dictionary:
 			"levelType": trigger.get("levelType", ""),
 			"levelIndex": trigger.get("levelIndex", 0),
 		})
+	var map_triggers: Array[Dictionary] = []
+	for trigger: Variant in install.bundle.documents.get(
+		"remakeLogic",
+		{}
+	).get("mapTriggers", []):
+		if trigger is Dictionary:
+			map_triggers.append({
+				"id": trigger.get("id", ""),
+				"name": trigger.get("name", ""),
+				"location": trigger.get("location", {}),
+				"event": trigger.get("event", "enter"),
+			})
 	var battles: Array[Dictionary] = []
-	for battle: Variant in install.bundle.documents.get("encounters", {}).get("battles", []):
+	var battle_values: Variant = install.bundle.documents.get(
+		"encounters",
+		{}
+	).get("battles", [])
+	if battle_values.is_empty():
+		battle_values = install.bundle.documents.get("content", {}).get(
+			"battles",
+			[]
+		)
+	for battle: Variant in battle_values:
 		battles.append({"id": battle.get("id", 0), "name": battle.get("name", "")})
 	var behavior_entries: Dictionary = {
 		"action": [],
@@ -958,6 +983,7 @@ func _entry_points() -> Dictionary:
 	return {
 		"start": install.bundle.get_start(),
 		"actionPoints": action_points,
+		"mapTriggers": map_triggers,
 		"battles": battles,
 		"behaviors": behavior_entries,
 	}

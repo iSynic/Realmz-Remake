@@ -25,6 +25,9 @@ const SemanticStateScript = preload(
 const PreviewServicesScript = preload(
 	"res://scripts/scenario_runtime/preview/scenario_semantic_preview_services.gd"
 )
+const SemanticHostScript = preload(
+	"res://scripts/scenario_runtime/scenario_semantic_runtime_host.gd"
+)
 
 const SUPPORTED_CLASSIC_KINDS := [
 	"classic-interpreted",
@@ -43,6 +46,46 @@ var semantic_mode := false
 var semantic_last_error := ""
 
 
+static func validate_save_payload(
+	payload: Variant,
+	expected_campaign_id := "",
+	expected_package_hash := "",
+	expected_script_contract := {},
+	expected_campaign_kind := ""
+) -> Dictionary:
+	if payload is Dictionary \
+			and str(payload.get("campaignKind", "")) == REMAKE_AUTHORED_KIND:
+		var validation := SaveContractScript.validate(payload)
+		if not bool(validation.get("valid", false)):
+			return {
+				"status": "error",
+				"message": validation.get("message", "Scenario save is invalid"),
+			}
+		if not expected_campaign_id.is_empty() \
+				and str(payload.get("campaignId", "")) != expected_campaign_id:
+			return _semantic_static_error(
+				"Scenario save belongs to a different campaign"
+			)
+		if not expected_package_hash.is_empty() \
+				and str(payload.get("packageHash", "")) != expected_package_hash:
+			return _semantic_static_error(
+				"Scenario save belongs to a different campaign package"
+			)
+		if not expected_campaign_kind.is_empty() \
+				and str(payload.get("campaignKind", "")) != expected_campaign_kind:
+			return _semantic_static_error(
+				"Scenario save belongs to a different campaign kind"
+			)
+		return {"status": "ok"}
+	return ClassicCampaignSession.validate_save_payload(
+		payload,
+		expected_campaign_id,
+		expected_package_hash,
+		expected_script_contract,
+		expected_campaign_kind
+	)
+
+
 func load_installed_campaign(
 	campaigns_directory: String,
 	campaign_name: String,
@@ -56,6 +99,7 @@ func load_installed_campaign(
 	)
 	if manifest_kind == REMAKE_AUTHORED_KIND:
 		clear()
+		self.command_adapter = command_adapter
 		if not _safe_campaign_name(campaign_name):
 			return _semantic_error("Campaign name is invalid")
 		var loaded_bundle := BundleScript.new()
@@ -119,6 +163,8 @@ func configure_remake_bundle(
 		if runtime_services != null
 		else PreviewServicesScript.new()
 	)
+	if semantic_services.has_method("configure_classic_bundle"):
+		semantic_services.call("configure_classic_bundle", semantic_bundle)
 	var start: Variant = semantic_bundle.documents.get(
 		"scenario",
 		{}
@@ -129,6 +175,12 @@ func configure_remake_bundle(
 			start if start is Dictionary else {}
 		)
 	var location := _semantic_location()
+	semantic_state.set_location(
+		str(location.get("levelType", "land")),
+		int(location.get("levelIndex", 0)),
+		int(location.get("x", 0)),
+		int(location.get("y", 0))
+	)
 	semantic_state.begin_map_entry(
 		"%s:%d" % [
 			location.get("levelType", "land"),
@@ -156,6 +208,9 @@ func configure_remake_bundle(
 	if str(ports_result.get("status", "")) != "ok":
 		return _semantic_fail(str(ports_result.get("message", "")))
 	command_router = ports_result["router"]
+	host = SemanticHostScript.new()
+	add_child(host)
+	host.configure(self)
 	return true
 
 
@@ -225,7 +280,10 @@ func make_save_payload() -> Dictionary:
 func make_save_result() -> Dictionary:
 	if not semantic_mode:
 		return super.make_save_result()
-	return _make_semantic_save()
+	var result := _make_semantic_save()
+	if str(result.get("status", "")) == "ok":
+		result["payload"] = result.get("save", {}).duplicate(true)
+	return result
 
 
 func restore_save_payload(payload: Dictionary) -> Dictionary:
@@ -259,6 +317,88 @@ func state_summary() -> Dictionary:
 			else null
 		),
 	}
+
+
+func validate_save_point() -> Dictionary:
+	if not semantic_mode:
+		return super.validate_save_point()
+	var result := _make_semantic_save()
+	return {"status": "ok"} if str(result.get("status", "")) == "ok" else result
+
+
+func apply_character_rules(party: Array) -> Dictionary:
+	if not semantic_mode:
+		return super.apply_character_rules(party)
+	if party.is_empty():
+		return _semantic_error("Select at least one character")
+	return {"status": "ok"}
+
+
+func activate_start_location(force_reload := false) -> Dictionary:
+	if not semantic_mode:
+		return super.activate_start_location(force_reload)
+	if semantic_services == null \
+			or not semantic_services.has_method("activate_classic_start"):
+		return _semantic_error("Remake Authored map services are unavailable")
+	var location := semantic_bundle.start_location()
+	if location.is_empty():
+		return _semantic_error("Remake Authored campaign start is invalid")
+	semantic_state.set_location(
+		str(location.get("levelType", "land")),
+		int(location.get("levelIndex", 0)),
+		int(location.get("x", 0)),
+		int(location.get("y", 0))
+	)
+	var map_id := "%s:%d" % [
+		location.get("levelType", "land"),
+		location.get("levelIndex", 0),
+	]
+	if force_reload or semantic_state.current_map_entry(map_id) == 0:
+		semantic_state.begin_map_entry(map_id)
+	var result: Variant = semantic_services.call(
+		"activate_classic_start",
+		location
+	)
+	return result if result is Dictionary else {
+		"status": "error",
+		"message": "Remake Authored campaign start returned an invalid result",
+	}
+
+
+func sync_native_location(location: Dictionary) -> Dictionary:
+	if not semantic_mode:
+		return super.sync_native_location(location)
+	var map_name := str(location.get("mapName", ""))
+	var level_type := "dungeon" if map_name.begins_with("mapd_") else "land"
+	var level_text := (
+		map_name.trim_prefix("mapd_")
+		if level_type == "dungeon"
+		else map_name.trim_prefix("map_")
+	)
+	if not level_text.is_valid_int():
+		return _semantic_error("Remake Authored save location is invalid")
+	semantic_state.set_location(
+		level_type,
+		int(level_text),
+		int(location.get("x", 0)),
+		int(location.get("y", 0))
+	)
+	return {"status": "ok"}
+
+
+func resume_saved_continuation() -> Dictionary:
+	if not semantic_mode:
+		return super.resume_saved_continuation()
+	if interpreter == null or interpreter.pending_command == null:
+		return {"status": "ok", "handled": false}
+	var pending := interpreter.last_result
+	var response: Dictionary = await command_router.route(
+		str(pending.get("commandId", "")),
+		pending.get("request", {})
+	)
+	if str(response.get("status", "")) == "error":
+		return response
+	return resume_remake_command(response)
 
 
 func clear() -> void:
@@ -385,6 +525,8 @@ func _make_semantic_save() -> Dictionary:
 	var payload := {
 		"schemaVersion": SaveContractScript.SCHEMA_VERSION,
 		"campaignId": str(semantic_bundle.manifest.get("id", "")),
+		"campaignKind": REMAKE_AUTHORED_KIND,
+		"implementationKind": IMPLEMENTATION_KIND,
 		"contentVersion": str(
 			semantic_bundle.manifest.get("contentVersion", "0.1.0")
 		),
@@ -511,6 +653,8 @@ func _validate_semantic_save_compatibility(saved: Dictionary) -> Dictionary:
 
 
 func _semantic_location() -> Dictionary:
+	if semantic_state != null and not semantic_state.location.is_empty():
+		return semantic_state.location.duplicate(true)
 	if semantic_services != null:
 		var value: Variant = semantic_services.get("location")
 		if value is Dictionary:
@@ -605,4 +749,8 @@ func _semantic_fail(message: String) -> bool:
 
 func _semantic_error(message: String) -> Dictionary:
 	semantic_last_error = message
+	return {"status": "error", "message": message}
+
+
+static func _semantic_static_error(message: String) -> Dictionary:
 	return {"status": "error", "message": message}

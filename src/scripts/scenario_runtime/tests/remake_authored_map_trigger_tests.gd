@@ -15,6 +15,9 @@ const CapabilityCatalogScript = preload(
 const PreviewServicesScript = preload(
 	"res://scripts/scenario_runtime/preview/scenario_semantic_preview_services.gd"
 )
+const MapMaterializerScript = preload(
+	"res://scripts/classic_runtime/classic_map_materializer.gd"
+)
 
 var failures := 0
 
@@ -37,6 +40,24 @@ func _test_map_trigger_execution_and_restore() -> void:
 	_expect(
 		session.configure_remake_bundle(bundle, services),
 		"generic campaign session configures Remake Authored logic"
+	)
+	_expect(
+		is_instance_valid(session.host)
+			and session.host.has_trigger("scenario.fixture.map-trigger"),
+		"generic runtime host exposes the authored Map Trigger"
+	)
+	var areas: Dictionary = MapMaterializerScript.new().call(
+		"_script_areas",
+		bundle,
+		{"levelType": "land", "index": 0},
+		{}
+	)
+	var authored_rectangles: Array = areas.get("ScriptRects", {}).values()
+	_expect(
+		authored_rectangles.size() == 1
+			and authored_rectangles[0].get("scriptToLoad") == "scenario.fixture.map-trigger"
+			and authored_rectangles[0].get("scriptRectangle") == [[2, 2], [2, 2]],
+		"native map materialization routes authored coordinates to the semantic session"
 	)
 	if not session.semantic_last_error.is_empty():
 		push_error(session.semantic_last_error)

@@ -379,6 +379,39 @@ func _script_areas(
 				"scriptToLoad": str(trigger.get("id", "")),
 				"chance": clampf(float(trigger.get("percent", 100)) / 100.0, 0.0, 1.0),
 			}
+	var authored_triggers: Variant = bundle.documents.get(
+		"remakeLogic",
+		{}
+	).get("mapTriggers", [])
+	if authored_triggers is Array:
+		for trigger_value: Variant in authored_triggers:
+			if not (trigger_value is Dictionary):
+				continue
+			var trigger: Dictionary = trigger_value
+			if not bool(trigger.get("enabled", true)) \
+					or str(trigger.get("event", "enter")) != "enter":
+				continue
+			var location: Variant = trigger.get("location", {})
+			if not (location is Dictionary):
+				continue
+			var map_identity := "%s:%d" % [level_type, level_index]
+			if str(location.get("mapId", "")) != map_identity:
+				continue
+			var x := int(location.get("x", -1))
+			var y := int(location.get("y", -1))
+			var width := maxi(1, int(location.get("width", 1)))
+			var height := maxi(1, int(location.get("height", 1)))
+			if x < 0 or y < 0:
+				continue
+			var trigger_id := str(trigger.get("id", ""))
+			if trigger_id.is_empty():
+				continue
+			areas["RT%s" % trigger_id.md5_text().substr(0, 12)] = {
+				"scriptRectangle": [[x, y], [x + width - 1, y + height - 1]],
+				"scriptToLoad": trigger_id,
+				# The semantic session owns deterministic chance and repeat policy.
+				"chance": 1.0,
+			}
 
 	var rectangles: Variant = random_level.get("rects", [])
 	if rectangles is Array:

@@ -1,7 +1,7 @@
 extends NinePatchRect
 
 const ClassicCampaignInstallScript = preload(
-	"res://scripts/classic_runtime/classic_campaign_install.gd"
+	"res://scripts/scenario_runtime/scenario_campaign_install.gd"
 )
 const ClassicCharacterRulesScript = preload(
 	"res://scripts/classic_runtime/classic_character_rules.gd"

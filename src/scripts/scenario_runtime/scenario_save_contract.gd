@@ -5,6 +5,8 @@ const SCHEMA_VERSION := 6
 const REQUIRED_FIELDS := [
 	"schemaVersion",
 	"campaignId",
+	"campaignKind",
+	"implementationKind",
 	"contentVersion",
 	"packageHash",
 	"capabilityCatalogHash",
@@ -41,6 +43,14 @@ static func validate(payload: Variant) -> Dictionary:
 			return _error("Scenario save field '%s' must be an object" % object_field)
 	if not (payload.get("requiredPlugins") is Array):
 		return _error("Scenario save requiredPlugins must be an array")
+	if str(payload.get("campaignKind", "")) not in [
+		"classic-interpreted",
+		"classic-enhanced",
+		"remake-authored",
+	]:
+		return _error("Scenario save campaignKind is unsupported")
+	if str(payload.get("implementationKind", "")) != "scenario-interpreter":
+		return _error("Scenario save interpreter implementation is unsupported")
 	return {"valid": true, "message": ""}
 
 

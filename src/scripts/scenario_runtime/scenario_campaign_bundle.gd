@@ -29,12 +29,16 @@ const REQUIRED_AUTHORED_DOCUMENTS := [
 const FORBIDDEN_EXTENSIONS := [
 	".dll", ".dylib", ".exe", ".gdc", ".pck", ".so",
 ]
+const MATERIALIZED_RUNTIME_DIRECTORIES := [
+	"Bestiary", "Items", "Maps", "Tilesets",
+]
 
 var implementation: Object
 var root_directory := ""
 var manifest: Dictionary = {}
 var documents: Dictionary = {}
 var last_error := ""
+var spell_overrides_by_id: Dictionary = {}
 
 
 func load_from_directory(directory: String) -> bool:
@@ -82,7 +86,110 @@ func resolve_package_path(relative_path: String) -> String:
 	return root_directory.path_join(relative_path)
 
 
+func get_start() -> Dictionary:
+	if implementation != null:
+		return implementation.get_start()
+	var startup: Variant = documents.get("scenario", {}).get("startup", {})
+	if not (startup is Dictionary):
+		return {}
+	var parsed := _parse_map_id(str(startup.get("mapId", "land:0")))
+	if parsed.is_empty():
+		return {}
+	return {
+		"levelType": parsed["levelType"],
+		"levelIndex": parsed["levelIndex"],
+		"x": int(startup.get("x", 0)),
+		"y": int(startup.get("y", 0)),
+	}
+
+
+func start_location() -> Dictionary:
+	return get_start()
+
+
+func get_random_level(level_type: String, level_index: int) -> Dictionary:
+	if implementation != null:
+		return implementation.get_random_level(level_type, level_index)
+	for value: Variant in documents.get("maps", {}).get("randomLevels", []):
+		if not (value is Dictionary):
+			continue
+		var record: Dictionary = value
+		if str(record.get("levelType", "")) == level_type \
+				and int(record.get("levelIndex", record.get("index", -1))) == level_index:
+			return record
+	return {}
+
+
+func get_extra_code(record_id: int) -> Dictionary:
+	if implementation != null:
+		return implementation.get_extra_code(record_id)
+	return {}
+
+
+func get_message(message_id: int) -> Dictionary:
+	if implementation != null:
+		return implementation.get_message(message_id)
+	return _record_by_numeric_id(
+		documents.get("content", {}).get("messages", []),
+		absi(message_id)
+	)
+
+
+func get_battle(battle_id: int) -> Dictionary:
+	if implementation != null:
+		return implementation.get_battle(battle_id)
+	return _record_by_numeric_id(
+		documents.get("content", {}).get("battles", []),
+		absi(battle_id)
+	)
+
+
+func get_scenario_item(item_id: int) -> Dictionary:
+	if implementation != null:
+		return implementation.get_scenario_item(item_id)
+	return _record_by_numeric_id(
+		documents.get("content", {}).get("items", []),
+		absi(item_id)
+	)
+
+
+func get_item_text(item_id: int) -> Dictionary:
+	if implementation != null:
+		return implementation.get_item_text(item_id)
+	return _record_by_numeric_id(
+		documents.get("content", {}).get("itemTexts", []),
+		absi(item_id)
+	)
+
+
+func is_empty_scenario_item(item_id: int) -> bool:
+	if implementation != null:
+		return implementation.is_empty_scenario_item(item_id)
+	var record := get_scenario_item(item_id)
+	if record.is_empty():
+		return false
+	for key: Variant in record:
+		if str(key) in ["id", "itemId", "authored", "provenance", "rawBytes"]:
+			continue
+		var value: Variant = record[key]
+		if value is bool and value:
+			return false
+		if (value is int or value is float) and value != 0:
+			return false
+		if value is String and not value.strip_edges().is_empty():
+			return false
+		if (value is Array or value is Dictionary) and not value.is_empty():
+			return false
+	return get_item_text(item_id).is_empty()
+
+
 func _load_remake_authored() -> bool:
+	var forbidden_payload := _find_forbidden_payload(root_directory)
+	if not forbidden_payload.is_empty():
+		return _fail(
+			"Scenario package contains unsupported executable payload '%s'"
+				% forbidden_payload
+		)
 	var files: Variant = manifest.get("files")
 	if not (files is Dictionary):
 		return _fail("Scenario package file map is invalid")
@@ -122,6 +229,7 @@ func _load_remake_authored() -> bool:
 		)))
 	if not _validate_script_sources():
 		return false
+	_index_authored_rules()
 	return true
 
 
@@ -224,6 +332,9 @@ func _package_file_paths(directory: String, prefix := "") -> Variant:
 				return null
 			var relative_path := name if prefix.is_empty() else prefix.path_join(name)
 			if access.current_is_dir():
+				if prefix.is_empty() and name in MATERIALIZED_RUNTIME_DIRECTORIES:
+					name = access.get_next()
+					continue
 				var child: Variant = _package_file_paths(
 					directory.path_join(name),
 					relative_path
@@ -238,6 +349,37 @@ func _package_file_paths(directory: String, prefix := "") -> Variant:
 	access.list_dir_end()
 	result.sort()
 	return result
+
+
+func _find_forbidden_payload(directory: String, prefix := "") -> String:
+	var access := DirAccess.open(directory)
+	if access == null:
+		return ""
+	access.list_dir_begin()
+	var name := access.get_next()
+	while not name.is_empty():
+		if name not in [".", ".."]:
+			var relative_path := name if prefix.is_empty() else prefix.path_join(name)
+			if access.is_link(name):
+				access.list_dir_end()
+				return relative_path
+			if access.current_is_dir():
+				var child := _find_forbidden_payload(
+					directory.path_join(name),
+					relative_path
+				)
+				if not child.is_empty():
+					access.list_dir_end()
+					return child
+			else:
+				var lower := name.to_lower()
+				for extension: String in FORBIDDEN_EXTENSIONS:
+					if lower.ends_with(extension):
+						access.list_dir_end()
+						return relative_path
+		name = access.get_next()
+	access.list_dir_end()
+	return ""
 
 
 func _safe_relative_path(path: String) -> bool:
@@ -308,6 +450,40 @@ func _canonical_value(value: Variant) -> Variant:
 	return value
 
 
+func _index_authored_rules() -> void:
+	spell_overrides_by_id.clear()
+	for value: Variant in documents.get("rules", {}).get("spellOverrides", []):
+		if value is Dictionary:
+			var record: Dictionary = value
+			var record_id := int(record.get("spellId", record.get("id", 0)))
+			if record_id != 0:
+				spell_overrides_by_id[record_id] = record
+
+
+static func _record_by_numeric_id(records: Variant, record_id: int) -> Dictionary:
+	if not (records is Array):
+		return {}
+	for value: Variant in records:
+		if not (value is Dictionary):
+			continue
+		var record: Dictionary = value
+		if int(record.get("id", record.get("itemId", -1))) == record_id:
+			return record
+	return {}
+
+
+static func _parse_map_id(map_id: String) -> Dictionary:
+	var parts := map_id.split(":", false, 1)
+	if parts.size() != 2 \
+			or str(parts[0]) not in ["land", "dungeon"] \
+			or not str(parts[1]).is_valid_int():
+		return {}
+	return {
+		"levelType": str(parts[0]),
+		"levelIndex": int(parts[1]),
+	}
+
+
 func _reset() -> void:
 	if implementation != null and implementation.has_method("clear"):
 		implementation.call("clear")
@@ -315,6 +491,7 @@ func _reset() -> void:
 	root_directory = ""
 	manifest.clear()
 	documents.clear()
+	spell_overrides_by_id.clear()
 	last_error = ""
 
 

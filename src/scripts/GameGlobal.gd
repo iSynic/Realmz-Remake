@@ -15,7 +15,7 @@ const SHOP_RULES_PATH := "res://scripts/shop_rules.gd"
 const BATTLE_REWARD_RULES_PATH := "res://scripts/battle_reward_rules.gd"
 const MUSIC_SETTINGS_PATH := "res://scripts/audio/music_settings.gd"
 const CLASSIC_CAMPAIGN_INSTALL_PATH := (
-	"res://scripts/classic_runtime/classic_campaign_install.gd"
+	"res://scripts/scenario_runtime/scenario_campaign_install.gd"
 )
 const CLASSIC_CAMPAIGN_ADMISSION_PATH := (
 	"res://scripts/classic_runtime/classic_campaign_admission.gd"
@@ -1229,10 +1229,20 @@ func validate_classic_campaign_save(campaign_name: String, payload: Variant) -> 
 		}
 	var campaign_validation: Dictionary = ClassicCampaignSessionScript.validate_save_payload(
 		payload,
-		str(install.bundle.manifest.get("id", ""))
+		str(install.bundle.manifest.get("id", "")),
+		str(install.bundle.package_hash()),
+		{},
+		str(install.bundle.manifest.get("campaignKind", ""))
 	)
 	if str(campaign_validation.get("status", "")) != "ok":
 		return campaign_validation
+	if str(install.bundle.manifest.get("campaignKind", "")) == "remake-authored":
+		return ScenarioGodotServicesScript.validate_classic_save_state(
+			payload.get("interpreter", {}).get("ports", {}).get(
+				"core.inventory",
+				{}
+			)
+		)
 	return ScenarioGodotServicesScript.validate_classic_save_state(
 		payload.get("portState", {}).get("core.inventory", {})
 	)

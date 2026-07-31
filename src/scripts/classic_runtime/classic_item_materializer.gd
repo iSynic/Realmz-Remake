@@ -207,7 +207,10 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 	var content: Variant = bundle.documents.get("content", {})
 	if not (content is Dictionary):
 		return _fail("Classic content document is unavailable")
-	var scenario_items: Variant = content.get("scenarioItems", [])
+	var scenario_items: Variant = content.get(
+		"scenarioItems",
+		content.get("items", [])
+	)
 	if not (scenario_items is Array):
 		return _fail("Classic scenario item collection is malformed")
 	if scenario_items.is_empty():
