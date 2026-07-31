@@ -1,10 +1,11 @@
 class_name ScenarioSemanticState
 extends RefCounted
 
-const SNAPSHOT_SCHEMA_VERSION := 1
+const SNAPSHOT_SCHEMA_VERSION := 2
 
 var quest_values: Dictionary = {}
 var completed_triggers: Dictionary = {}
+var completed_encounters: Dictionary = {}
 var completed_map_entries: Dictionary = {}
 var map_entry_sequences: Dictionary = {}
 var rng_state := 1
@@ -14,6 +15,7 @@ var location: Dictionary = {}
 func configure(package_hash: String) -> void:
 	quest_values.clear()
 	completed_triggers.clear()
+	completed_encounters.clear()
 	completed_map_entries.clear()
 	map_entry_sequences.clear()
 	location.clear()
@@ -83,6 +85,19 @@ func mark_trigger_completed(trigger: Dictionary) -> void:
 		completed_map_entries[key] = true
 
 
+func can_run_encounter(encounter: Dictionary) -> bool:
+	if str(encounter.get("repeatPolicy", "always")) == "once":
+		return not bool(completed_encounters.get(
+			str(encounter.get("id", "")),
+			false
+		))
+	return true
+
+
+func mark_encounter_completed(encounter: Dictionary) -> void:
+	completed_encounters[str(encounter.get("id", ""))] = true
+
+
 func roll_percent() -> int:
 	rng_state = int((1103515245 * rng_state + 12345) & 0x7fffffff)
 	return (rng_state % 100) + 1
@@ -93,6 +108,7 @@ func snapshot() -> Dictionary:
 		"schemaVersion": SNAPSHOT_SCHEMA_VERSION,
 		"questValues": quest_values.duplicate(true),
 		"completedTriggers": completed_triggers.duplicate(true),
+		"completedEncounters": completed_encounters.duplicate(true),
 		"completedMapEntries": completed_map_entries.duplicate(true),
 		"mapEntrySequences": map_entry_sequences.duplicate(true),
 		"rngState": rng_state,
@@ -110,6 +126,7 @@ func restore(value: Variant) -> Dictionary:
 	var saved: Dictionary = value
 	quest_values = saved["questValues"].duplicate(true)
 	completed_triggers = saved["completedTriggers"].duplicate(true)
+	completed_encounters = saved["completedEncounters"].duplicate(true)
 	completed_map_entries = saved["completedMapEntries"].duplicate(true)
 	map_entry_sequences = saved["mapEntrySequences"].duplicate(true)
 	rng_state = int(saved["rngState"])
@@ -126,6 +143,7 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 	for field_name: String in [
 		"questValues",
 		"completedTriggers",
+		"completedEncounters",
 		"completedMapEntries",
 		"mapEntrySequences",
 	]:

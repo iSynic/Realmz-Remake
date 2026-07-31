@@ -41,7 +41,9 @@ var command_router: ScenarioCommandRouter
 var semantic_state: ScenarioSemanticState
 var semantic_services: Object
 var triggers_by_id: Dictionary = {}
+var encounters_by_id: Dictionary = {}
 var active_trigger_id := ""
+var active_encounter_id := ""
 var semantic_mode := false
 var semantic_last_error := ""
 
@@ -192,7 +194,10 @@ func configure_remake_bundle(
 	if not HandlerCatalogScript.register_all(registry):
 		return _semantic_fail(registry.last_error)
 	var vm_triggers := _build_vm_triggers(logic)
-	if vm_triggers.is_empty() and not logic.get("mapTriggers", []).is_empty():
+	if vm_triggers.is_empty() and (
+		not logic.get("mapTriggers", []).is_empty()
+		or not logic.get("encounters", []).is_empty()
+	):
 		return false
 	interpreter = InterpreterScript.new()
 	interpreter.configure(registry, vm_triggers)
@@ -242,10 +247,51 @@ func begin_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 		return behavior_result
 	_set_vm_behavior(trigger_id, str(behavior_result.get("behaviorId", "")))
 	active_trigger_id = trigger_id
+	active_encounter_id = ""
 	var execution_context := context.duplicate(true) \
 		if context is Dictionary else {}
 	execution_context["mapTrigger"] = trigger.duplicate(true)
 	var started := interpreter.start(trigger_id, 0, execution_context)
+	if str(started.get("status", "")) != "ok":
+		return started
+	return _finish_if_complete(interpreter.run(interpreter))
+
+
+func begin_encounter(
+	encounter_id: String,
+	context := {},
+	start_node_id := ""
+) -> Dictionary:
+	if not semantic_mode or interpreter == null:
+		return _semantic_error("Remake Authored session is not configured")
+	var encounter: Dictionary = encounters_by_id.get(encounter_id, {})
+	if encounter.is_empty():
+		return _semantic_error(
+			"Modern Encounter '%s' is unavailable" % encounter_id
+		)
+	if not semantic_state.can_run_encounter(encounter):
+		return {"status": "skipped", "reason": "repeat-policy"}
+	var active_encounter := encounter.duplicate(true)
+	if not start_node_id.is_empty():
+		var found := false
+		for node_value: Variant in active_encounter.get("nodes", []):
+			if node_value is Dictionary \
+					and str(node_value.get("id", "")) == start_node_id:
+				found = true
+				break
+		if not found:
+			return _semantic_error(
+				"Modern Encounter '%s' has no scene '%s'"
+				% [encounter_id, start_node_id]
+			)
+		active_encounter["entryNodeId"] = start_node_id
+	_set_vm_encounter(encounter_id, active_encounter)
+	active_encounter_id = encounter_id
+	active_trigger_id = ""
+	var execution_context := context.duplicate(true) \
+		if context is Dictionary else {}
+	execution_context["encounter"] = active_encounter.duplicate(true)
+	var started := interpreter.start(encounter_id, 0, execution_context)
 	if str(started.get("status", "")) != "ok":
 		return started
 	return _finish_if_complete(interpreter.run(interpreter))
@@ -259,6 +305,23 @@ func resume_remake_command(response: Dictionary) -> Dictionary:
 
 func run_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 	var result := begin_map_trigger(trigger_id, context)
+	while str(result.get("status", "")) == "yield":
+		var response: Dictionary = await command_router.route(
+			str(result.get("commandId", "")),
+			result.get("request", {})
+		)
+		if str(response.get("status", "")) == "error":
+			return response
+		result = resume_remake_command(response)
+	return result
+
+
+func run_encounter(
+	encounter_id: String,
+	context := {},
+	start_node_id := ""
+) -> Dictionary:
+	var result := begin_encounter(encounter_id, context, start_node_id)
 	while str(result.get("status", "")) == "yield":
 		var response: Dictionary = await command_router.route(
 			str(result.get("commandId", "")),
@@ -302,6 +365,7 @@ func state_summary() -> Dictionary:
 		"campaignId": str(semantic_bundle.manifest.get("id", "")),
 		"campaignKind": REMAKE_AUTHORED_KIND,
 		"activeTriggerId": active_trigger_id,
+		"activeEncounterId": active_encounter_id,
 		"location": _semantic_location(),
 		"semanticState": (
 			semantic_state.snapshot() if semantic_state != null else {}
@@ -409,7 +473,9 @@ func clear() -> void:
 	semantic_state = null
 	semantic_services = null
 	triggers_by_id.clear()
+	encounters_by_id.clear()
 	active_trigger_id = ""
+	active_encounter_id = ""
 	semantic_mode = false
 	semantic_last_error = ""
 
@@ -435,6 +501,20 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 			"actions": [
 				_script_call(str(default_variant.get("behaviorId", ""))),
 			],
+		}
+	for encounter_value: Variant in logic.get("encounters", []):
+		if not (encounter_value is Dictionary):
+			_semantic_fail("Modern Encounter entry is invalid")
+			return {}
+		var encounter: Dictionary = encounter_value
+		var encounter_id := str(encounter.get("id", ""))
+		if encounter_id.is_empty() or result.has(encounter_id):
+			_semantic_fail("Semantic trigger and Encounter IDs must be unique")
+			return {}
+		encounters_by_id[encounter_id] = encounter.duplicate(true)
+		result[encounter_id] = {
+			"id": encounter_id,
+			"actions": [_encounter_run(encounter)],
 		}
 	return result
 
@@ -502,11 +582,22 @@ func _set_vm_behavior(trigger_id: String, behavior_id: String) -> void:
 	interpreter.triggers[trigger_id] = vm_trigger
 
 
+func _set_vm_encounter(encounter_id: String, encounter: Dictionary) -> void:
+	var vm_trigger: Dictionary = interpreter.triggers.get(encounter_id, {})
+	vm_trigger["actions"] = [_encounter_run(encounter)]
+	interpreter.triggers[encounter_id] = vm_trigger
+
+
 func _finish_if_complete(result: Dictionary) -> Dictionary:
 	if str(result.get("status", "")) in ["complete", "halt"] \
 			and triggers_by_id.has(active_trigger_id):
 		semantic_state.mark_trigger_completed(
 			triggers_by_id[active_trigger_id]
+		)
+	if str(result.get("status", "")) in ["complete", "halt"] \
+			and encounters_by_id.has(active_encounter_id):
+		semantic_state.mark_encounter_completed(
+			encounters_by_id[active_encounter_id]
 		)
 	return result
 
@@ -542,6 +633,7 @@ func _make_semantic_save() -> Dictionary:
 			"ports": command_router.snapshot_state(),
 			"services": service_snapshot,
 			"activeTriggerId": active_trigger_id,
+			"activeEncounterId": active_encounter_id,
 		},
 		"pendingCommand": vm_snapshot.get("pendingCommand"),
 		"resolvedGameplayRules": {
@@ -603,6 +695,7 @@ func _restore_semantic_save(payload: Variant) -> Dictionary:
 	if str(vm_result.get("status", "")) != "ok":
 		return vm_result
 	active_trigger_id = str(session_state.get("activeTriggerId", ""))
+	active_encounter_id = str(session_state.get("activeEncounterId", ""))
 	return {"status": "ok"}
 
 
@@ -707,6 +800,16 @@ static func _script_call(behavior_id: String) -> Dictionary:
 		"parameters": {
 			"behaviorId": behavior_id,
 			"arguments": {},
+		},
+	}
+
+
+static func _encounter_run(encounter: Dictionary) -> Dictionary:
+	return {
+		"kind": "semantic",
+		"operation": "core.encounter.run",
+		"parameters": {
+			"encounter": encounter.duplicate(true),
 		},
 	}
 

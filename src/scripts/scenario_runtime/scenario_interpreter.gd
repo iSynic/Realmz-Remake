@@ -632,6 +632,14 @@ func execute_scenario_script(
 	return scenario_script_runtime.invoke(script_id, arguments, invocation_context)
 
 
+func record_semantic_encounter_completion(encounter: Dictionary) -> void:
+	if scenario_script_runtime == null:
+		return
+	var state := scenario_script_runtime.runtime_state
+	if state != null and state.has_method("mark_encounter_completed"):
+		state.call("mark_encounter_completed", encounter)
+
+
 func execute_nested_scenario_script(
 	script_id: String,
 	arguments: Variant,

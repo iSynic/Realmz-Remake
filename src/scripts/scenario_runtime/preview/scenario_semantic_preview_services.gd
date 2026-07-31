@@ -1,11 +1,13 @@
 class_name ScenarioSemanticPreviewServices
 extends RefCounted
 
-const SNAPSHOT_SCHEMA_VERSION := 1
+const SNAPSHOT_SCHEMA_VERSION := 2
 
 var command_log: Array = []
 var transcript: Array[String] = []
 var battles: Array[int] = []
+var pictures: Array[int] = []
+var sounds: Array[int] = []
 var location := {
 	"levelType": "land",
 	"levelIndex": 0,
@@ -20,6 +22,8 @@ func configure(start: Dictionary, fixture := {}) -> void:
 	command_log.clear()
 	transcript.clear()
 	battles.clear()
+	pictures.clear()
+	sounds.clear()
 	choice_response_index = 0
 	location = _normalized_location(start)
 	choice_responses.clear()
@@ -63,6 +67,12 @@ func execute_command(command_id: String, request: Dictionary) -> Dictionary:
 		"start_battle":
 			battles.append(int(request.get("battleId", 0)))
 			response = {}
+		"show_picture":
+			pictures.append(int(request.get("pictureId", 0)))
+			response = {}
+		"play_sound":
+			sounds.append(int(request.get("soundId", 0)))
+			response = {}
 		_:
 			response = {
 				"status": "error",
@@ -83,6 +93,8 @@ func snapshot() -> Dictionary:
 		"commandLog": command_log.duplicate(true),
 		"transcript": Array(transcript),
 		"battles": Array(battles),
+		"pictures": Array(pictures),
+		"sounds": Array(sounds),
 		"location": location.duplicate(true),
 		"choiceResponses": Array(choice_responses),
 		"choiceResponseIndex": choice_response_index,
@@ -100,6 +112,8 @@ func restore(value: Variant) -> Dictionary:
 	command_log = saved["commandLog"].duplicate(true)
 	transcript.assign(saved["transcript"])
 	battles.assign(saved["battles"])
+	pictures.assign(saved["pictures"])
+	sounds.assign(saved["sounds"])
 	location = saved["location"].duplicate(true)
 	choice_responses.assign(saved["choiceResponses"])
 	choice_response_index = int(saved["choiceResponseIndex"])
@@ -116,6 +130,8 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 		"commandLog",
 		"transcript",
 		"battles",
+		"pictures",
+		"sounds",
 		"choiceResponses",
 	]:
 		if not (saved.get(field_name) is Array):

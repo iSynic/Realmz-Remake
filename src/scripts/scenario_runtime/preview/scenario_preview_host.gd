@@ -332,6 +332,20 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 			entry.get("arguments", {}),
 			entry.get("context", {})
 		)
+	elif kind == "encounter" and not str(entry.get("encounterId", "")).is_empty():
+		var encounter_id := str(entry.get("encounterId", ""))
+		if not session.host.has_method("has_encounter") \
+				or not session.host.has_encounter(encounter_id):
+			_launching = false
+			_respond(request_id, {
+				"status": "error",
+				"message": "Preview Modern Encounter is unavailable",
+			})
+			return
+		await _run_preview_encounter(
+			encounter_id,
+			str(entry.get("nodeId", ""))
+		)
 	elif kind in [
 		"encounter",
 		"spell",
@@ -651,6 +665,33 @@ func _run_preview_trigger(trigger_id: String, slot: int) -> void:
 	})
 
 
+func _run_preview_encounter(encounter_id: String, node_id: String) -> void:
+	var debug_result := _prepare_debugger_for_entry()
+	if str(debug_result.get("status", "")) != "ok":
+		_send({
+			"type": "runtime-error",
+			"message": debug_result.get(
+				"message",
+				"Scenario debugger is unavailable"
+			),
+		})
+		return
+	var result: Dictionary = await session.host.run_encounter(
+		encounter_id,
+		{"source": "providence-preview"},
+		node_id
+	)
+	_send({
+		"type": "runtime-event",
+		"event": "encounter-finished",
+		"encounterId": encounter_id,
+		"nodeId": node_id,
+		"result": result,
+		"trace": _vm_trace(),
+		"assertions": _assertion_report(),
+	})
+
+
 func _run_preview_behavior(
 	behavior_id: String,
 	arguments_value: Variant,
@@ -928,6 +969,18 @@ func _entry_points() -> Dictionary:
 				"location": trigger.get("location", {}),
 				"event": trigger.get("event", "enter"),
 			})
+	var modern_encounters: Array[Dictionary] = []
+	for encounter_value: Variant in install.bundle.documents.get(
+		"remakeLogic",
+		{}
+	).get("encounters", []):
+		if encounter_value is Dictionary:
+			modern_encounters.append({
+				"id": encounter_value.get("id", ""),
+				"name": encounter_value.get("name", ""),
+				"entryNodeId": encounter_value.get("entryNodeId", ""),
+				"nodes": encounter_value.get("nodes", []),
+			})
 	var battles: Array[Dictionary] = []
 	var battle_values: Variant = install.bundle.documents.get(
 		"encounters",
@@ -984,6 +1037,7 @@ func _entry_points() -> Dictionary:
 		"start": install.bundle.get_start(),
 		"actionPoints": action_points,
 		"mapTriggers": map_triggers,
+		"modernEncounters": modern_encounters,
 		"battles": battles,
 		"behaviors": behavior_entries,
 	}
