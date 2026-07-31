@@ -1,1 +1,1 @@
-{"itemTexts":[],"monsterDescriptions":[],"monsterSets":[],"monsters":[{"canSummon":0,"deathMacro":0,"displayName":"Zombie","hitDice":2,"id":78,"magicResistance":0,"nameId":78,"traitor":1,"typeFlags":[0,1,0,0,0,0]}],"questLabels":[],"scenarioItems":[],"schemaVersion":3}
+{"itemTexts":[],"monsterDescriptions":[],"monsterSets":[],"monsters":[{"canSummon":0,"deathMacro":0,"displayName":"Zombie","hitDice":2,"id":78,"magicResistance":0,"nameId":78,"traitor":1,"typeFlags":[0,1,0,0,0,0]}],"questLabels":[],"scenarioItems":[],"schemaVersion":4}

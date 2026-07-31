@@ -108,6 +108,7 @@ func _ready() -> void:
 	await _test_builtin_extension_execution()
 	await _test_providence_scripting_acceptance_bundle()
 	_test_classic_enhanced_encounter_completion()
+	_test_classic_enhanced_named_result()
 	_test_classic_enhanced_gosub_attachments()
 	await _test_city_of_bywater_enhanced_ap()
 	await _test_classic_enhanced_global_triggers()
@@ -232,10 +233,10 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 		return
 	var scripts: Dictionary = bundle.documents.get("remakeScripts", {})
 	_expect(
-		scripts.get("schemaVersion") == 2
+		scripts.get("schemaVersion") == 3
 			and scripts.get("apiVersion") == 2
-			and scripts.get("behaviors", []).size() == 14
-			and scripts.get("bindings", []).size() == 12
+			and scripts.get("behaviors", []).size() == 19
+			and scripts.get("bindings", []).size() == 17
 			and scripts.get("stateDefinitions", []).size() == 3
 			and scripts.get("migrations", []).size() == 1,
 		"Remake consumes the complete Providence-authored scripting contract"
@@ -255,8 +256,11 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 	)
 	_expect(
 		not exported_bindings.is_empty()
-			and exported_bindings[0].get("hook") == "after-slot"
-			and exported_bindings[0].get("slot") == 0,
+			and exported_bindings[0].get("hook") == "run"
+			and exported_bindings[0].get("anchor", {}).get("kind") \
+				== "classic-action"
+			and exported_bindings[0].get("anchor", {}).get("slot") == 0
+			and exported_bindings[0].get("anchor", {}).get("phase") == "after",
 		"Providence exports the guided Behavior as a separate after-slot attachment"
 	)
 	var state := ClassicRuntimeStateScript.new()
@@ -267,6 +271,16 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 		interpreter.scenario_script_runtime != null
 			and interpreter.scenario_script_runtime.last_error.is_empty(),
 		"Providence-authored behaviors configure in the central interpreter"
+	)
+	_expect(
+		interpreter.scenario_script_runtime.matching_bindings(
+			"action",
+			"run",
+			"trigger",
+			["land:0:ap:0"],
+			{"kind": "classic-action", "slot": 0, "phase": "after"}
+		).size() == 1,
+		"Typed Classic-action attachment resolves through its exact anchor"
 	)
 	var host := HostScript.new()
 	add_child(host)
@@ -286,12 +300,12 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 		"id": "binding.providence.battle-start",
 		"targetKind": "battle",
 		"recordId": "0",
-		"slot": null,
+		"anchor": {"kind": "domain"},
 		"role": "lifecycle",
 		"hook": "battle-start",
 		"behaviorId": "scenario.providence.battle-start",
 		"arguments": {},
-		"priority": 0,
+		"order": 0,
 	})
 	var battle_start_result: Dictionary = await host.emit_lifecycle_event(
 		"battle-start",
@@ -716,7 +730,7 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 				and trace_value.get("event") == "behavior-attachment":
 			xap_attachment_hooks.append(trace_value.get("hook"))
 	_expect(
-		xap_attachment_hooks == ["before-ap", "after-ap"],
+		xap_attachment_hooks == ["run", "run"],
 		"Extra Action Point record attachments fire exactly once in order: %s"
 			% str(xap_attachment_hooks)
 	)
@@ -817,17 +831,51 @@ func _test_classic_enhanced_encounter_completion() -> void:
 	)
 	result = interpreter.resume_command({})
 	_expect(
+		_is_text_yield(
+			result,
+			"Before preserved result action 1."
+		),
+		"Before-action Behavior runs before City of Bywater result slot 0: %s"
+			% str(result)
+	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"Before preserved result action"
+	)
+	result = interpreter.resume_command({})
+	_expect(
 		result.get("status") == "yield"
 			and result.get("command") == "show_text"
 			and result.get("payload", {}).get("messageId") == -52,
 		"City of Bywater resumes into its first preserved result action: %s"
 			% str(result)
 	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"preserved result action"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		_is_text_yield(
+			result,
+			"After preserved result action 1."
+		),
+		"After-action Behavior waits for the Classic result action resume: %s"
+			% str(result)
+	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"After preserved result action"
+	)
+	result = interpreter.resume_command({})
 	for _step: int in range(24):
 		if result.get("status") != "yield" \
 				or _is_text_yield(
 					result,
-					"The preserved encounter result is complete."
+					"Classic result body complete."
 				):
 			break
 		result = interpreter.resume_command(
@@ -836,9 +884,9 @@ func _test_classic_enhanced_encounter_completion() -> void:
 	_expect(
 		_is_text_yield(
 			result,
-			"The preserved encounter result is complete."
+			"Classic result body complete."
 		),
-		"After Result waits until City of Bywater's result actions finish: %s"
+		"Result completion waits until City of Bywater's Classic actions finish: %s"
 			% str(result)
 	)
 	if result.get("status") != "yield":
@@ -846,12 +894,26 @@ func _test_classic_enhanced_encounter_completion() -> void:
 	interpreter = _restore_classic_interpreter(
 		bundle,
 		interpreter,
-		"After Result"
+		"Classic result body completion"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		_is_text_yield(
+			result,
+			"The preserved encounter result is complete."
+		),
+		"Encounter completion runs after the selected result finishes: %s"
+			% str(result)
+	)
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"Encounter completion"
 	)
 	var completed := interpreter.resume_command({})
 	_expect(
 		completed.get("status") == "completed",
-		"Restored After Result resumes into Classic completion: %s"
+		"Restored encounter completion resumes into Classic completion: %s"
 			% str(completed)
 	)
 
@@ -894,19 +956,103 @@ func _test_classic_enhanced_encounter_completion() -> void:
 				trace_value.get("attachmentId")
 			)
 	_expect(
-		encounter_hooks == ["enter", "option", "result", "complete"],
-		"All four encounter phases fire exactly once in order: %s"
+		encounter_hooks == [
+			"enter",
+			"availability",
+			"response",
+			"result",
+			"result",
+			"result",
+			"result",
+			"complete",
+		],
+		"All encounter behavior boundaries fire exactly once in order: %s"
 			% str(encounter_hooks)
 	)
 	_expect(
 		encounter_attachment_ids == [
 			"binding.providence.acceptance.encounter.entry",
+			"binding.providence.acceptance.encounter.availability",
 			"binding.providence.acceptance.encounter.option",
 			"binding.providence.acceptance.encounter.result",
+			"binding.providence.acceptance.encounter.result-action-before",
+			"binding.providence.acceptance.encounter.result-action-after",
+			"binding.providence.acceptance.encounter.result-complete",
 			"binding.providence.acceptance.encounter.complete",
 		],
 		"City of Bywater uses the exact Providence-authored bindings: %s"
 			% str(encounter_attachment_ids)
+	)
+
+
+func _test_classic_enhanced_named_result() -> void:
+	var bundle = _classic_enhanced_city_encounter_bundle()
+	if bundle == null:
+		return
+	var state := ClassicRuntimeStateScript.new()
+	state.configure_from_bundle(bundle)
+	var interpreter := InterpreterScript.new()
+	interpreter.configure(bundle, state)
+	_expect(
+		interpreter.begin_trigger("Data DD:0:0"),
+		"City of Bywater AP starts for the named Enhanced Result proof"
+	)
+	var result := interpreter.run_until_yield()
+	result = interpreter.resume_command({})
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("command") == "start_encounter",
+		"Named-result proof reaches the preserved encounter prompt"
+	)
+	result = interpreter.resume_encounter(2, {"optionSlot": 1})
+	_expect(
+		_is_text_yield(result, "The named Enhanced Result ran."),
+		"A response overlay selects its named Enhanced Result exactly once: %s"
+			% str(result)
+	)
+	var named_attachment_count := 0
+	for trace_value: Variant in interpreter.trace:
+		if trace_value is Dictionary \
+				and trace_value.get("attachmentId") \
+					== "binding.providence.acceptance.encounter.enhanced-result":
+			named_attachment_count += 1
+	interpreter = _restore_classic_interpreter(
+		bundle,
+		interpreter,
+		"named Enhanced Result"
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		_is_text_yield(
+			result,
+			"The preserved encounter result is complete."
+		),
+		"Named Enhanced Result completion restores the encounter origin: %s"
+			% str(result)
+	)
+	result = interpreter.resume_command({})
+	_expect(
+		result.get("status") == "completed",
+		"Named Enhanced Result returns to and completes the originating AP: %s"
+			% str(result)
+	)
+	var classic_result_executed := false
+	for trace_value: Variant in interpreter.trace:
+		if not (trace_value is Dictionary):
+			continue
+		if trace_value.get("attachmentId") \
+				== "binding.providence.acceptance.encounter.enhanced-result":
+			named_attachment_count += 1
+		if str(trace_value.get("triggerId", "")).begins_with(
+			"simple encounter:0:outcome:"
+		):
+			classic_result_executed = true
+	_expect(
+		named_attachment_count == 1 and not classic_result_executed,
+		"Enhanced routing never double-runs the displaced Classic result "
+			+ "(named=%d, classic=%s)"
+			% [named_attachment_count, str(classic_result_executed)]
 	)
 
 
@@ -926,8 +1072,20 @@ func _classic_enhanced_city_encounter_bundle():
 	if not city_bundle.last_error.is_empty() \
 			or not behavior_bundle.last_error.is_empty():
 		return null
-	city_bundle.documents["remakeScripts"] = behavior_bundle.documents.get(
+	var encounter_scripts: Dictionary = behavior_bundle.documents.get(
 		"remakeScripts",
+		{}
+	).duplicate(true)
+	var encounter_bindings: Array = []
+	for binding_value: Variant in encounter_scripts.get("bindings", []):
+		if binding_value is Dictionary \
+				and str(binding_value.get("targetKind", "")) == "simpleEncounter" \
+				and str(binding_value.get("recordId", "")) == "0":
+			encounter_bindings.append(binding_value)
+	encounter_scripts["bindings"] = encounter_bindings
+	city_bundle.documents["remakeScripts"] = encounter_scripts
+	city_bundle.documents["remakeLogic"] = behavior_bundle.documents.get(
+		"remakeLogic",
 		{}
 	).duplicate(true)
 	return city_bundle
@@ -1078,7 +1236,7 @@ func _test_classic_enhanced_gosub_attachments() -> void:
 				and trace_value.get("event") == "behavior-attachment":
 			attachment_hooks.append(trace_value.get("hook"))
 	_expect(
-		attachment_hooks == ["before-ap", "after-ap"],
+		attachment_hooks == ["run", "run"],
 		"GOSUB entry and return fire each XAP attachment exactly once: %s"
 			% str(attachment_hooks)
 	)
@@ -1104,12 +1262,23 @@ func _test_city_of_bywater_enhanced_ap() -> void:
 		"remakeScripts",
 		{}
 	).duplicate(true)
+	var city_bindings: Array = []
 	for binding_value: Variant in behavior_document.get("bindings", []):
-		if binding_value is Dictionary \
-				and binding_value.get("id") \
-					== "binding.providence.acceptance.action":
-			binding_value["recordId"] = "Data DD:0:0"
+		if not (binding_value is Dictionary):
+			continue
+		if binding_value.get("id") == "binding.providence.acceptance.action":
+			var action_binding: Dictionary = binding_value.duplicate(true)
+			action_binding["recordId"] = "Data DD:0:0"
+			city_bindings.append(action_binding)
+		elif str(binding_value.get("targetKind", "")) == "simpleEncounter" \
+				and str(binding_value.get("recordId", "")) == "0":
+			city_bindings.append(binding_value)
+	behavior_document["bindings"] = city_bindings
 	city_bundle.documents["remakeScripts"] = behavior_document
+	city_bundle.documents["remakeLogic"] = behavior_bundle.documents.get(
+		"remakeLogic",
+		{}
+	).duplicate(true)
 	var city_state := ClassicRuntimeStateScript.new()
 	city_state.configure_from_bundle(city_bundle)
 	var city_interpreter := InterpreterScript.new()
@@ -1238,6 +1407,10 @@ func _test_classic_enhanced_global_triggers() -> void:
 		"scenario.providence.global.second",
 		"scenario.providence.global.scheduled",
 	]
+	var extended_behaviors: Array = script_document.get(
+		"behaviors",
+		[]
+	).duplicate(true)
 	for behavior_id: String in behavior_ids:
 		var behavior := template.duplicate(true)
 		behavior["id"] = behavior_id
@@ -1270,12 +1443,15 @@ func _test_classic_enhanced_global_triggers() -> void:
 		behavior["contentHash"] = ScenarioScriptRuntimeScript._sha256_json(
 			behavior["program"]
 		)
-		script_document["behaviors"].append(behavior)
+		extended_behaviors.append(behavior)
+	script_document["behaviors"] = extended_behaviors
+	script_document["bindings"] = []
 	bundle.documents["remakeScripts"] = script_document
 	bundle.documents["remakeLogic"] = {
-		"schemaVersion": 3,
+		"schemaVersion": 4,
 		"kind": "classic-enhanced",
 		"replacements": [],
+		"mapTriggers": [],
 		"eventTriggers": [
 			{
 				"id": "scenario.providence.event.second",
@@ -1312,7 +1488,28 @@ func _test_classic_enhanced_global_triggers() -> void:
 			"conditionBehaviorId": null,
 			"behaviorId": behavior_ids[2],
 		}],
+		"encounters": [],
+		"encounterOverlays": [],
 	}
+	var probe_state := ClassicRuntimeStateScript.new()
+	probe_state.configure_from_bundle(bundle)
+	var probe_runtime := ScenarioScriptRuntimeScript.new()
+	var probe_configured := probe_runtime.configure(
+		script_document,
+		probe_state,
+		bundle
+	)
+	_expect(
+		probe_configured,
+		"Enhanced global-trigger Behaviors validate: %s"
+			% probe_runtime.last_error
+	)
+	_expect(
+		probe_runtime.scripts_by_id.has(behavior_ids[0])
+			and probe_runtime.scripts_by_id.has(behavior_ids[1])
+			and probe_runtime.scripts_by_id.has(behavior_ids[2]),
+		"Enhanced global-trigger Behaviors are indexed"
+	)
 	var host := HostScript.new()
 	add_child(host)
 	host.configure(RefCounted.new())
@@ -1988,7 +2185,7 @@ func _test_definition_snapshot_services() -> void:
 	)
 	_expect(
 		encounter_definition.get("encounterKind") == "simple"
-			and int(encounter_definition.get("optionCount", 0)) == 1,
+			and int(encounter_definition.get("optionCount", 0)) == 2,
 		"encounter definitions expose bounded authoring metadata"
 	)
 	_expect(
@@ -2391,6 +2588,7 @@ func _test_safe_script_quest_slice() -> void:
 		"kind": "entry",
 		"role": "action",
 		"hook": "run",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -2417,7 +2615,7 @@ func _test_safe_script_quest_slice() -> void:
 		"program": program,
 	}
 	bundle.documents["remakeScripts"] = {
-		"schemaVersion": 2,
+		"schemaVersion": 3,
 		"apiVersion": 2,
 		"capabilityCatalogHash": catalog.catalog_hash(),
 		"limits": {
@@ -2582,6 +2780,7 @@ func _test_safe_script_quest_slice() -> void:
 		"kind": "helper",
 		"role": "helper",
 		"hook": "",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -2701,7 +2900,7 @@ func _test_nested_safe_behavior_execution() -> void:
 		),
 	]
 	var document := {
-		"schemaVersion": 2,
+		"schemaVersion": 3,
 		"apiVersion": 2,
 		"capabilityCatalogHash": catalog.catalog_hash(),
 		"behaviors": scripts,
@@ -2815,6 +3014,7 @@ func _safe_behavior_fixture(
 		"kind": "entry",
 		"role": role,
 		"hook": hook,
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -3020,6 +3220,7 @@ func _test_behavior_role_capability_validation() -> void:
 		"kind": "entry",
 		"role": "monster-ai",
 		"hook": "decide",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -3034,7 +3235,7 @@ func _test_behavior_role_capability_validation() -> void:
 		"program": program,
 	}
 	var document := {
-		"schemaVersion": 2,
+		"schemaVersion": 3,
 		"apiVersion": 2,
 		"capabilityCatalogHash": catalog.catalog_hash(),
 		"limits": {

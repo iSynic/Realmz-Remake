@@ -367,13 +367,20 @@ func _show_encounter(payload: Dictionary) -> Dictionary:
 		choice_tokens
 	)
 	if str(selected_outcome) == STOP_CHOICE_TOKEN:
-		return {"outcome": 0}
+		return {
+			"outcome": 0,
+			"responseRef": {"kind": "back-out"},
+		}
 	var simple_parts := str(selected_outcome).split(":", false)
 	if simple_parts.size() != 3 or simple_parts[0] != "option":
 		return _error("Classic simple encounter returned an invalid option")
 	return {
 		"outcome": int(simple_parts[2]),
 		"optionSlot": int(simple_parts[1]),
+		"responseRef": {
+			"kind": "simple-choice",
+			"index": int(simple_parts[1]),
+		},
 	}
 
 
@@ -510,7 +517,10 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 				choice_tokens
 			))
 			if selected == STOP_CHOICE_TOKEN:
-				return {"outcome": 0}
+				return {
+					"outcome": 0,
+					"responseRef": {"kind": "back-out"},
+				}
 			if selected == "word":
 				var word_result: Dictionary = await service_owner.call(
 					"_select_complex_word",
@@ -556,6 +566,10 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 			return {
 				"outcome": int(token_parts[2]),
 				"optionSlot": int(token_parts[1]),
+				"responseRef": {
+					"kind": "action-choice",
+					"index": int(token_parts[1]),
+				},
 			}
 
 	var thief_encounter: Variant = payload.get("thiefEncounter", {})
@@ -645,6 +659,7 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 		if selected == STOP_CHOICE_TOKEN:
 			return {
 				"outcome": 0,
+				"responseRef": {"kind": "back-out"},
 				"thiefEncounter": resolver.rogue_encounter.duplicate(true),
 			}
 		if selected == "word":
@@ -722,6 +737,10 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 			return {
 				"outcome": int(token_parts[2]),
 				"optionSlot": int(token_parts[1]),
+				"responseRef": {
+					"kind": "action-choice",
+					"index": int(token_parts[1]),
+				},
 				"thiefEncounter": resolver.rogue_encounter.duplicate(true),
 			}
 		if token_parts.size() != 2 or token_parts[0] != "rogue":
@@ -767,6 +786,14 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 				if outcome != 0:
 					return {
 						"outcome": outcome,
+						"responseRef": {
+							"kind": "rogue",
+							"outcome": (
+								"success"
+								if bool(resolution.get("success", false))
+								else "failure"
+							),
+						},
 						"thiefEncounter": resolution["thiefEncounter"],
 					}
 			_:

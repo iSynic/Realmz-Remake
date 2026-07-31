@@ -1084,6 +1084,7 @@ func _make_semantic_save() -> Dictionary:
 		{}
 	)
 	var vm_snapshot := interpreter.snapshot()
+	var mixed_state := interpreter.mixed_execution_state()
 	var service_snapshot := {}
 	if semantic_services != null and semantic_services.has_method("snapshot"):
 		service_snapshot = semantic_services.call("snapshot")
@@ -1120,6 +1121,11 @@ func _make_semantic_save() -> Dictionary:
 			),
 		},
 		"pendingCommand": vm_snapshot.get("pendingCommand"),
+		"activeResponseRef": mixed_state.get("activeResponseRef"),
+		"activeResultRef": mixed_state.get("activeResultRef"),
+		"mixedSequenceCursor": mixed_state.get("mixedSequenceCursor", {}),
+		"resultTransitionCount": int(mixed_state.get("resultTransitionCount", 0)),
+		"attachmentOrder": mixed_state.get("attachmentOrder", []),
 		"resolvedGameplayRules": {
 			"preset": str(
 				semantic_bundle.documents.get("runtime", {}).get(

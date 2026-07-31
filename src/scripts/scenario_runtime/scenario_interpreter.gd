@@ -16,9 +16,10 @@ const ClassicExecutionStateScript = preload(
 const ScenarioScriptRuntimeScript = preload(
 	"res://scripts/scenario_runtime/scenario_script_runtime.gd"
 )
-const SNAPSHOT_SCHEMA_VERSION := 2
+const SNAPSHOT_SCHEMA_VERSION := 3
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
+const MAX_RESULT_TRANSITIONS := MAX_INTERNAL_STEPS
 
 var instruction_registry: ScenarioInstructionRegistry
 var triggers: Dictionary = {}
@@ -42,6 +43,7 @@ var _classic_deferred_result: Dictionary = {}
 var _classic_executing_anchor: Dictionary = {}
 var _classic_pending_after_anchor: Dictionary = {}
 var _classic_encounter_phase: Dictionary = {}
+var _result_transition_count := 0
 
 var runtime_state: ClassicRuntimeState:
 	get:
@@ -261,6 +263,11 @@ func _run_classic_loop() -> Dictionary:
 			)
 			if str(attachment_result.get("status", "")) == "error":
 				return attachment_result
+			if str(attachment_result.get("status", "")) == "redirect":
+				var redirect_result := _redirect_executing_classic_result()
+				if str(redirect_result.get("status", "")) == "continue":
+					continue
+				return redirect_result
 			if str(semantic_result.get("status", "")) == "continue":
 				continue
 			return semantic_result
@@ -456,6 +463,11 @@ func resume_command(response: Dictionary) -> Dictionary:
 		)
 		if str(attachment_result.get("status", "")) == "error":
 			return _classic_result(attachment_result)
+		if str(attachment_result.get("status", "")) == "redirect":
+			var redirect_result := _redirect_executing_classic_result()
+			if str(redirect_result.get("status", "")) == "continue":
+				return _classic_result(_run_classic_loop())
+			return _classic_result(redirect_result)
 		if str(semantic_result.get("status", "")) == "continue":
 			return _classic_result(_run_classic_loop())
 		return _classic_result(semantic_result)
@@ -499,6 +511,11 @@ func _resume_classic_pending_step(
 		if not _classic_attachment_queue.is_empty():
 			_classic_deferred_result = classic_result.duplicate(true)
 			return _run_classic_loop()
+	if str(classic_result.get("status", "")) == "yield":
+		# A resumed Classic command can re-enter the VM and yield a later
+		# instruction. Its anchor is now the active continuation and must not be
+		# cleared by the outer resume frame.
+		return classic_result
 	_classic_pending_after_anchor.clear()
 	return classic_result
 
@@ -536,6 +553,7 @@ func make_execution_snapshot() -> Dictionary:
 			"executingAnchor": _classic_executing_anchor.duplicate(true),
 			"pendingAfterAnchor": _classic_pending_after_anchor.duplicate(true),
 			"encounterPhase": _classic_encounter_phase.duplicate(true),
+			"resultTransitionCount": _result_transition_count,
 		}
 		result["snapshot"]["scenarioScriptRuntime"] = (
 			scenario_script_runtime.snapshot()
@@ -589,6 +607,10 @@ func restore_execution_snapshot(saved: Variant) -> Dictionary:
 			"encounterPhase",
 			{}
 		).duplicate(true)
+		_result_transition_count = int(attachment_state.get(
+			"resultTransitionCount",
+			0
+		))
 		if scenario_script_runtime != null:
 			var script_restore := scenario_script_runtime.restore(
 				saved.get("scenarioScriptRuntime", {})
@@ -683,7 +705,7 @@ func matching_scenario_behavior_bindings(
 	hook: String,
 	target_kind: String,
 	target_ids: Array,
-	slot := -1
+	anchor := {"kind": "domain"}
 ) -> Array:
 	if scenario_script_runtime == null:
 		return []
@@ -692,7 +714,7 @@ func matching_scenario_behavior_bindings(
 		hook,
 		target_kind,
 		target_ids,
-		slot
+		anchor
 	)
 
 
@@ -796,7 +818,10 @@ func _take_next_classic_plan_instruction() -> Dictionary:
 			"status": "instruction",
 			"instruction": injected,
 		}
-	if not _classic_encounter_phase.is_empty() and pending_command == null:
+	if not _classic_encounter_phase.is_empty() \
+			and pending_command == null \
+			and str(_classic_encounter_phase.get("stage", "")) \
+				!= "executing-classic-result":
 		var encounter_phase_result := _advance_classic_encounter_phase()
 		if str(encounter_phase_result.get("status", "")) == "continue":
 			return _take_next_classic_plan_instruction()
@@ -946,8 +971,6 @@ func _queue_classic_encounter_completion_attachments(
 			continue
 		var origin: Dictionary = origin_value
 		var outcome := int(origin.get("selectedOutcome", 0))
-		if outcome <= 0:
-			continue
 		var encounter_kind := str(origin.get("encounterKind", ""))
 		var encounter_id := str(origin.get("encounterId", ""))
 		var target_kind := (
@@ -955,22 +978,43 @@ func _queue_classic_encounter_completion_attachments(
 			if encounter_kind == "complex"
 			else "simpleEncounter"
 		)
+		var completion_request := {
+			"encounterKind": encounter_kind,
+			"encounterId": int(origin.get("encounterId", -1)),
+			"outcome": outcome,
+			"resultSlot": outcome - 1,
+			"optionSlot": int(origin.get("selectedOptionSlot", -1)),
+		}
+		if outcome > 0:
+			_classic_attachment_queue.append_array(
+				_behavior_attachment_instructions(
+					"encounter",
+					"result",
+					target_kind,
+					[encounter_id],
+					{
+						"kind": "encounter-result",
+						"result": {"kind": "classic", "index": outcome - 1},
+						"phase": "body-complete",
+					},
+					completion_request
+				)
+			)
+		if str(_classic_encounter_phase.get("stage", "")) \
+				== "executing-classic-result" \
+				and str(_classic_encounter_phase.get("encounterKind", "")) \
+					== encounter_kind \
+				and int(_classic_encounter_phase.get("encounterId", -1)) \
+					== int(origin.get("encounterId", -1)):
+			_classic_encounter_phase["stage"] = "completion"
 		_classic_attachment_queue.append_array(
 			_behavior_attachment_instructions(
 				"encounter",
 				"complete",
 				target_kind,
 				[encounter_id],
-				-1,
-				{
-					"encounterKind": encounter_kind,
-					"encounterId": int(origin.get("encounterId", -1)),
-					"outcome": outcome,
-					"resultSlot": outcome - 1,
-					"optionSlot": int(
-						origin.get("selectedOptionSlot", -1)
-					),
-				}
+				{"kind": "record", "phase": "complete"},
+				completion_request
 			)
 		)
 
@@ -996,6 +1040,7 @@ func _begin_classic_encounter_phase(yield_result: Dictionary) -> Dictionary:
 		"yieldResult": yield_result.duplicate(true),
 		"request": request,
 		"response": {},
+		"availabilityResults": {},
 		"encounterKind": encounter_kind,
 		"encounterId": encounter_id,
 		"targetKind": (
@@ -1006,6 +1051,7 @@ func _begin_classic_encounter_phase(yield_result: Dictionary) -> Dictionary:
 	}
 	pending_command = null
 	_queue_classic_encounter_phase_attachments("enter", -1)
+	_queue_classic_encounter_availability_attachments()
 	return _classic_result(_run_classic_loop())
 
 
@@ -1027,7 +1073,8 @@ func _resume_classic_encounter_presentation(
 		return _classic_error("Encounter response is missing 'outcome'")
 	_classic_encounter_phase["response"] = response.duplicate(true)
 	var option_slot := int(response.get("optionSlot", -1))
-	if option_slot >= 0:
+	var response_ref := _classic_response_reference(response)
+	if option_slot >= 0 or not response_ref.is_empty():
 		_classic_encounter_phase["stage"] = "option"
 		_queue_classic_encounter_phase_attachments(
 			"option",
@@ -1050,6 +1097,9 @@ func _advance_classic_encounter_phase() -> Dictionary:
 						and entry_response.has("outcome"):
 					_prepare_classic_encounter_result_phase()
 				else:
+					var availability_result := _apply_classic_availability_filter()
+					if str(availability_result.get("status", "")) == "error":
+						return availability_result
 					var restored_pending := ScenarioPendingCommand.from_dictionary(
 						_classic_encounter_phase.get("pendingCommand")
 					)
@@ -1066,7 +1116,33 @@ func _advance_classic_encounter_phase() -> Dictionary:
 			"option":
 				_prepare_classic_encounter_result_phase()
 			"result":
-				_classic_encounter_phase["stage"] = "resume"
+				var result_response: Dictionary = _classic_encounter_phase.get(
+					"response",
+					{}
+				).duplicate(true)
+				var result_behavior: Variant = result_response.get(
+					"behaviorOutcome",
+					{}
+				)
+				if result_behavior is Dictionary:
+					match str(result_behavior.get("kind", "continue")):
+						"repeat":
+							result_response["enhancedTerminal"] = {"kind": "repeat"}
+						"close":
+							result_response["enhancedTerminal"] = {"kind": "continue"}
+					result_response.erase("behaviorOutcome")
+					_classic_encounter_phase["response"] = result_response
+				if result_response.has("enhancedTerminal"):
+					_classic_encounter_phase["stage"] = "enhanced-terminal"
+				else:
+					_classic_encounter_phase["stage"] = "resume"
+			"enhanced-result":
+				_classic_encounter_phase["stage"] = "enhanced-terminal"
+			"enhanced-terminal":
+				var terminal_result := _finish_classic_enhanced_result()
+				if str(terminal_result.get("status", "")) == "continue":
+					continue
+				return terminal_result
 			"resume":
 				var resume_pending := ScenarioPendingCommand.from_dictionary(
 					_classic_encounter_phase.get("pendingCommand")
@@ -1079,14 +1155,24 @@ func _advance_classic_encounter_phase() -> Dictionary:
 					"response",
 					{}
 				).duplicate(true)
-				_classic_encounter_phase.clear()
+				if int(resume_response.get("outcome", 0)) > 0:
+					_classic_encounter_phase["stage"] = "executing-classic-result"
+				else:
+					_classic_encounter_phase.clear()
 				return _resume_classic_pending_step(
 					resume_pending,
 					resume_response
 				)
+			"completion":
+				_classic_encounter_phase.clear()
+				return {"status": "continue"}
 			"presenting":
 				return _classic_error(
 					"Classic encounter presentation resumed without a response"
+				)
+			"invalid-enhanced-result":
+				return _classic_error(
+					"Classic encounter response references a missing Enhanced Result"
 				)
 			_:
 				return _classic_error(
@@ -1103,7 +1189,37 @@ func _prepare_classic_encounter_result_phase() -> void:
 	var response: Dictionary = _classic_encounter_phase.get(
 		"response",
 		{}
-	)
+	).duplicate(true)
+	if not response.has("behaviorOutcome"):
+		var routed_result := _classic_overlay_result_for_response(
+			_classic_response_reference(response)
+		)
+		if not routed_result.is_empty():
+			if str(routed_result.get("kind", "")) == "classic":
+				response["outcome"] = int(routed_result.get("index", -1)) + 1
+			elif str(routed_result.get("kind", "")) == "enhanced":
+				response["enhancedResultId"] = str(routed_result.get("id", ""))
+	var behavior_outcome: Variant = response.get("behaviorOutcome", {})
+	if behavior_outcome is Dictionary:
+		match str(behavior_outcome.get("kind", "continue")):
+			"repeat":
+				response["enhancedTerminal"] = {"kind": "repeat"}
+			"close":
+				response["enhancedTerminal"] = {"kind": "continue"}
+	_classic_encounter_phase["response"] = response
+	if response.has("enhancedTerminal"):
+		_classic_encounter_phase["stage"] = "enhanced-terminal"
+		return
+	var enhanced_result_id := str(response.get("enhancedResultId", ""))
+	if not enhanced_result_id.is_empty():
+		var enhanced_result := _classic_enhanced_result(enhanced_result_id)
+		if enhanced_result.is_empty():
+			_classic_encounter_phase["stage"] = "invalid-enhanced-result"
+			return
+		_classic_encounter_phase["enhancedResult"] = enhanced_result
+		_classic_encounter_phase["stage"] = "enhanced-result"
+		_queue_classic_enhanced_result_attachments(enhanced_result_id)
+		return
 	var outcome := int(response.get("outcome", 0))
 	if outcome > 0:
 		_classic_encounter_phase["stage"] = "result"
@@ -1115,6 +1231,155 @@ func _prepare_classic_encounter_result_phase() -> void:
 		_classic_encounter_phase["stage"] = "resume"
 
 
+func _classic_overlay_result_for_response(response_ref: Dictionary) -> Dictionary:
+	if response_ref.is_empty():
+		return {}
+	if not _classic_response_is_available(response_ref):
+		return {}
+	var overlay := _classic_encounter_overlay()
+	for route_value: Variant in overlay.get("responseRoutes", []):
+		if not (route_value is Dictionary):
+			continue
+		var route: Dictionary = route_value
+		var candidate: Variant = route.get("response", {})
+		if candidate is Dictionary \
+				and _classic_response_key(candidate) == _classic_response_key(response_ref):
+			var result: Variant = route.get("result", {})
+			return result.duplicate(true) if result is Dictionary else {}
+	return {}
+
+
+func _classic_encounter_overlay() -> Dictionary:
+	if scenario_script_runtime == null or scenario_script_runtime.bundle == null:
+		return {}
+	var logic: Variant = scenario_script_runtime.bundle.documents.get(
+		"remakeLogic",
+		{}
+	)
+	if not (logic is Dictionary):
+		return {}
+	var encounter_kind := str(_classic_encounter_phase.get("encounterKind", ""))
+	var encounter_id := int(_classic_encounter_phase.get("encounterId", -1))
+	for overlay_value: Variant in logic.get("encounterOverlays", []):
+		if not (overlay_value is Dictionary):
+			continue
+		var overlay: Dictionary = overlay_value
+		if str(overlay.get("encounterKind", "")) == encounter_kind \
+				and int(overlay.get("encounterId", -1)) == encounter_id:
+			return overlay.duplicate(true)
+	return {}
+
+
+func _classic_enhanced_result(result_id: String) -> Dictionary:
+	for result_value: Variant in _classic_encounter_overlay().get(
+		"namedResults",
+		[]
+	):
+		if result_value is Dictionary \
+				and str(result_value.get("id", "")) == result_id:
+			return result_value.duplicate(true)
+	return {}
+
+
+func _queue_classic_enhanced_result_attachments(result_id: String) -> void:
+	var request: Dictionary = _classic_encounter_phase.get(
+		"request",
+		{}
+	).duplicate(true)
+	request["response"] = _classic_encounter_phase.get(
+		"response",
+		{}
+	).duplicate(true)
+	request["enhancedResultId"] = result_id
+	_classic_attachment_queue.append_array(
+		_behavior_attachment_instructions(
+			"encounter",
+			"result",
+			str(_classic_encounter_phase.get("targetKind", "")),
+			[str(_classic_encounter_phase.get("encounterId", ""))],
+			{
+				"kind": "encounter-result",
+				"result": {"kind": "enhanced", "id": result_id},
+				"phase": "body",
+			},
+			request
+		)
+	)
+
+
+func _finish_classic_enhanced_result() -> Dictionary:
+	var response: Dictionary = _classic_encounter_phase.get(
+		"response",
+		{}
+	).duplicate(true)
+	var terminal: Variant = response.get("enhancedTerminal")
+	if not (terminal is Dictionary):
+		terminal = _classic_encounter_phase.get(
+			"enhancedResult",
+			{}
+		).get("terminal", {"kind": "continue"})
+	if not (terminal is Dictionary):
+		return _classic_error("Enhanced Result has an invalid terminal outcome")
+	match str(terminal.get("kind", "")):
+		"classic-result":
+			var transition_error := _consume_result_transition()
+			if not transition_error.is_empty():
+				return transition_error
+			var result_index := int(terminal.get("index", -1))
+			if result_index < 0 or result_index > 3:
+				return _classic_error("Enhanced Result Classic target is invalid")
+			response["outcome"] = result_index + 1
+			response.erase("enhancedTerminal")
+			_classic_encounter_phase["response"] = response
+			_classic_encounter_phase["stage"] = "resume"
+			return {"status": "continue"}
+		"repeat":
+			var transition_error := _consume_result_transition()
+			if not transition_error.is_empty():
+				return transition_error
+			var encounter_kind := str(_classic_encounter_phase.get("encounterKind", ""))
+			var encounter_id := int(_classic_encounter_phase.get("encounterId", -1))
+			_classic_executor.pending_encounter = {}
+			_classic_encounter_phase.clear()
+			return _classic_executor._yield_encounter(encounter_kind, encounter_id, 0)
+		"continue":
+			var transition_error := _consume_result_transition()
+			if not transition_error.is_empty():
+				return transition_error
+			return _complete_classic_enhanced_result_to_origin()
+	return _classic_error("Enhanced Result has an unsupported terminal outcome")
+
+
+func _complete_classic_enhanced_result_to_origin() -> Dictionary:
+	var pending_anchor := _classic_pending_after_anchor.duplicate(true)
+	var completion_request := {
+		"encounterKind": str(_classic_encounter_phase.get("encounterKind", "")),
+		"encounterId": int(_classic_encounter_phase.get("encounterId", -1)),
+		"response": _classic_encounter_phase.get("response", {}).duplicate(true),
+		"enhancedResult": _classic_encounter_phase.get("enhancedResult", {}).duplicate(true),
+	}
+	var target_kind := str(_classic_encounter_phase.get("targetKind", ""))
+	var encounter_id := str(_classic_encounter_phase.get("encounterId", ""))
+	_classic_executor.pending_encounter = {}
+	var break_result: Dictionary = _classic_executor._break_encounter()
+	if str(break_result.get("status", "")) == "error":
+		return break_result
+	_classic_encounter_phase["stage"] = "completion"
+	_classic_attachment_queue.append_array(
+		_behavior_attachment_instructions(
+			"encounter",
+			"complete",
+			target_kind,
+			[encounter_id],
+			{"kind": "record", "phase": "complete"},
+			completion_request
+		)
+	)
+	_activate_pending_after_attachments()
+	_queue_classic_record_transition_attachments(pending_anchor)
+	return {"status": "continue"}
+
+
 func _queue_classic_encounter_phase_attachments(
 	hook: String,
 	slot: int
@@ -1123,26 +1388,231 @@ func _queue_classic_encounter_phase_attachments(
 		"request",
 		{}
 	).duplicate(true)
+	var response: Dictionary = _classic_encounter_phase.get(
+		"response",
+		{}
+	).duplicate(true)
 	if hook != "enter":
-		var response: Dictionary = _classic_encounter_phase.get(
-			"response",
-			{}
-		).duplicate(true)
 		request["response"] = response
 		request["outcome"] = int(response.get("outcome", 0))
 		request["slot"] = slot
 		if response.has("optionSlot"):
 			request["optionSlot"] = int(response.get("optionSlot", -1))
+	var contract_hook := hook
+	var typed_anchor := {"kind": "record", "phase": "start"}
+	if hook == "option":
+		contract_hook = "response"
+		for response_ref_value: Variant in _classic_selected_response_refs(response):
+			if not (response_ref_value is Dictionary):
+				continue
+			var response_ref: Dictionary = response_ref_value
+			if not _classic_response_is_available(response_ref):
+				continue
+			var response_request := request.duplicate(true)
+			response_request["responseRef"] = response_ref.duplicate(true)
+			_classic_attachment_queue.append_array(
+				_behavior_attachment_instructions(
+					"encounter",
+					contract_hook,
+					str(_classic_encounter_phase.get("targetKind", "")),
+					[str(_classic_encounter_phase.get("encounterId", ""))],
+					{
+						"kind": "encounter-response",
+						"response": response_ref.duplicate(true),
+						"phase": "selected",
+					},
+					response_request
+				)
+			)
+		return
+	elif hook == "result":
+		typed_anchor = {
+			"kind": "encounter-result",
+			"result": {"kind": "classic", "index": slot},
+			"phase": "body-start",
+		}
 	_classic_attachment_queue.append_array(
 		_behavior_attachment_instructions(
 			"encounter",
-			hook,
+			contract_hook,
 			str(_classic_encounter_phase.get("targetKind", "")),
 			[str(_classic_encounter_phase.get("encounterId", ""))],
-			slot,
+			typed_anchor,
 			request
 		)
 	)
+
+
+func _queue_classic_encounter_availability_attachments() -> void:
+	var request: Dictionary = _classic_encounter_phase.get(
+		"request",
+		{}
+	).duplicate(true)
+	for response_ref_value: Variant in _classic_encounter_response_refs(request):
+		if not (response_ref_value is Dictionary):
+			continue
+		var response_ref: Dictionary = response_ref_value
+		_classic_attachment_queue.append_array(
+			_behavior_attachment_instructions(
+				"encounter",
+				"availability",
+				str(_classic_encounter_phase.get("targetKind", "")),
+				[str(_classic_encounter_phase.get("encounterId", ""))],
+				{
+					"kind": "encounter-response",
+					"response": response_ref.duplicate(true),
+					"phase": "availability",
+				},
+				{
+					"encounterKind": str(_classic_encounter_phase.get("encounterKind", "")),
+					"encounterId": int(_classic_encounter_phase.get("encounterId", -1)),
+					"responseRef": response_ref.duplicate(true),
+				}
+			)
+		)
+
+
+func _classic_encounter_response_refs(request: Dictionary) -> Array:
+	var result: Array = []
+	var encounter: Variant = request.get("encounter", {})
+	if not (encounter is Dictionary):
+		return result
+	var encounter_kind := str(_classic_encounter_phase.get("encounterKind", ""))
+	if encounter_kind == "simple":
+		for index: int in range(4):
+			result.append({"kind": "simple-choice", "index": index})
+	else:
+		for index: int in range(8):
+			result.append({"kind": "action-choice", "index": index})
+		result.append({"kind": "typed-reply"})
+		for index: int in range(10):
+			result.append({"kind": "spell", "index": index})
+		for index: int in range(5):
+			result.append({"kind": "item", "index": index})
+		if bool(encounter.get("thief", false)):
+			for outcome: String in ["attempt", "success", "failure"]:
+				result.append({"kind": "rogue", "outcome": outcome})
+	if bool(encounter.get("canBackOut", false)):
+		result.append({"kind": "back-out"})
+	return result
+
+
+func _apply_classic_availability_filter() -> Dictionary:
+	var availability: Variant = _classic_encounter_phase.get(
+		"availabilityResults",
+		{}
+	)
+	if not (availability is Dictionary) or availability.is_empty():
+		return {"status": "ok"}
+	var request: Dictionary = _classic_encounter_phase.get(
+		"request",
+		{}
+	).duplicate(true)
+	var encounter: Variant = request.get("encounter", {})
+	if not (encounter is Dictionary):
+		return _classic_error("Classic encounter availability has no record")
+	var filtered: Dictionary = encounter.duplicate(true)
+	for key_value: Variant in availability:
+		if bool(availability[key_value]):
+			continue
+		_disable_classic_encounter_response(filtered, str(key_value))
+	request["encounter"] = filtered
+	_classic_encounter_phase["request"] = request
+	var yield_result: Dictionary = _classic_encounter_phase.get(
+		"yieldResult",
+		{}
+	).duplicate(true)
+	yield_result["payload"] = request.duplicate(true)
+	_classic_encounter_phase["yieldResult"] = yield_result
+	var pending_value: Variant = _classic_encounter_phase.get("pendingCommand", {})
+	if pending_value is Dictionary:
+		var pending_record: Dictionary = pending_value.duplicate(true)
+		var continuation: Dictionary = pending_record.get(
+			"continuation",
+			{}
+		).duplicate(true)
+		continuation.merge(request, true)
+		pending_record["continuation"] = continuation
+		_classic_encounter_phase["pendingCommand"] = pending_record
+	return {"status": "ok"}
+
+
+func _disable_classic_encounter_response(encounter: Dictionary, key: String) -> void:
+	var parts := key.split(":", false)
+	var kind := str(parts[0]) if not parts.is_empty() else ""
+	var index := int(parts[1]) if parts.size() > 1 and str(parts[1]).is_valid_int() else -1
+	match kind:
+		"simple-choice":
+			_disable_array_slot(encounter, "choiceResults", index, 0)
+		"action-choice":
+			_disable_array_slot(encounter, "texts", index, "")
+		"typed-reply":
+			encounter["wordResult"] = 0
+		"spell":
+			_disable_array_slot(encounter, "spellIds", index, 0)
+			_disable_array_slot(encounter, "spellResults", index, 0)
+		"item":
+			_disable_array_slot(encounter, "itemIds", index, 0)
+			_disable_array_slot(encounter, "itemResults", index, 0)
+		"rogue":
+			if parts.size() > 1 and str(parts[1]) == "attempt":
+				encounter["thief"] = false
+		"back-out":
+			encounter["canBackOut"] = false
+
+
+func _disable_array_slot(
+	record: Dictionary,
+	field_name: String,
+	index: int,
+	replacement: Variant
+) -> void:
+	var value: Variant = record.get(field_name, [])
+	if not (value is Array) or index < 0 or index >= value.size():
+		return
+	var next: Array = value.duplicate(true)
+	next[index] = replacement
+	record[field_name] = next
+
+
+func _classic_response_reference(response: Dictionary) -> Dictionary:
+	var authored: Variant = response.get("responseRef")
+	if authored is Dictionary:
+		return authored.duplicate(true)
+	var option_slot := int(response.get("optionSlot", -1))
+	if option_slot >= 0:
+		return {
+			"kind": (
+				"action-choice"
+				if str(_classic_encounter_phase.get("encounterKind", "")) == "complex"
+				else "simple-choice"
+			),
+			"index": option_slot,
+		}
+	if int(response.get("outcome", 0)) == 0:
+		return {"kind": "back-out"}
+	return {}
+
+
+func _classic_selected_response_refs(response: Dictionary) -> Array:
+	var response_ref := _classic_response_reference(response)
+	if response_ref.is_empty():
+		return []
+	var refs: Array = []
+	if str(response_ref.get("kind", "")) == "rogue" \
+			and str(response_ref.get("outcome", "")) in ["success", "failure"]:
+		refs.append({"kind": "rogue", "outcome": "attempt"})
+	refs.append(response_ref)
+	return refs
+
+
+func _classic_response_is_available(response_ref: Dictionary) -> bool:
+	var availability: Variant = _classic_encounter_phase.get(
+		"availabilityResults",
+		{}
+	)
+	return not (availability is Dictionary) \
+		or bool(availability.get(_classic_response_key(response_ref), true))
 
 
 func _apply_classic_attachment_outcome(
@@ -1150,20 +1620,38 @@ func _apply_classic_attachment_outcome(
 	value: Variant
 ) -> Dictionary:
 	if str(action_identity.get("attachmentRole", "")) != "encounter" \
-			or _classic_encounter_phase.is_empty() \
-			or not (value is Dictionary):
+			or _classic_encounter_phase.is_empty():
+		return {"status": "ok"}
+	var anchor: Variant = action_identity.get("attachmentAnchor", {})
+	if anchor is Dictionary \
+			and str(anchor.get("kind", "")) == "encounter-response" \
+			and str(anchor.get("phase", "")) == "availability":
+		if not (value is bool):
+			return _classic_error("Encounter availability behavior must return bool")
+		var response_ref: Variant = anchor.get("response", {})
+		if not (response_ref is Dictionary):
+			return _classic_error("Encounter availability behavior lost its response")
+		var availability: Dictionary = _classic_encounter_phase.get(
+			"availabilityResults",
+			{}
+		).duplicate(true)
+		availability[_classic_response_key(response_ref)] = bool(value)
+		_classic_encounter_phase["availabilityResults"] = availability
+		return {"status": "ok"}
+	if not (value is Dictionary):
 		return {"status": "ok"}
 	var outcome: Dictionary = value
 	var kind := str(outcome.get("kind", "continue"))
-	if kind not in ["close", "resolve", "branch"]:
+	if kind not in ["close", "resolve", "branch", "repeat"]:
 		return {"status": "ok"}
 	var response: Dictionary = _classic_encounter_phase.get(
 		"response",
 		{}
 	).duplicate(true)
-	if kind == "close":
+	if kind == "close" or kind == "repeat":
 		response["status"] = "ok"
-		response["outcome"] = 0
+		if kind == "close":
+			response["outcome"] = 0
 	elif outcome.has("outcome"):
 		var selected_outcome := int(outcome.get("outcome", 0))
 		if selected_outcome < 0 or selected_outcome > 4:
@@ -1178,7 +1666,70 @@ func _apply_classic_attachment_outcome(
 		)
 	response["behaviorOutcome"] = outcome.duplicate(true)
 	_classic_encounter_phase["response"] = response
-	return {"status": "ok"}
+	return {
+		"status": "redirect",
+	}
+
+
+func _redirect_executing_classic_result() -> Dictionary:
+	var response: Dictionary = _classic_encounter_phase.get(
+		"response",
+		{}
+	).duplicate(true)
+	var behavior: Variant = response.get("behaviorOutcome", {})
+	if not (behavior is Dictionary):
+		return {"status": "continue"}
+	var kind := str(behavior.get("kind", "continue"))
+	var transition_error := _consume_result_transition()
+	if not transition_error.is_empty():
+		return transition_error
+	if str(_classic_encounter_phase.get("stage", "")) != "executing-classic-result":
+		_classic_attachment_queue.clear()
+		_prepare_classic_encounter_result_phase()
+		return {"status": "continue"}
+	response.erase("behaviorOutcome")
+	_classic_encounter_phase["response"] = response
+	match kind:
+		"repeat":
+			var encounter_kind := str(_classic_encounter_phase.get("encounterKind", ""))
+			var encounter_id := int(_classic_encounter_phase.get("encounterId", -1))
+			_classic_encounter_phase.clear()
+			return _classic_executor._yield_encounter(encounter_kind, encounter_id, 0)
+		"close":
+			return _complete_classic_enhanced_result_to_origin()
+		"resolve", "branch":
+			var outcome := int(response.get("outcome", 0))
+			if outcome < 1 or outcome > 4:
+				return _classic_error("Encounter result redirect requires Classic Result 1 through 4")
+			if not _classic_executor.encounter_origins.is_empty():
+				var origin: Dictionary = _classic_executor.encounter_origins[-1]
+				origin["selectedOutcome"] = outcome
+				_classic_executor.encounter_origins[-1] = origin
+			return _classic_executor._branch_to_loaded_encounter_result(
+				str(_classic_encounter_phase.get("encounterKind", "")),
+				outcome - 1,
+				0
+			)
+	return {"status": "continue"}
+
+
+func _consume_result_transition() -> Dictionary:
+	_result_transition_count += 1
+	if _result_transition_count <= MAX_RESULT_TRANSITIONS:
+		return {}
+	return _classic_error(
+		"Classic encounter exceeded %d result transitions"
+		% MAX_RESULT_TRANSITIONS
+	)
+
+
+func _classic_response_key(response_ref: Dictionary) -> String:
+	var kind := str(response_ref.get("kind", ""))
+	if response_ref.has("index"):
+		return "%s:%d" % [kind, int(response_ref.get("index", -1))]
+	if kind == "rogue":
+		return "%s:%s" % [kind, str(response_ref.get("outcome", ""))]
+	return kind
 
 
 func _activate_pending_after_attachments() -> void:
@@ -1203,13 +1754,72 @@ func _classic_attachment_instructions(
 	var is_record_hook := hook in ["before-ap", "after-ap"]
 	if trigger_id.is_empty() or (not is_record_hook and slot < 0):
 		return []
+	var target_kind := "trigger"
+	var target_ids: Array = [trigger_id]
+	var role := "action"
+	var contract_hook := "run"
+	var typed_anchor := {
+		"kind": "record",
+		"phase": "start" if hook == "before-ap" else "complete",
+	} if is_record_hook else {
+		"kind": "classic-action",
+		"slot": slot,
+		"phase": "before" if hook == "before-slot" else "after",
+	}
+	var encounter_result := _classic_encounter_result_anchor(anchor, hook)
+	if not encounter_result.is_empty():
+		target_kind = str(encounter_result.get("targetKind", ""))
+		target_ids = [str(encounter_result.get("encounterId", ""))]
+		role = "encounter"
+		contract_hook = "result"
+		typed_anchor = encounter_result.get("anchor", {}).duplicate(true)
 	return _behavior_attachment_instructions(
-		"action",
-		hook,
-		"trigger",
-		[trigger_id],
-		-1 if is_record_hook else slot
+		role,
+		contract_hook,
+		target_kind,
+		target_ids,
+		typed_anchor
 	)
+
+
+func _classic_encounter_result_anchor(
+	execution_anchor: Dictionary,
+	placement_hook: String
+) -> Dictionary:
+	if placement_hook not in ["before-slot", "after-slot"]:
+		return {}
+	var origins: Variant = execution_anchor.get("encounterOrigins", [])
+	if not (origins is Array) or origins.is_empty():
+		return {}
+	var origin_value: Variant = origins[-1]
+	if not (origin_value is Dictionary):
+		return {}
+	var origin: Dictionary = origin_value
+	var outcome := int(origin.get("selectedOutcome", 0))
+	var encounter_kind := str(origin.get("encounterKind", ""))
+	var encounter_id := int(origin.get("encounterId", -1))
+	var trigger_id := str(execution_anchor.get("triggerId", ""))
+	var expected_id := "%s encounter:%d:outcome:%d" % [
+		encounter_kind,
+		encounter_id,
+		outcome,
+	]
+	if outcome < 1 or encounter_kind not in ["simple", "complex"] \
+			or encounter_id < 0 or trigger_id != expected_id:
+		return {}
+	return {
+		"targetKind": (
+			"complexEncounter" if encounter_kind == "complex"
+			else "simpleEncounter"
+		),
+		"encounterId": encounter_id,
+		"anchor": {
+			"kind": "encounter-result-action",
+			"resultIndex": outcome - 1,
+			"slot": int(execution_anchor.get("slot", -1)),
+			"phase": "before" if placement_hook == "before-slot" else "after",
+		},
+	}
 
 
 func _behavior_attachment_instructions(
@@ -1217,7 +1827,7 @@ func _behavior_attachment_instructions(
 	hook: String,
 	target_kind: String,
 	target_ids: Array,
-	slot: int,
+	anchor: Dictionary,
 	request := {}
 ) -> Array:
 	var bindings := scenario_script_runtime.matching_bindings(
@@ -1225,8 +1835,9 @@ func _behavior_attachment_instructions(
 		hook,
 		target_kind,
 		target_ids,
-		slot
+		anchor
 	)
+	var slot := _behavior_anchor_slot(anchor)
 	var instructions: Array = []
 	for binding_value: Variant in bindings:
 		if not (binding_value is Dictionary):
@@ -1249,6 +1860,8 @@ func _behavior_attachment_instructions(
 					"targetKind": target_kind,
 					"recordId": str(binding.get("recordId", "")),
 					"slot": null if slot < 0 else slot,
+					"anchor": anchor.duplicate(true),
+					"order": int(binding.get("order", 0)),
 					"priority": int(binding.get("priority", 0)),
 					"request": (
 						request.duplicate(true)
@@ -1258,6 +1871,21 @@ func _behavior_attachment_instructions(
 			},
 		})
 	return instructions
+
+
+func _behavior_anchor_slot(anchor: Dictionary) -> int:
+	match str(anchor.get("kind", "")):
+		"classic-action", "encounter-result-action":
+			return int(anchor.get("slot", -1))
+		"encounter-response":
+			var response: Variant = anchor.get("response", {})
+			if response is Dictionary and response.has("index"):
+				return int(response.get("index", -1))
+		"encounter-result":
+			var result: Variant = anchor.get("result", {})
+			if result is Dictionary and str(result.get("kind", "")) == "classic":
+				return int(result.get("index", -1))
+	return -1
 
 
 func _classic_semantic_action_identity(
@@ -1291,6 +1919,10 @@ func _classic_semantic_action_identity(
 		identity["attachmentTargetKind"] = str(
 			attachment.get("targetKind", "")
 		)
+		identity["attachmentAnchor"] = (
+			attachment.get("anchor", {}).duplicate(true)
+			if attachment.get("anchor") is Dictionary else {}
+		)
 	return identity
 
 
@@ -1301,6 +1933,7 @@ func _reset_classic_attachment_plan() -> void:
 	_classic_executing_anchor.clear()
 	_classic_pending_after_anchor.clear()
 	_classic_encounter_phase.clear()
+	_result_transition_count = 0
 
 
 static func _validate_classic_attachment_snapshot(value: Variant) -> Dictionary:
@@ -1327,12 +1960,68 @@ static func _validate_classic_attachment_snapshot(value: Variant) -> Dictionary:
 			"valid": false,
 			"message": "Classic attachment snapshot has an invalid queue",
 		}
+	var transition_count: Variant = value.get("resultTransitionCount")
+	if not _is_nonnegative_integer_number(transition_count):
+		return {
+			"valid": false,
+			"message": "Classic attachment snapshot has an invalid result transition count",
+		}
 	var encounter_validation := _validate_classic_encounter_phase_snapshot(
 		value.get("encounterPhase")
 	)
 	if not bool(encounter_validation.get("valid", false)):
 		return encounter_validation
 	return {"valid": true}
+
+
+static func _is_nonnegative_integer_number(value: Variant) -> bool:
+	if not (value is int or value is float):
+		return false
+	var number := float(value)
+	return number >= 0.0 and number == floorf(number)
+
+
+func mixed_execution_state() -> Dictionary:
+	var response: Dictionary = _classic_encounter_phase.get(
+		"response",
+		{}
+	).duplicate(true)
+	var active_response: Variant = _classic_response_reference(response)
+	var active_result: Variant = null
+	var enhanced_result_id := str(response.get("enhancedResultId", ""))
+	if not enhanced_result_id.is_empty():
+		active_result = {"kind": "enhanced", "id": enhanced_result_id}
+	var outcome := int(response.get("outcome", 0))
+	if active_result == null and outcome > 0:
+		active_result = {"kind": "classic", "index": absi(outcome) - 1}
+	var attachment_order: Array = []
+	for instruction_value: Variant in _classic_attachment_queue:
+		if not (instruction_value is Dictionary):
+			continue
+		var attachment: Variant = instruction_value.get(
+			"parameters",
+			{}
+		).get("attachment", {})
+		if attachment is Dictionary:
+			attachment_order.append({
+				"id": str(attachment.get("id", "")),
+				"order": int(attachment.get("order", 0)),
+			})
+	return {
+		"activeResponseRef": (
+			active_response.duplicate(true)
+			if active_response is Dictionary else null
+		),
+		"activeResultRef": active_result,
+		"mixedSequenceCursor": {
+			"executingAnchor": _classic_executing_anchor.duplicate(true),
+			"pendingAfterAnchor": _classic_pending_after_anchor.duplicate(true),
+			"encounterStage": str(_classic_encounter_phase.get("stage", "")),
+			"remainingAttachments": _classic_attachment_queue.size(),
+		},
+		"resultTransitionCount": _result_transition_count,
+		"attachmentOrder": attachment_order,
+	}
 
 
 static func _validate_classic_encounter_phase_snapshot(
@@ -1350,6 +2039,11 @@ static func _validate_classic_encounter_phase_snapshot(
 		"presenting",
 		"option",
 		"result",
+		"enhanced-result",
+		"enhanced-terminal",
+		"executing-classic-result",
+		"completion",
+		"invalid-enhanced-result",
 		"resume",
 	]:
 		return {
@@ -1395,7 +2089,12 @@ func _classic_result(value: Variant) -> Dictionary:
 		if str(value.get("status", "")) == "yield":
 			_capture_classic_pending(value)
 			if str(value.get("command", "")) == "start_encounter" \
-					and _classic_encounter_phase.is_empty():
+					and (
+						_classic_encounter_phase.is_empty()
+						or str(_classic_encounter_phase.get("stage", "")) \
+							== "executing-classic-result"
+					):
+				_classic_encounter_phase.clear()
 				return _begin_classic_encounter_phase(value)
 		elif str(value.get("status", "")) != "error":
 			pending_command = null

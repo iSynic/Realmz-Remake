@@ -22,8 +22,8 @@ const CLASSIC_CAMPAIGN_KINDS := [
 # Kept as the default fixture kind while callers migrate to the explicit constants.
 const CAMPAIGN_KIND := CAMPAIGN_KIND_CLASSIC_INTERPRETED
 const COMPATIBILITY_PROFILE := "realmz-7.1"
-const DOCUMENT_SCHEMA_VERSION := 3
-const RUNTIME_DOCUMENT_SCHEMA_VERSION := 3
+const DOCUMENT_SCHEMA_VERSION := 4
+const RUNTIME_DOCUMENT_SCHEMA_VERSION := 4
 const RULE_TABLE_SOURCES := ["shared", "scenario-local", "unresolved"]
 const CLASSIC_DOCUMENTS := [
 	"scenario",
@@ -1012,10 +1012,178 @@ func _validate_remake_logic_document() -> bool:
 		"eventTriggers",
 		"scheduledTriggers",
 		"encounters",
+		"encounterOverlays",
 	]:
 		if not (logic.get(collection_name) is Array):
 			return _fail("remakeLogic.%s must be an array" % collection_name)
+	if not _validate_encounter_overlays(logic.get("encounterOverlays", [])):
+		return false
 	return true
+
+
+func _validate_encounter_overlays(overlays: Array) -> bool:
+	var seen_overlay_ids: Dictionary = {}
+	var seen_encounters: Dictionary = {}
+	for overlay_index: int in range(overlays.size()):
+		var overlay_value: Variant = overlays[overlay_index]
+		var context := "remakeLogic.encounterOverlays[%d]" % overlay_index
+		if not (overlay_value is Dictionary):
+			return _fail("%s must be an object" % context)
+		var overlay: Dictionary = overlay_value
+		var overlay_id := str(overlay.get("id", ""))
+		var encounter_kind := str(overlay.get("encounterKind", ""))
+		var encounter_id := int(overlay.get("encounterId", -1))
+		if overlay_id.is_empty() or seen_overlay_ids.has(overlay_id):
+			return _fail("%s has a missing or duplicate ID" % context)
+		if encounter_kind not in ["simple", "complex"] or encounter_id < 0:
+			return _fail("%s has an invalid Classic encounter identity" % context)
+		var encounter_key := "%s:%d" % [encounter_kind, encounter_id]
+		if seen_encounters.has(encounter_key):
+			return _fail("%s duplicates another encounter overlay" % context)
+		var collection_name := (
+			"simpleEncounters" if encounter_kind == "simple" else "complexEncounters"
+		)
+		if not _collection_has_integer_id(
+			documents.get("encounters", {}).get(collection_name, []),
+			encounter_id
+		):
+			return _fail("%s references a missing Classic encounter" % context)
+		if not (overlay.get("namedResults") is Array) \
+				or not (overlay.get("responseRoutes") is Array):
+			return _fail("%s results and response routes must be arrays" % context)
+		var classic_result_names: Variant = overlay.get("classicResultNames", [])
+		if not (classic_result_names is Array) or classic_result_names.size() != 4:
+			return _fail("%s.classicResultNames must contain four names" % context)
+		for classic_name: Variant in classic_result_names:
+			if not (classic_name is String) or str(classic_name).strip_edges().is_empty():
+				return _fail("%s.classicResultNames must contain non-empty names" % context)
+		var named_result_ids: Dictionary = {}
+		for result_index: int in range(overlay["namedResults"].size()):
+			var result_value: Variant = overlay["namedResults"][result_index]
+			var result_context := "%s.namedResults[%d]" % [context, result_index]
+			if not (result_value is Dictionary):
+				return _fail("%s must be an object" % result_context)
+			var result: Dictionary = result_value
+			var result_id := str(result.get("id", ""))
+			if result_id.is_empty() or named_result_ids.has(result_id):
+				return _fail("%s has a missing or duplicate ID" % result_context)
+			if str(result.get("name", "")).strip_edges().is_empty():
+				return _fail("%s requires an author-facing name" % result_context)
+			if not _validate_enhanced_result_terminal(
+				result.get("terminal"),
+				result_context
+			):
+				return false
+			named_result_ids[result_id] = true
+		var seen_responses: Dictionary = {}
+		for route_index: int in range(overlay["responseRoutes"].size()):
+			var route_value: Variant = overlay["responseRoutes"][route_index]
+			var route_context := "%s.responseRoutes[%d]" % [context, route_index]
+			if not (route_value is Dictionary):
+				return _fail("%s must be an object" % route_context)
+			var route: Dictionary = route_value
+			var response_key := _encounter_response_key(
+				route.get("response"),
+				encounter_kind,
+				route_context
+			)
+			if response_key.is_empty():
+				return false
+			if seen_responses.has(response_key):
+				return _fail("%s duplicates another response route" % route_context)
+			if not _validate_encounter_result_reference(
+				route.get("result"),
+				named_result_ids,
+				route_context
+			):
+				return false
+			seen_responses[response_key] = true
+		seen_overlay_ids[overlay_id] = true
+		seen_encounters[encounter_key] = true
+	return true
+
+
+func _validate_enhanced_result_terminal(value: Variant, context: String) -> bool:
+	if not (value is Dictionary):
+		return _fail("%s.terminal must be an object" % context)
+	var kind := str(value.get("kind", ""))
+	if kind in ["continue", "repeat"]:
+		return true
+	if kind == "classic-result" \
+			and int(value.get("index", -1)) >= 0 \
+			and int(value.get("index", -1)) <= 3:
+		return true
+	return _fail("%s.terminal is invalid" % context)
+
+
+func _validate_encounter_result_reference(
+	value: Variant,
+	named_result_ids: Dictionary,
+	context: String
+) -> bool:
+	if not (value is Dictionary):
+		return _fail("%s.result must be an object" % context)
+	var kind := str(value.get("kind", ""))
+	if kind == "classic":
+		var index := int(value.get("index", -1))
+		return index >= 0 and index <= 3 \
+			or _fail("%s.result Classic index must be between 0 and 3" % context)
+	if kind == "enhanced" and named_result_ids.has(str(value.get("id", ""))):
+		return true
+	return _fail("%s.result references a missing Enhanced Result" % context)
+
+
+func _encounter_response_key(
+	value: Variant,
+	encounter_kind: String,
+	context: String
+) -> String:
+	if not (value is Dictionary):
+		_fail("%s.response must be an object" % context)
+		return ""
+	var response: Dictionary = value
+	var kind := str(response.get("kind", ""))
+	var indexed_limits := {
+		"simple-choice": 3,
+		"action-choice": 7,
+		"spell": 9,
+		"item": 4,
+	}
+	if indexed_limits.has(kind):
+		if kind == "simple-choice" and encounter_kind != "simple":
+			_fail("%s.response belongs to a Simple Encounter" % context)
+			return ""
+		if kind in ["action-choice", "spell", "item"] \
+				and encounter_kind != "complex":
+			_fail("%s.response belongs to a Complex Encounter" % context)
+			return ""
+		var index := int(response.get("index", -1))
+		if index < 0 or index > int(indexed_limits[kind]):
+			_fail("%s.response index is out of range" % context)
+			return ""
+		return "%s:%d" % [kind, index]
+	if kind == "rogue":
+		var outcome := str(response.get("outcome", ""))
+		if encounter_kind != "complex" \
+				or outcome not in ["attempt", "success", "failure"]:
+			_fail("%s.response has an invalid Rogue outcome" % context)
+			return ""
+		return "rogue:%s" % outcome
+	if kind == "typed-reply" and encounter_kind == "complex":
+		return kind
+	if kind == "back-out":
+		return kind
+	_fail("%s.response kind is unsupported" % context)
+	return ""
+
+
+func _collection_has_integer_id(collection: Variant, record_id: int) -> bool:
+	if not (collection is Array):
+		return false
+	for record_value: Variant in collection:
+		if record_value is Dictionary and int(record_value.get("id", -1)) == record_id:
+			return true
+	return false
 
 
 func _runtime_extension_ids() -> Dictionary:

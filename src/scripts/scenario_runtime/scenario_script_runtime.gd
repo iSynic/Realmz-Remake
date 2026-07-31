@@ -14,7 +14,7 @@ const EnginePluginRegistryScript = preload(
 	"res://scripts/scenario_runtime/scenario_engine_plugin_registry.gd"
 )
 
-const SCHEMA_VERSION := 2
+const SCHEMA_VERSION := 3
 const API_VERSION := 2
 const SNAPSHOT_SCHEMA_VERSION := 3
 const MAX_ARRAY_LENGTH := 256
@@ -344,7 +344,7 @@ func matching_bindings(
 	hook: String,
 	target_kind: String,
 	target_ids: Array,
-	slot := -1
+	anchor := {"kind": "domain"}
 ) -> Array:
 	var matches: Array = []
 	var normalized_target_ids: Array = []
@@ -359,16 +359,19 @@ func matching_bindings(
 				or str(binding.get("targetKind", "")) != target_kind \
 				or str(binding.get("recordId", "")) not in normalized_target_ids:
 			continue
-		if int(slot) >= 0:
-			if binding.get("slot") == null \
-					or int(binding.get("slot", -1)) != int(slot):
-				continue
-		elif binding.get("slot") != null:
+		if not (binding.get("anchor") is Dictionary) \
+				or not _anchors_equal(binding.get("anchor"), anchor):
 			continue
 		matches.append(binding.duplicate(true))
 	matches.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
-		var left_priority := int(left.get("priority", 0))
-		var right_priority := int(right.get("priority", 0))
+		var left_priority := int(left.get(
+			"priority" if role == "rule-modifier" else "order",
+			0
+		))
+		var right_priority := int(right.get(
+			"priority" if role == "rule-modifier" else "order",
+			0
+		))
 		return (
 			left_priority < right_priority
 			or (
@@ -378,6 +381,59 @@ func matching_bindings(
 		)
 	)
 	return matches
+
+
+static func _anchors_equal(left: Dictionary, right: Dictionary) -> bool:
+	var kind := str(left.get("kind", ""))
+	if kind != str(right.get("kind", "")):
+		return false
+	match kind:
+		"domain":
+			return true
+		"record":
+			return str(left.get("phase", "")) == str(right.get("phase", ""))
+		"classic-action":
+			return int(left.get("slot", -1)) == int(right.get("slot", -1)) \
+				and str(left.get("phase", "")) == str(right.get("phase", ""))
+		"encounter-response":
+			var left_response: Variant = left.get("response", {})
+			var right_response: Variant = right.get("response", {})
+			return left_response is Dictionary \
+				and right_response is Dictionary \
+				and _response_reference_key(left_response) \
+					== _response_reference_key(right_response) \
+				and str(left.get("phase", "")) == str(right.get("phase", ""))
+		"encounter-result":
+			var left_result: Variant = left.get("result", {})
+			var right_result: Variant = right.get("result", {})
+			return left_result is Dictionary \
+				and right_result is Dictionary \
+				and _result_reference_key(left_result) \
+					== _result_reference_key(right_result) \
+				and str(left.get("phase", "")) == str(right.get("phase", ""))
+		"encounter-result-action":
+			return int(left.get("resultIndex", -1)) \
+					== int(right.get("resultIndex", -1)) \
+				and int(left.get("slot", -1)) == int(right.get("slot", -1)) \
+				and str(left.get("phase", "")) == str(right.get("phase", ""))
+	return false
+
+
+static func _response_reference_key(value: Dictionary) -> String:
+	var kind := str(value.get("kind", ""))
+	if kind == "rogue":
+		return "%s:%s" % [kind, str(value.get("outcome", ""))]
+	if value.has("index"):
+		return "%s:%d" % [kind, int(value.get("index", -1))]
+	return kind
+
+
+static func _result_reference_key(value: Dictionary) -> String:
+	return (
+		"classic:%d" % int(value.get("index", -1))
+		if str(value.get("kind", "")) == "classic"
+		else "enhanced:%s" % str(value.get("id", ""))
+	)
 
 
 func register_spell_effect(
@@ -1201,6 +1257,8 @@ static func validate_document(
 			):
 				return _invalid("%s source hash does not match its manifest" % context)
 	var seen_bindings: Dictionary = {}
+	var binding_counts_by_behavior: Dictionary = {}
+	var anchor_orders: Dictionary = {}
 	for binding_value: Variant in document["bindings"]:
 		if not (binding_value is Dictionary):
 			return _invalid("Scenario behavior binding must be an object")
@@ -1217,6 +1275,57 @@ static func validate_document(
 				or str(binding.get("hook", "")) != str(behavior.get("hook", "")):
 			return _invalid(
 				"Scenario behavior binding role and hook must match its behavior"
+			)
+		var anchor_validation := _validate_binding_anchor(binding)
+		if not bool(anchor_validation.get("valid", false)):
+			return anchor_validation
+		var target_validation := _validate_binding_target(
+			binding,
+			campaign_bundle
+		)
+		if not bool(target_validation.get("valid", false)):
+			return target_validation
+		binding_counts_by_behavior[behavior_id] = int(
+			binding_counts_by_behavior.get(behavior_id, 0)
+		) + 1
+		var anchor_key := "%s\u0000%s\u0000%s" % [
+			str(binding.get("targetKind", "")),
+			str(binding.get("recordId", "")),
+			_binding_anchor_key(binding.get("anchor", {})),
+		]
+		if not anchor_orders.has(anchor_key):
+			anchor_orders[anchor_key] = []
+		anchor_orders[anchor_key].append({
+			"id": binding_id,
+			"order": int(binding.get("order", -1)),
+		})
+	for anchor_key: String in anchor_orders:
+		var orders: Array = anchor_orders[anchor_key]
+		orders.sort_custom(func(left: Dictionary, right: Dictionary) -> bool:
+			return int(left.get("order", -1)) < int(right.get("order", -1)) \
+				or (
+					int(left.get("order", -1)) == int(right.get("order", -1))
+					and str(left.get("id", "")) < str(right.get("id", ""))
+				)
+		)
+		for index: int in range(orders.size()):
+			if int(orders[index].get("order", -1)) != index:
+				return _invalid(
+					"Scenario behavior binding '%s' has a non-contiguous anchor order"
+					% str(orders[index].get("id", ""))
+				)
+	for behavior_id: String in seen_scripts:
+		var behavior: Dictionary = document["behaviors"][int(seen_scripts[behavior_id])]
+		var library_scope := str(behavior.get("libraryScope", ""))
+		if library_scope not in ["inline", "project"]:
+			return _invalid(
+				"Scenario behavior '%s' has an invalid library scope" % behavior_id
+			)
+		if library_scope == "inline" \
+				and int(binding_counts_by_behavior.get(behavior_id, 0)) != 1:
+			return _invalid(
+				"Inline scenario behavior '%s' must have exactly one binding"
+				% behavior_id
 			)
 	var seen_migrations: Dictionary = {}
 	var migration_origins: Dictionary = {}
@@ -1252,6 +1361,259 @@ static func validate_document(
 			)
 		seen_migrations[migration_id] = true
 		migration_origins[from_version] = to_version
+	return {"valid": true}
+
+
+static func _validate_binding_anchor(binding: Dictionary) -> Dictionary:
+	var anchor_value: Variant = binding.get("anchor")
+	if not (anchor_value is Dictionary):
+		return _invalid("Scenario behavior binding requires a typed anchor")
+	var anchor: Dictionary = anchor_value
+	var anchor_kind := str(anchor.get("kind", ""))
+	var target_kind := str(binding.get("targetKind", ""))
+	var role := str(binding.get("role", ""))
+	var hook := str(binding.get("hook", ""))
+	if int(binding.get("order", -1)) < 0:
+		return _invalid("Scenario behavior binding order must be zero or greater")
+	if target_kind == "trigger":
+		if role != "action" or hook != "run":
+			return _invalid("Trigger bindings require the action run contract")
+		if anchor_kind == "record":
+			if str(anchor.get("phase", "")) not in ["start", "complete"]:
+				return _invalid("Trigger record anchor phase must be start or complete")
+			return {"valid": true}
+		if anchor_kind == "classic-action":
+			if not _valid_slot_phase_anchor(anchor, "Classic action"):
+				return _invalid("Classic action anchor is invalid")
+			return {"valid": true}
+		return _invalid("Trigger binding requires a record or Classic action anchor")
+	if target_kind in ["simpleEncounter", "complexEncounter"]:
+		if role != "encounter":
+			return _invalid("Encounter binding requires the encounter role")
+		match anchor_kind:
+			"record":
+				var phase := str(anchor.get("phase", ""))
+				var expected_hook := "enter" if phase == "start" else "complete"
+				if phase not in ["start", "complete"] or hook != expected_hook:
+					return _invalid("Encounter record anchor contract is invalid")
+			"encounter-response":
+				var phase := str(anchor.get("phase", ""))
+				var expected_hook := "availability" \
+					if phase == "availability" else "response"
+				if phase not in ["availability", "selected"] \
+						or hook != expected_hook:
+					return _invalid("Encounter response anchor contract is invalid")
+				var response_validation := _validate_response_reference(
+					anchor.get("response"),
+					target_kind
+				)
+				if not bool(response_validation.get("valid", false)):
+					return response_validation
+			"encounter-result":
+				if hook != "result" \
+						or str(anchor.get("phase", "")) not in [
+							"body-start",
+							"body",
+							"body-complete",
+						]:
+					return _invalid("Encounter result anchor contract is invalid")
+				var result: Variant = anchor.get("result")
+				if not (result is Dictionary) \
+						or str(result.get("kind", "")) not in ["classic", "enhanced"]:
+					return _invalid("Encounter result reference is invalid")
+				if str(result.get("kind", "")) == "classic" \
+						and (int(result.get("index", -1)) < 0 \
+						or int(result.get("index", -1)) > 3):
+					return _invalid("Classic encounter result index must be between 0 and 3")
+				if str(result.get("kind", "")) == "enhanced" \
+						and str(result.get("id", "")).is_empty():
+					return _invalid("Enhanced encounter result requires an ID")
+			"encounter-result-action":
+				if hook != "result" \
+						or int(anchor.get("resultIndex", -1)) < 0 \
+						or int(anchor.get("resultIndex", -1)) > 3 \
+						or not _valid_slot_phase_anchor(anchor, "Encounter result action"):
+					return _invalid("Encounter result action anchor is invalid")
+			_:
+				return _invalid("Encounter binding has an unsupported anchor")
+		return {"valid": true}
+	if anchor_kind != "domain":
+		return _invalid("Domain behavior binding requires a domain anchor")
+	return {"valid": true}
+
+
+static func _valid_slot_phase_anchor(anchor: Dictionary, _label: String) -> bool:
+	return int(anchor.get("slot", -1)) >= 0 \
+		and int(anchor.get("slot", -1)) <= 7 \
+		and str(anchor.get("phase", "")) in ["before", "after"]
+
+
+static func _binding_anchor_key(anchor: Dictionary) -> String:
+	var kind := str(anchor.get("kind", ""))
+	match kind:
+		"domain":
+			return kind
+		"record":
+			return "%s:%s" % [kind, str(anchor.get("phase", ""))]
+		"classic-action":
+			return "%s:%d:%s" % [
+				kind,
+				int(anchor.get("slot", -1)),
+				str(anchor.get("phase", "")),
+			]
+		"encounter-response":
+			var response: Variant = anchor.get("response", {})
+			return "%s:%s:%s" % [
+				kind,
+				_response_reference_key(response) if response is Dictionary else "",
+				str(anchor.get("phase", "")),
+			]
+		"encounter-result":
+			var result: Variant = anchor.get("result", {})
+			return "%s:%s:%s" % [
+				kind,
+				_result_reference_key(result) if result is Dictionary else "",
+				str(anchor.get("phase", "")),
+			]
+		"encounter-result-action":
+			return "%s:%d:%d:%s" % [
+				kind,
+				int(anchor.get("resultIndex", -1)),
+				int(anchor.get("slot", -1)),
+				str(anchor.get("phase", "")),
+			]
+	return ""
+
+
+static func _validate_binding_target(
+	binding: Dictionary,
+	campaign_bundle: Object
+) -> Dictionary:
+	if campaign_bundle == null:
+		return {"valid": true}
+	var documents_value: Variant = campaign_bundle.get("documents")
+	if not (documents_value is Dictionary):
+		return _invalid("Scenario package documents are unavailable for binding validation")
+	var documents: Dictionary = documents_value
+	var target_kind := str(binding.get("targetKind", ""))
+	var record_id := str(binding.get("recordId", ""))
+	if target_kind == "trigger":
+		var scripts_value: Variant = documents.get("scripts", {})
+		var triggers: Variant = (
+			scripts_value.get("triggers", [])
+			if scripts_value is Dictionary else []
+		)
+		if not _records_include_string_id(triggers, record_id):
+			return _invalid(
+				"Scenario behavior binding references missing trigger '%s'"
+				% record_id
+			)
+		return {"valid": true}
+	if target_kind not in ["simpleEncounter", "complexEncounter"]:
+		return {"valid": true}
+	if not record_id.is_valid_int():
+		return _invalid("Encounter behavior binding has an invalid record ID")
+	var encounter_id := int(record_id)
+	var encounters_value: Variant = documents.get("encounters", {})
+	var collection_name := (
+		"simpleEncounters" if target_kind == "simpleEncounter"
+		else "complexEncounters"
+	)
+	var encounters: Variant = (
+		encounters_value.get(collection_name, [])
+		if encounters_value is Dictionary else []
+	)
+	if not _records_include_integer_id(encounters, encounter_id):
+		return _invalid(
+			"Scenario behavior binding references missing %s %d"
+			% [collection_name.trim_suffix("s"), encounter_id]
+		)
+	var anchor: Dictionary = binding.get("anchor", {})
+	if str(anchor.get("kind", "")) != "encounter-result":
+		return {"valid": true}
+	var result: Variant = anchor.get("result", {})
+	if not (result is Dictionary) \
+			or str(result.get("kind", "")) != "enhanced":
+		return {"valid": true}
+	var enhanced_id := str(result.get("id", ""))
+	var logic_value: Variant = documents.get("remakeLogic", {})
+	var overlays: Variant = (
+		logic_value.get("encounterOverlays", [])
+		if logic_value is Dictionary else []
+	)
+	for overlay_value: Variant in overlays:
+		if not (overlay_value is Dictionary):
+			continue
+		var overlay: Dictionary = overlay_value
+		if str(overlay.get("encounterKind", "")) != (
+			"simple" if target_kind == "simpleEncounter" else "complex"
+		) or int(overlay.get("encounterId", -1)) != encounter_id:
+			continue
+		if _records_include_string_id(overlay.get("namedResults", []), enhanced_id):
+			return {"valid": true}
+	return _invalid(
+		"Scenario behavior binding references missing Enhanced Result '%s'"
+		% enhanced_id
+	)
+
+
+static func _records_include_string_id(records: Variant, expected_id: String) -> bool:
+	if not (records is Array):
+		return false
+	for record_value: Variant in records:
+		if record_value is Dictionary \
+				and str(record_value.get("id", "")) == expected_id:
+			return true
+	return false
+
+
+static func _records_include_integer_id(records: Variant, expected_id: int) -> bool:
+	if not (records is Array):
+		return false
+	for record_value: Variant in records:
+		if record_value is Dictionary \
+				and int(record_value.get("id", -1)) == expected_id:
+			return true
+	return false
+
+
+static func _validate_response_reference(
+	value: Variant,
+	target_kind: String
+) -> Dictionary:
+	if not (value is Dictionary):
+		return _invalid("Encounter response reference must be an object")
+	var response: Dictionary = value
+	var kind := str(response.get("kind", ""))
+	var indexed_limits := {
+		"simple-choice": 3,
+		"action-choice": 7,
+		"spell": 9,
+		"item": 4,
+	}
+	if indexed_limits.has(kind):
+		var index := int(response.get("index", -1))
+		if index < 0 or index > int(indexed_limits[kind]):
+			return _invalid("Encounter response reference index is out of range")
+		if kind == "simple-choice" and target_kind != "simpleEncounter":
+			return _invalid("Simple choice response belongs to a Simple Encounter")
+		if kind == "action-choice" and target_kind != "complexEncounter":
+			return _invalid("Action choice response belongs to a Complex Encounter")
+		if kind in ["spell", "item"] and target_kind != "complexEncounter":
+			return _invalid("%s response belongs to a Complex Encounter" % kind.capitalize())
+		return {"valid": true}
+	if kind == "rogue":
+		if target_kind != "complexEncounter":
+			return _invalid("Rogue response belongs to a Complex Encounter")
+		if str(response.get("outcome", "")) not in [
+			"attempt", "success", "failure",
+		]:
+			return _invalid("Rogue response outcome is unsupported")
+		return {"valid": true}
+	if kind == "typed-reply" and target_kind != "complexEncounter":
+		return _invalid("Typed reply response belongs to a Complex Encounter")
+	if kind not in ["typed-reply", "back-out"]:
+		return _invalid("Encounter response reference kind is unsupported")
 	return {"valid": true}
 
 

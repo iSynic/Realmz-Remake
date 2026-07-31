@@ -81,9 +81,9 @@ func _test_map_trigger_execution_and_restore() -> void:
 	var save_result := session.make_save_result()
 	_expect(
 		save_result.get("status") == "ok"
-			and save_result.get("save", {}).get("schemaVersion") == 6
+			and save_result.get("save", {}).get("schemaVersion") == 7
 			and save_result.get("save", {}).get("pendingCommand") is Dictionary,
-		"pending Map Trigger produces a schema-6 save"
+		"pending Map Trigger produces a schema-7 save"
 	)
 
 	var restored_services := PreviewServicesScript.new()
@@ -293,7 +293,7 @@ func _test_typed_state_and_named_variants() -> void:
 	)
 	_expect(
 		restored_configured and restore_result.get("status") == "ok",
-		"typed map state restores through save schema 6: %s"
+		"typed map state restores through save schema 7: %s"
 			% restore_result
 	)
 	result = restored.begin_map_trigger("scenario.fixture.stateful-trigger")
@@ -538,6 +538,7 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 		"kind": "entry",
 		"role": "action",
 		"hook": "run",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -573,7 +574,7 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 3,
+			"schemaVersion": 4,
 			"kind": "remake-authored",
 			"mapTriggers": [{
 				"id": trigger_id,
@@ -605,7 +606,7 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 			"encounters": [],
 		},
 		"remakeScripts": {
-			"schemaVersion": 2,
+			"schemaVersion": 3,
 			"apiVersion": 2,
 			"capabilityCatalogHash": catalog.catalog_hash(),
 			"behaviors": [behavior],
@@ -651,6 +652,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"kind": "entry",
 		"role": "encounter",
 		"hook": "enter",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -692,6 +694,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"kind": "entry",
 		"role": "encounter",
 		"hook": "result",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -733,6 +736,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"kind": "entry",
 		"role": "encounter",
 		"hook": "complete",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -763,6 +767,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"kind": "helper",
 		"role": "helper",
 		"hook": "",
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
@@ -843,7 +848,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 3,
+			"schemaVersion": 4,
 			"kind": "remake-authored",
 			"mapTriggers": [],
 			"eventTriggers": [],
@@ -919,7 +924,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 			}],
 		},
 		"remakeScripts": {
-			"schemaVersion": 2,
+			"schemaVersion": 3,
 			"apiVersion": 2,
 			"capabilityCatalogHash": catalog.catalog_hash(),
 			"behaviors": [
@@ -1050,7 +1055,7 @@ func _state_variant_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 3,
+			"schemaVersion": 4,
 			"kind": "remake-authored",
 			"mapTriggers": [{
 				"id": trigger_id,
@@ -1090,7 +1095,7 @@ func _state_variant_bundle() -> ScenarioCampaignBundle:
 			"encounters": [],
 		},
 		"remakeScripts": {
-			"schemaVersion": 2,
+			"schemaVersion": 3,
 			"apiVersion": 2,
 			"capabilityCatalogHash": catalog.catalog_hash(),
 			"behaviors": [
@@ -1176,7 +1181,7 @@ func _event_schedule_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 3,
+			"schemaVersion": 4,
 			"kind": "remake-authored",
 			"mapTriggers": [],
 			"eventTriggers": [
@@ -1225,7 +1230,7 @@ func _event_schedule_bundle() -> ScenarioCampaignBundle:
 			"encounters": [],
 		},
 		"remakeScripts": {
-			"schemaVersion": 2,
+			"schemaVersion": 3,
 			"apiVersion": 2,
 			"capabilityCatalogHash": catalog.catalog_hash(),
 			"behaviors": behaviors,
@@ -1276,6 +1281,7 @@ static func _safe_behavior(
 		"kind": kind,
 		"role": role,
 		"hook": hook,
+		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,

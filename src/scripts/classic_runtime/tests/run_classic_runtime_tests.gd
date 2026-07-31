@@ -2861,6 +2861,7 @@ func _test_bundle_contract_validation() -> void:
 		"eventTriggers": [],
 		"scheduledTriggers": [],
 		"encounters": [],
+		"encounterOverlays": [],
 	}
 	_expect(
 		enhanced_bundle._validate_document_contract(),
@@ -3835,7 +3836,7 @@ func _minimal_contract_documents() -> Dictionary:
 			},
 		},
 		"remakeScripts": {
-			"schemaVersion": 2,
+			"schemaVersion": 3,
 			"apiVersion": 2,
 			"capabilityCatalogHash": capability_catalog.catalog_hash(),
 			"limits": {
@@ -4482,7 +4483,11 @@ func _test_installed_classic_campaign_layout() -> void:
 		"saved campaign reload creates a fresh runtime host"
 	)
 	var restore_result: Dictionary = restored_session.restore_save_payload(parsed_payload)
-	_expect_equal(restore_result.get("status"), "ok", "campaign save payload restores")
+	_expect_equal(
+		restore_result.get("status"),
+		"ok",
+		"campaign save payload restores: %s" % restore_result
+	)
 	var restored_state: Object = restored_session.host.runtime.runtime_state
 	_expect(restored_state.is_quest_set(37), "saved campaign restores quest flags")
 	_expect_equal(restored_state.level_type, "dungeon", "saved campaign restores map family")

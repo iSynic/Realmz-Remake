@@ -1776,22 +1776,43 @@ func resolve_complex_spell_result(
 	spell_id_mapping: Dictionary,
 	supported_spell_ids: Array = []
 ) -> int:
+	var response_index := matching_complex_spell_response_index(
+		encounter,
+		spell_name,
+		spell_class,
+		spell_id_mapping,
+		supported_spell_ids
+	)
+	var spell_results: Variant = encounter.get("spellResults", [])
+	if response_index < 0 or not (spell_results is Array) \
+			or response_index >= spell_results.size():
+		return 4
+	return int(spell_results[response_index])
+
+
+func matching_complex_spell_response_index(
+	encounter: Dictionary,
+	spell_name: String,
+	spell_class: int,
+	spell_id_mapping: Dictionary,
+	supported_spell_ids: Array = []
+) -> int:
 	var spell_ids: Variant = encounter.get("spellIds", [])
 	var spell_results: Variant = encounter.get("spellResults", [])
 	if not (spell_ids is Array) or not (spell_results is Array):
-		return 4
+		return -1
 	for index: int in range(min(spell_ids.size(), spell_results.size())):
 		var spell_id := int(spell_ids[index])
 		if spell_id > 0 and spell_id in supported_spell_ids:
-			return int(spell_results[index])
+			return index
 		if spell_id > 0 and spell_id < 7 and spell_class == spell_id:
-			return int(spell_results[index])
+			return index
 		if spell_id >= 1101:
 			var mapped_name := _mapped_spell_name(spell_id, spell_id_mapping)
 			if _normalized_spell_name(mapped_name) == _normalized_spell_name(spell_name) \
 					and (supported_spell_ids.is_empty() or spell_id in supported_spell_ids):
-				return int(spell_results[index])
-	return 4
+				return index
+	return -1
 
 
 func classic_spell_mapping_key(spell_id: int) -> String:
@@ -2063,10 +2084,31 @@ func resolve_complex_item_result(
 	item_texts: Array,
 	classic_item_identity: Variant = 0
 ) -> int:
+	var response_index := matching_complex_item_response_index(
+		encounter,
+		item_name,
+		item_id_mapping,
+		item_texts,
+		classic_item_identity
+	)
+	var item_results: Variant = encounter.get("itemResults", [])
+	if response_index < 0 or not (item_results is Array) \
+			or response_index >= item_results.size():
+		return 4
+	return int(item_results[response_index])
+
+
+func matching_complex_item_response_index(
+	encounter: Dictionary,
+	item_name: String,
+	item_id_mapping: Dictionary,
+	item_texts: Array,
+	classic_item_identity: Variant = 0
+) -> int:
 	var item_ids: Variant = encounter.get("itemIds", [])
 	var item_results: Variant = encounter.get("itemResults", [])
 	if not (item_ids is Array) or not (item_results is Array):
-		return 4
+		return -1
 	var normalized_item_name := _normalized_item_name(item_name)
 	var classic_item_ids: Array[int] = []
 	if classic_item_identity is Array:
@@ -2083,15 +2125,15 @@ func resolve_complex_item_result(
 		if item_id == 0:
 			continue
 		if classic_item_ids.has(item_id):
-			return int(item_results[index])
+			return index
 		for candidate_name: String in _classic_item_names(
 			item_id,
 			item_id_mapping,
 			item_texts
 		):
 			if _normalized_item_name(candidate_name) == normalized_item_name:
-				return int(item_results[index])
-	return 4
+				return index
+	return -1
 
 
 func resolve_complex_item_selection(
@@ -2121,6 +2163,13 @@ func resolve_complex_item_selection(
 	match str(selection.get("mode", "item")):
 		"item":
 			# Ordinary encounter-response items are inspected, not consumed.
+			var response_index := matching_complex_item_response_index(
+				encounter,
+				item_name,
+				item_id_mapping,
+				item_texts,
+				_classic_item_ids(item)
+			)
 			selection["outcome"] = resolve_complex_item_result(
 				encounter,
 				item_name,
@@ -2128,6 +2177,11 @@ func resolve_complex_item_selection(
 				item_texts,
 				_classic_item_ids(item)
 			)
+			if response_index >= 0:
+				selection["responseRef"] = {
+					"kind": "item",
+					"index": response_index,
+				}
 		"spell-item":
 			var spell_response := _complex_spell_item_response(encounter, selection)
 			if str(spell_response.get("status", "")) == "error":
@@ -2282,7 +2336,7 @@ func _complex_spell_item_response(encounter: Dictionary, selection: Dictionary) 
 	var spell_name := str(selection.get("spellName", ""))
 	var custom_spell: Variant = classic_spell_override(spell_id)
 	if custom_spell != null:
-		return {
+		var custom_response := {
 			"outcome": resolve_complex_spell_result(
 				encounter,
 				str(custom_spell.get("name")),
@@ -2294,6 +2348,19 @@ func _complex_spell_item_response(encounter: Dictionary, selection: Dictionary) 
 			"spellId": spell_id,
 			"classicSpecial": int(custom_spell.get("classic_special")),
 		}
+		var custom_response_index := matching_complex_spell_response_index(
+			encounter,
+			str(custom_spell.get("name")),
+			int(custom_spell.get("classic_spell_class")),
+			{},
+			custom_spell.get("classic_spell_ids")
+		)
+		if custom_response_index >= 0:
+			custom_response["responseRef"] = {
+				"kind": "spell",
+				"index": custom_response_index,
+			}
+		return custom_response
 	var spell_mapping: Dictionary = {}
 	var spell_ids: Object = _autoload("SpellsIdDivinity")
 	if spell_ids != null and spell_ids.mappings is Dictionary:
@@ -2312,7 +2379,7 @@ func _complex_spell_item_response(encounter: Dictionary, selection: Dictionary) 
 		if spell.get("classic_spell_class") != null else 0
 	var supported_spell_ids: Array = spell.get("classic_spell_ids") \
 		if spell.get("classic_spell_ids") is Array else []
-	return {
+	var response := {
 		"outcome": resolve_complex_spell_result(
 			encounter,
 			spell_name,
@@ -2325,6 +2392,19 @@ func _complex_spell_item_response(encounter: Dictionary, selection: Dictionary) 
 		"classicSpecial": int(spell.get("classic_special")) \
 			if spell.get("classic_special") != null else 0,
 	}
+	var response_index := matching_complex_spell_response_index(
+		encounter,
+		spell_name,
+		spell_class,
+		spell_mapping,
+		supported_spell_ids
+	)
+	if response_index >= 0:
+		response["responseRef"] = {
+			"kind": "spell",
+			"index": response_index,
+		}
+	return response
 
 
 func _classic_item_ids(item: Variant) -> Array[int]:
@@ -2449,6 +2529,7 @@ func _select_complex_word(encounter: Dictionary) -> Dictionary:
 	return {
 		"outcome": resolve_complex_word_result(encounter, entered_text),
 		"spokenText": entered_text,
+		"responseRef": {"kind": "typed-reply"},
 	}
 
 
@@ -2477,6 +2558,13 @@ func _select_complex_spell(encounter: Dictionary, include_spell_user := false) -
 	var spell_class := int(spell.get("classic_spell_class")) \
 		if spell.get("classic_spell_class") != null else 0
 	var supported_spell_ids := classic_spell_response_ids(spell)
+	var response_index := matching_complex_spell_response_index(
+		encounter,
+		str(spell.get("name")),
+		spell_class,
+		spell_mapping,
+		supported_spell_ids
+	)
 	var result := {
 		"outcome": resolve_complex_spell_result(
 			encounter,
@@ -2490,6 +2578,11 @@ func _select_complex_spell(encounter: Dictionary, include_spell_user := false) -
 		"classicSpecial": int(spell.get("classic_special")) \
 			if spell.get("classic_special") != null else 0,
 	}
+	if response_index >= 0:
+		result["responseRef"] = {
+			"kind": "spell",
+			"index": response_index,
+		}
 	if include_spell_user:
 		result["_spellUser"] = picked_character
 	return result

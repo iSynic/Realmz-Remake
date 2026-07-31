@@ -178,6 +178,7 @@ func resolve_action(action_index: int, succeeded: bool) -> Dictionary:
 	var prefix := "success" if succeeded else "failure"
 	return {
 		"status": "resolved",
+		"success": succeeded,
 		"outcome": _array_int("%sCodes" % prefix, action_index),
 		"messageId": _array_int("%sText" % prefix, action_index),
 		"soundId": _array_int("%sSounds" % prefix, action_index),

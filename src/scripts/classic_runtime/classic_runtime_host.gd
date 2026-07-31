@@ -794,12 +794,16 @@ func run_behavior_attachments(
 ) -> Dictionary:
 	if runtime == null or runtime.interpreter == null:
 		return {"handled": false}
+	var binding_anchor: Dictionary = request.get(
+		"anchor",
+		{"kind": "domain"}
+	)
 	var bindings: Array = runtime.interpreter.matching_scenario_behavior_bindings(
 		role,
 		hook,
 		target_kind,
 		target_ids,
-		int(request.get("slot", -1))
+		binding_anchor
 	)
 	if bindings.is_empty():
 		return {"handled": false}
@@ -846,13 +850,28 @@ func run_behavior_binding(
 			"status": "error",
 			"message": "Scenario behavior runtime is unavailable",
 		}
+	var binding_anchor: Dictionary = request.get(
+		"anchor",
+		{"kind": "domain"}
+	)
 	var bindings: Array = runtime.interpreter.matching_scenario_behavior_bindings(
 		role,
 		hook,
 		target_kind,
 		[target_id],
-		slot
+		binding_anchor
 	)
+	if bindings.is_empty() and slot >= 0:
+		# Preview entries from older clients carry only a slot. Select the named
+		# binding after checking its target contract; placement remains package data.
+		for binding_value: Variant in runtime.interpreter.scenario_script_runtime.behavior_bindings:
+			if binding_value is Dictionary \
+					and str(binding_value.get("behaviorId", "")) == behavior_id \
+					and str(binding_value.get("role", "")) == role \
+					and str(binding_value.get("hook", "")) == hook \
+					and str(binding_value.get("targetKind", "")) == target_kind \
+					and str(binding_value.get("recordId", "")) == target_id:
+				bindings.append(binding_value.duplicate(true))
 	var selected_binding := {}
 	for binding_value: Variant in bindings:
 		if binding_value is Dictionary \
@@ -898,12 +917,16 @@ func run_behavior_attachments_pure(
 ) -> Dictionary:
 	if runtime == null or runtime.interpreter == null:
 		return {"handled": false}
+	var binding_anchor: Dictionary = request.get(
+		"anchor",
+		{"kind": "domain"}
+	)
 	var bindings: Array = runtime.interpreter.matching_scenario_behavior_bindings(
 		role,
 		hook,
 		target_kind,
 		target_ids,
-		int(request.get("slot", -1))
+		binding_anchor
 	)
 	if bindings.is_empty():
 		return {"handled": false}
@@ -941,7 +964,7 @@ func has_behavior_attachments(
 	hook: String,
 	target_kind: String,
 	target_ids: Array,
-	slot := -1
+	anchor := {"kind": "domain"}
 ) -> bool:
 	if runtime == null or runtime.interpreter == null:
 		return false
@@ -950,7 +973,7 @@ func has_behavior_attachments(
 		hook,
 		target_kind,
 		target_ids,
-		slot
+		anchor
 	).is_empty()
 
 

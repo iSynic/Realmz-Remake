@@ -1,7 +1,7 @@
 class_name ScenarioSaveContract
 extends RefCounted
 
-const SCHEMA_VERSION := 6
+const SCHEMA_VERSION := 7
 const REQUIRED_FIELDS := [
 	"schemaVersion",
 	"campaignId",
@@ -14,6 +14,11 @@ const REQUIRED_FIELDS := [
 	"stateSchemaVersions",
 	"interpreter",
 	"pendingCommand",
+	"activeResponseRef",
+	"activeResultRef",
+	"mixedSequenceCursor",
+	"resultTransitionCount",
+	"attachmentOrder",
 	"resolvedGameplayRules",
 	"requiredPlugins",
 ]
@@ -37,12 +42,24 @@ static func validate(payload: Variant) -> Dictionary:
 		"behaviorHashes",
 		"stateSchemaVersions",
 		"interpreter",
+		"mixedSequenceCursor",
 		"resolvedGameplayRules",
 	]:
 		if not (payload.get(object_field) is Dictionary):
 			return _error("Scenario save field '%s' must be an object" % object_field)
 	if not (payload.get("requiredPlugins") is Array):
 		return _error("Scenario save requiredPlugins must be an array")
+	if not (payload.get("attachmentOrder") is Array):
+		return _error("Scenario save attachmentOrder must be an array")
+	if payload.get("activeResponseRef") != null \
+			and not (payload.get("activeResponseRef") is Dictionary):
+		return _error("Scenario save activeResponseRef must be an object or null")
+	if payload.get("activeResultRef") != null \
+			and not (payload.get("activeResultRef") is Dictionary):
+		return _error("Scenario save activeResultRef must be an object or null")
+	if not (payload.get("resultTransitionCount") is int) \
+			or int(payload.get("resultTransitionCount", -1)) < 0:
+		return _error("Scenario save resultTransitionCount must be a non-negative integer")
 	if str(payload.get("campaignKind", "")) not in [
 		"classic-interpreted",
 		"classic-enhanced",

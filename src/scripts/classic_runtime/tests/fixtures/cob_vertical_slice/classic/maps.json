@@ -1,1 +1,1 @@
-{"maps":[{"height":90,"id":"land:0","index":0,"levelType":"land","name":"Land level 0","render":{"landlook":0,"mode":"outdoor-landlook","tilesetId":"landlook-0"},"width":90}],"schemaVersion":3}
+{"maps":[{"height":90,"id":"land:0","index":0,"levelType":"land","name":"Land level 0","render":{"landlook":0,"mode":"outdoor-landlook","tilesetId":"landlook-0"},"width":90}],"schemaVersion":4}

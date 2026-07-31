@@ -68,13 +68,15 @@
       "hookLabel": "Encounter Stage",
       "hooks": [
         "enter",
-        "option",
+        "availability",
+        "response",
         "result",
         "complete"
       ],
       "runtimeHooks": [
         "enter",
-        "option",
+        "availability",
+        "response",
         "result",
         "complete"
       ],
@@ -85,9 +87,15 @@
           "description": "Runs before the encounter prompt opens."
         },
         {
-          "id": "option",
-          "label": "After Choice",
-          "description": "Runs after the player chooses this option and before its result is resolved."
+          "id": "availability",
+          "label": "Available When",
+          "description": "Pure check that decides whether this response participates.",
+          "resultType": "bool"
+        },
+        {
+          "id": "response",
+          "label": "When Chosen",
+          "description": "Runs after the response matches and before its result is resolved."
         },
         {
           "id": "result",
@@ -101,6 +109,7 @@
         }
       ],
       "allowsYield": true,
+      "pureHooks": ["availability"],
       "summary": "Adds behavior to an encounter boundary.",
       "reference": "Attach behavior to the encounter, a selected option or result, or the completion boundary.",
       "example": "func resolve_offer() -> EncounterOutcome:\n    return {\"kind\": \"resolve\"}"

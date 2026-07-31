@@ -18,7 +18,7 @@ const GameplayRuleRegistryScript = preload(
 const GameplayRuleSetScript = preload(
 	"res://scripts/scenario_runtime/gameplay_rule_set.gd"
 )
-const SAVE_SCHEMA_VERSION := 6
+const SAVE_SCHEMA_VERSION := 7
 const IMPLEMENTATION_KIND := "scenario-interpreter"
 
 var install: Object
@@ -328,6 +328,7 @@ func make_save_result() -> Dictionary:
 	if str(continuation_result.get("status", "")) != "ok":
 		return continuation_result
 	var port_state: Dictionary = host.snapshot_port_state()
+	var mixed_state: Dictionary = host.runtime.interpreter.mixed_execution_state()
 	return {
 		"status": "ok",
 		"payload": {
@@ -337,7 +338,7 @@ func make_save_result() -> Dictionary:
 			"implementationKind": IMPLEMENTATION_KIND,
 			"campaignContentVersion": _campaign_content_version(),
 			"campaignPackageHash": _campaign_package_hash(),
-			"scriptApiVersions": {"scenarioScripts": 2},
+			"scriptApiVersions": {"scenarioScripts": 3},
 			"scenarioScriptContract": _scenario_script_contract(),
 			"requiredPlugins": _required_plugins(),
 			"runtimeState": runtime_state.call("snapshot"),
@@ -345,6 +346,11 @@ func make_save_result() -> Dictionary:
 			"continuationState": continuation_result["snapshot"],
 			"enhancedTriggerState": host.snapshot_enhanced_trigger_state(),
 			"activeSemanticReplacements": _active_semantic_replacements(),
+			"activeResponseRef": mixed_state.get("activeResponseRef"),
+			"activeResultRef": mixed_state.get("activeResultRef"),
+			"mixedSequenceCursor": mixed_state.get("mixedSequenceCursor", {}),
+			"resultTransitionCount": int(mixed_state.get("resultTransitionCount", 0)),
+			"attachmentOrder": mixed_state.get("attachmentOrder", []),
 			"gameplayRules": gameplay_rule_set.snapshot(),
 		},
 	}
@@ -644,7 +650,7 @@ static func validate_save_payload(
 			)
 	var script_versions: Variant = payload.get("scriptApiVersions")
 	if not (script_versions is Dictionary) \
-			or int(script_versions.get("scenarioScripts", 0)) != 2:
+			or int(script_versions.get("scenarioScripts", 0)) != 3:
 		return _error("Scenario script save API is unavailable or incompatible")
 	var saved_script_contract: Variant = payload.get("scenarioScriptContract")
 	if not (saved_script_contract is Dictionary):
@@ -662,6 +668,19 @@ static func validate_save_payload(
 		return _error("Scenario runtime save data has invalid Enhanced trigger state")
 	if not (payload.get("activeSemanticReplacements") is Array):
 		return _error("Scenario runtime save data has invalid semantic replacements")
+	if payload.get("activeResponseRef") != null \
+			and not (payload.get("activeResponseRef") is Dictionary):
+		return _error("Scenario runtime save data has an invalid active response")
+	if payload.get("activeResultRef") != null \
+			and not (payload.get("activeResultRef") is Dictionary):
+		return _error("Scenario runtime save data has an invalid active result")
+	if not (payload.get("mixedSequenceCursor") is Dictionary):
+		return _error("Scenario runtime save data has an invalid mixed-sequence cursor")
+	var transition_count: Variant = payload.get("resultTransitionCount")
+	if not _is_nonnegative_integer_number(transition_count):
+		return _error("Scenario runtime save data has an invalid result transition count")
+	if not (payload.get("attachmentOrder") is Array):
+		return _error("Scenario runtime save data has an invalid attachment order")
 	var continuation_value: Variant = payload.get("continuationState")
 	var continuation_result: Dictionary = RuntimeScript.validate_continuation_snapshot(
 		continuation_value
@@ -680,6 +699,13 @@ static func validate_save_payload(
 			"Saved gameplay rules are invalid"
 		)))
 	return {"status": "ok"}
+
+
+static func _is_nonnegative_integer_number(value: Variant) -> bool:
+	if not (value is int or value is float):
+		return false
+	var number := float(value)
+	return number >= 0.0 and number == floorf(number)
 
 
 func _campaign_id() -> String:
