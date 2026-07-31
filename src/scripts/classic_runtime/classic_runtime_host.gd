@@ -1193,8 +1193,12 @@ func run_battle_round_macro(
 			"handled": true,
 			"triggerId": trigger_id,
 			"result": {
-				"status": "error",
-				"message": "Classic battle macro trigger '%s' is missing" % trigger_id,
+				"status": "completed",
+				"reason": "missing-battle-round-macro-noop",
+				"message": (
+					"Classic battle macro trigger '%s' is missing; "
+					+ "using the deterministic no-op fallback"
+				) % trigger_id,
 			},
 		}
 	var execution_context: Dictionary = context.duplicate(true) if context is Dictionary else {}

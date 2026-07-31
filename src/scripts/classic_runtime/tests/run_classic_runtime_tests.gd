@@ -116,6 +116,9 @@ const CampaignCorpusReportScript = preload(
 const CampaignAdmissionScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_admission.gd"
 )
+const TestPartyFactoryScript = preload(
+	"res://scripts/classic_runtime/playtest/classic_test_party_factory.gd"
+)
 const CharacterRulesScript = preload(
 	"res://scripts/classic_runtime/classic_character_rules.gd"
 )
@@ -2588,6 +2591,7 @@ func _ready() -> void:
 	_test_classic_native_context_and_corpus_report()
 	_test_builtin_shared_asset_tilesets()
 	_test_classic_campaign_admission()
+	_test_classic_test_party_tiers()
 	_test_classic_character_rule_profile()
 	_test_classic_map_materializer()
 	_test_classic_dungeon_battle_terrain()
@@ -5394,6 +5398,70 @@ func _test_classic_campaign_admission() -> void:
 	_expect(bool(allowed_party.get("allowed", false)), "ordinary eligible party remains allowed")
 
 
+func _test_classic_test_party_tiers() -> void:
+	_expect_equal(
+		TestPartyFactoryScript.levels_for_recommended_total(6),
+		[1, 1, 1, 1, 1, 1],
+		"City of Bywater receives a complete level-1 test party",
+	)
+	_expect_equal(
+		TestPartyFactoryScript.levels_for_recommended_total(72),
+		[12, 12, 12, 12, 12, 12],
+		"War receives a complete level-12 test party",
+	)
+	_expect_equal(
+		TestPartyFactoryScript.levels_for_recommended_total(125),
+		[21, 21, 21, 21, 21, 20],
+		"White Dragon distributes its non-divisible recommended total deterministically",
+	)
+	_expect_equal(
+		TestPartyFactoryScript.levels_for_recommended_total(170),
+		[29, 29, 28, 28, 28, 28],
+		"Mithril Vault receives the exact recommended epic party total",
+	)
+	var first_specs := TestPartyFactoryScript.specs_for_recommended_total(72)
+	var second_specs := TestPartyFactoryScript.specs_for_recommended_total(72)
+	_expect_equal(
+		first_specs,
+		second_specs,
+		"campaign-aware test party specs are deterministic",
+	)
+	var party_roles: Array[String] = []
+	for spec: Dictionary in first_specs:
+		party_roles.append("%s:%s:%s" % [
+			spec.get("name", ""),
+			spec.get("raceName", ""),
+			spec.get("casteName", ""),
+		])
+	_expect_equal(
+		party_roles,
+		[
+			"Alaric:Human:Fighter",
+			"Brynja:Dwarf:Crusader",
+			"Korga:Half Orc:Rogue",
+			"Lethiel:Elf:Archer",
+			"Nyssara:Shadow Elf:Sorcerer",
+			"Pella:Gnome:Priest",
+		],
+		"test party covers six stable race, caste, and gameplay roles",
+	)
+	_expect_equal(
+		TestPartyFactoryScript.maximum_spell_tier_for_level(1),
+		1,
+		"level-1 casters receive only first-tier spells",
+	)
+	_expect_equal(
+		TestPartyFactoryScript.maximum_spell_tier_for_level(21),
+		6,
+		"level-21 casters receive spells through sixth tier",
+	)
+	_expect_equal(
+		TestPartyFactoryScript.gear_tier_for_level(29),
+		4,
+		"epic campaign characters receive the epic equipment loadout",
+	)
+
+
 func _test_classic_map_materializer() -> void:
 	var bundle = BundleScript.new()
 	_expect(
@@ -7325,9 +7393,15 @@ func _test_classic_item_materializer() -> void:
 	)
 	_expect(
 		_readiness_has_reference_diagnostic(
+			unsupported_readiness, "native-item-fidelity-fallback", 901
+		),
+		"encounter identity matching remains available when other item behavior is unsupported"
+	)
+	_expect(
+		not _readiness_has_reference_diagnostic(
 			unsupported_readiness, "unsupported-native-item-fields", 901
 		),
-		"unsupported item behavior blocks launch with its stable identity"
+		"unrelated item mechanics do not block a complex encounter identity check"
 	)
 	_expect_equal(
 		CampaignPackageInstallerScript.new()._remove_directory(test_root),
@@ -9075,7 +9149,6 @@ func _test_classic_bestiary_materializer() -> void:
 		exact_spell_book,
 		spell_ids.mappings
 	)
-	spell_ids.free()
 	_expect_equal(
 		exact_spell_result.get("entries"),
 		[["Enchanted Blade", 1], ["Classic Discover Magic Area", 1]],
@@ -9086,9 +9159,25 @@ func _test_classic_bestiary_materializer() -> void:
 		[],
 		"exact-ID Classic monster spells do not use name-only fallbacks"
 	)
+	var stock_monster_spell_result: Dictionary = materializer._native_spells(
+		{"spells": [4512]},
+		exact_spell_book,
+		spell_ids.mappings
+	)
+	_expect_equal(
+		stock_monster_spell_result.get("entries"),
+		[["Pheromone Blast", 1]],
+		"stock monster-only spells resolve through their exact Classic identity"
+	)
+	_expect_equal(
+		stock_monster_spell_result.get("unsupportedFields"),
+		[],
+		"an executable monster-only spell is launchable"
+	)
+	spell_ids.free()
 
 	var requirement_record: Dictionary = bundle.get_monster(1).duplicate(true)
-	requirement_record["distance"] = 1
+	requirement_record["distance"] = -1023
 	requirement_record["magicToHit"] = 2
 	var requirement_result: Dictionary = materializer._native_weapon_requirements(
 		requirement_record,
@@ -9103,7 +9192,7 @@ func _test_classic_bestiary_materializer() -> void:
 			"classicRequiredWeaponName": "Dagger",
 			"classicRequiredMagicPlus": 2,
 		},
-		"Classic exact-weapon and magic-plus gates resolve to native metadata"
+		"Classic item-ID deltas and magic-plus gates resolve to native metadata"
 	)
 	_expect_equal(
 		requirement_result.get("unsupportedFields"),
@@ -9171,7 +9260,7 @@ func _test_classic_bestiary_materializer() -> void:
 		"Classic unarmed gate uses the attacker's level threshold"
 	)
 	var invalid_requirement: Dictionary = materializer._native_weapon_requirements(
-		{"distance": -3, "magicToHit": -1},
+		{"distance": -1025, "magicToHit": -1},
 		{},
 		[],
 		{}
@@ -9180,6 +9269,36 @@ func _test_classic_bestiary_materializer() -> void:
 		invalid_requirement.get("unsupportedFields"),
 		["distance", "magicToHit"],
 		"unknown weapon gates remain explicit launch blockers"
+	)
+	var spell_only_record: Dictionary = bundle.get_monster(1).duplicate(true)
+	spell_only_record["attackCount"] = 0
+	spell_only_record["magicAttackCount"] = 2
+	var spell_only_attacks: Dictionary = materializer._native_attacks(
+		spell_only_record
+	)
+	_expect(
+		spell_only_attacks.get("fidelityFallbacks", []).has(
+			"zeroMeleeAttacksUseNativeActionFloor"
+		),
+		"a spell-only monster records the native action-floor fallback"
+	)
+	_expect(
+		not materializer._unsupported_fields(
+			spell_only_record,
+			{},
+			{},
+			spell_only_attacks,
+			{}
+		).has("attackCount"),
+		"zero Classic melee attacks remain valid for a spell-only monster"
+	)
+	_expect_equal(
+		materializer._native_stats(
+			spell_only_record,
+			10
+		).get("MaxActions"),
+		2,
+		"spell-only monsters retain enough native actions for their spell count"
 	)
 	var runtime_state_record: Dictionary = bundle.get_monster(1).duplicate(true)
 	for field_name: String in [
@@ -10230,14 +10349,13 @@ func _test_classic_campaign_package_installer() -> void:
 	)
 	_expect_equal(
 		unsupported_item_install.get("status"),
-		"error",
-		"installer rejects a materialized item with unsupported behavior"
+		"ok",
+		"installer accepts an identifiable encounter item with unrelated unsupported behavior"
 	)
-	_expect(
-		str(unsupported_item_install.get("message", "")).contains(
-			"unsupported native fields"
-		),
-		"unsupported item installation reports the item readiness boundary"
+	_expect_equal(
+		unsupported_item_install.get("readinessState"),
+		"Ready with fallbacks",
+		"encounter-only item fidelity debt does not block campaign launch"
 	)
 	var unsupported_monster_export := test_root.path_join("producer-unsupported-monster")
 	_expect_equal(
@@ -13508,6 +13626,24 @@ func _test_execution_coverage_audit(bundle) -> void:
 		_audit_has_diagnostic(macro_report, "inactive-macro-target"),
 		"execution audit diagnoses an inactive but reachable macro"
 	)
+	macro_bundle.battles_by_id[4] = {"id": 4, "battleMacro": -98}
+	var macro_readiness: Dictionary = ReadinessScript.new().inspect(macro_bundle)
+	var missing_battle_macro_fallback := false
+	for diagnostic_value: Variant in macro_readiness.get("diagnostics", []):
+		if not (diagnostic_value is Dictionary):
+			continue
+		if (
+			diagnostic_value.get("code") == "missing-macro-target"
+			and diagnostic_value.get("source") == "Data BD"
+			and diagnostic_value.get("classification") == "fidelity-fallback"
+			and diagnostic_value.get("remakeBehavior") == "deterministic-noop"
+		):
+			missing_battle_macro_fallback = true
+			break
+	_expect(
+		missing_battle_macro_fallback,
+		"missing battle-round macros use an explicit deterministic fallback"
+	)
 	var invalid_death_records: Array = []
 	for diagnostic_value: Variant in macro_report.get("diagnostics", []):
 		if (
@@ -13869,7 +14005,7 @@ func _test_campaign_readiness_report() -> void:
 	bundle.documents["encounters"]["complexEncounters"] = [{
 		"id": 9,
 		"actions": [],
-		"itemIds": [878, 811, 0, 0, 0],
+		"itemIds": [878, 811, 9999, 0, 0],
 		"spellIds": [1, 9998, 0, 0, 0, 0, 0, 0, 0, 0],
 	}]
 	bundle.documents["assets"]["catalog"]["pictures"] = [{
@@ -13994,6 +14130,10 @@ func _test_campaign_readiness_report() -> void:
 	_expect(
 		not _readiness_has_reference_diagnostic(report, "missing-native-item", 811),
 		"readiness ignores empty fixed-capacity scenario-item slots"
+	)
+	_expect(
+		not _readiness_has_reference_diagnostic(report, "missing-native-item", 9999),
+		"readiness ignores the Classic complex-encounter item sentinel"
 	)
 	_expect(
 		_readiness_has_diagnostic(
@@ -26947,6 +27087,71 @@ func _test_classic_stock_item_spells() -> void:
 			"stock Poison preserves its source condition strength"
 		)
 
+	var pheromone_blast: Variant = load(
+		"res://shared_assets/spells/classic_pheromone_blast_4512.gd"
+	).new()
+	_expect_equal(
+		pheromone_blast.classic_spell_ids,
+		[4512],
+		"Pheromone Blast exports its exact stock identity"
+	)
+	_expect_equal(
+		pheromone_blast.classic_special,
+		52,
+		"Pheromone Blast preserves Classic's charm-to-caster special"
+	)
+	_expect_equal(
+		pheromone_blast.classic_target_type,
+		3,
+		"Pheromone Blast preserves its area target type"
+	)
+	_expect_equal(
+		pheromone_blast.get_range(1, null),
+		4,
+		"Pheromone Blast preserves its four-tile source range"
+	)
+	_expect_equal(
+		pheromone_blast.classic_size,
+		7,
+		"Pheromone Blast preserves its source area size"
+	)
+	_expect_equal(
+		pheromone_blast.classic_spell_save_index,
+		-1,
+		"Pheromone Blast follows Classic's no-DRV charm path"
+	)
+	_expect(
+		pheromone_blast.in_combat and not pheromone_blast.in_field,
+		"Pheromone Blast remains a combat-only monster ability"
+	)
+	_expect_equal(
+		pheromone_blast.source_record.get("sourceRecord", {}).get("recordIndex"),
+		386,
+		"Pheromone Blast preserves its Data S record"
+	)
+	var pheromone_caster := Creature.new()
+	var pheromone_target := Creature.new()
+	_expect(
+		pheromone_blast.apply_classic_scaled_effect(
+			pheromone_caster,
+			pheromone_target,
+			1,
+			1.0
+		),
+		"Pheromone Blast applies its allegiance effect"
+	)
+	_expect_equal(
+		pheromone_target.traits.size(),
+		1,
+		"Pheromone Blast adds one charm trait"
+	)
+	if not pheromone_target.traits.is_empty():
+		_expect_equal(
+			pheromone_target.traits[0].name,
+			"t_classic_charmed.gd",
+			"Pheromone Blast uses the shared Classic charm implementation"
+		)
+
 	var attribute_specs: Array[Dictionary] = [
 		{
 			"path": "classic_improved_knowledge_4502.gd",
@@ -30839,6 +31044,21 @@ func _test_native_battle_round_host() -> void:
 	var disabled: Variant = await host.run_battle_round_macro({"battleMacro": 118}, 3)
 	_expect(disabled is Dictionary, "disabled battle macro dispatch returns immediately")
 	_expect(not bool(disabled.get("handled", true)), "positive battle macro remains disabled")
+	var missing: Variant = await host.run_battle_round_macro(
+		{"battleMacro": -9363},
+		3
+	)
+	_expect(bool(missing.get("handled", false)), "missing battle macro is handled")
+	_expect_equal(
+		missing.get("result", {}).get("status"),
+		"completed",
+		"missing battle macro continues combat"
+	)
+	_expect_equal(
+		missing.get("result", {}).get("reason"),
+		"missing-battle-round-macro-noop",
+		"missing battle macro reports its deterministic fallback"
+	)
 
 	var dispatch: Variant = await host.run_battle_round_macro(
 		{"battleMacro": -118},

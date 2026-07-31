@@ -2,6 +2,9 @@ extends Node
 
 const ACCEPTANCE_PROFILE := "Classic Lifecycle Acceptance"
 const ACCEPTANCE_SAVE := "Launch Checkpoint"
+const TestPartyFactoryScript = preload(
+	"res://scripts/classic_runtime/playtest/classic_test_party_factory.gd"
+)
 
 var campaign_directory := ""
 var acceptance_phase := ""
@@ -9,7 +12,8 @@ var profile_root := ""
 var evidence_path := ""
 var campaign_manifest: Dictionary = {}
 var selection_state := ""
-var selected_character := ""
+var recommended_party_level := 0
+var selected_party: Array[Dictionary] = []
 var failures: Array[String] = []
 var evidence: Dictionary = {}
 var finishing := false
@@ -100,6 +104,58 @@ func _prepare_acceptance_profile() -> bool:
 			_fail("profile", "The disposable acceptance profile could not be created")
 			return false
 	GameGlobal.set_current_profile(ACCEPTANCE_PROFILE)
+	Paths.campaignsfolderpath = campaign_directory.get_base_dir() + "/"
+	var campaign_name := campaign_directory.get_file()
+	var selection_rules: Variant = GameGlobal.get_campaign_selection_rules(
+		campaign_name
+	)
+	if not (selection_rules is Dictionary) \
+			or not bool(selection_rules.get("valid", false)):
+		var rules_diagnostic := ""
+		if selection_rules is Dictionary:
+			rules_diagnostic = str(
+				selection_rules.get(
+					"diagnostic",
+					selection_rules.get("readinessSummary", ""),
+				)
+			).strip_edges()
+		_fail(
+			"profile",
+			(
+				"The campaign rules were unavailable while preparing its "
+				+ "playtest party"
+				+ (
+					": %s" % rules_diagnostic
+					if not rules_diagnostic.is_empty()
+					else ""
+				)
+			),
+		)
+		return false
+	recommended_party_level = int(
+		selection_rules.get("recommendedPartyLevel", 0)
+	)
+	evidence["recommendedPartyLevel"] = recommended_party_level
+	if acceptance_phase == "save":
+		var profile_characters_directory := (
+			profile_path.path_join("Characters")
+		)
+		var party_result: Dictionary = TestPartyFactoryScript.provision(
+			profile_characters_directory,
+			recommended_party_level,
+			NodeAccess.__Resources(),
+		)
+		if str(party_result.get("status", "")) != "ok":
+			_fail(
+				"profile",
+				str(party_result.get(
+					"message",
+					"The campaign-aware playtest party could not be created",
+				)),
+			)
+			return false
+		evidence["provisionedParty"] = party_result.get("characters", [])
+		GameGlobal.load_profile_characters()
 	return true
 
 
@@ -150,19 +206,8 @@ func _launch_through_campaign_menu() -> bool:
 	if not failures.is_empty():
 		return false
 
-	var character_button := _first_eligible_character_button(
-		panel.charPickRect.eligibleContainer.get_children()
-	)
-	if character_button == null:
-		_fail(
-			"ui_launch",
-			"The campaign party rules did not admit any profile character",
-		)
+	if not _select_test_party(panel):
 		return false
-	var character: Variant = character_button.get("character")
-	selected_character = str(character.get("name")) if character != null else ""
-	panel.charPickRect._on_char_button_pressed(character_button)
-	panel.charPickRect._on_AddButton_pressed()
 	if panel.startButton.disabled:
 		_fail("ui_launch", "The normal party picker did not enable Start")
 		return false
@@ -208,7 +253,12 @@ func _verify_authored_start() -> bool:
 		"The compiled authored start is loaded as a drawable native map",
 	)
 	evidence["selectionState"] = selection_state
-	evidence["selectedCharacter"] = selected_character
+	evidence["selectedParty"] = selected_party
+	evidence["selectedCharacter"] = (
+		str(selected_party[0].get("name", ""))
+		if not selected_party.is_empty()
+		else ""
+	)
 	evidence["nativeMapName"] = GameGlobal.currentmap_name
 	evidence["nativePosition"] = {
 		"x": native_position.x,
@@ -351,6 +401,11 @@ func _run_continue_phase() -> void:
 			and map.map_size.y > 0
 			and not map.mapdata.is_empty()
 	)
+	var restored_party := _party_summary(GameGlobal.player_characters)
+	var expected_names := TestPartyFactoryScript.member_names()
+	var restored_names: Array[String] = []
+	for member: Dictionary in restored_party:
+		restored_names.append(str(member.get("name", "")))
 	_verify(
 		"disk_continue",
 		GameGlobal.currentcampaign == campaign_name
@@ -360,7 +415,10 @@ func _run_continue_phase() -> void:
 			and native_matches
 			and _positions_match(saved_position, observed)
 			and not session.has_pending_continuation()
-			and map_drawable,
+			and map_drawable
+			and restored_names == expected_names
+			and _party_level_total(GameGlobal.player_characters)
+				== maxi(TestPartyFactoryScript.PARTY_SIZE, recommended_party_level),
 		"A fresh process restores the saved native and Classic start state",
 	)
 	evidence["nativeMapName"] = GameGlobal.currentmap_name
@@ -371,6 +429,7 @@ func _run_continue_phase() -> void:
 	evidence["runtimePosition"] = observed
 	evidence["mapDrawable"] = map_drawable
 	evidence["pendingContinuation"] = session.has_pending_continuation()
+	evidence["restoredParty"] = restored_party
 	_finish()
 
 
@@ -383,13 +442,119 @@ func _find_campaign_index(item_list: ItemList, campaign_name: String) -> int:
 	return -1
 
 
-func _first_eligible_character_button(buttons: Array[Node]) -> Button:
+func _select_test_party(panel: Node) -> bool:
+	selected_party.clear()
+	var expected_names := TestPartyFactoryScript.member_names()
+	for expected_name: String in expected_names:
+		var character_button := _character_button_named(
+			panel.charPickRect.eligibleContainer.get_children(),
+			expected_name,
+		)
+		if character_button == null:
+			_fail(
+				"ui_launch",
+				"The campaign-aware playtest character %s was not eligible"
+				% expected_name,
+			)
+			return false
+		panel.charPickRect._on_char_button_pressed(character_button)
+		panel.charPickRect._on_AddButton_pressed()
+		if character_button.get_parent() \
+				!= panel.charPickRect.teamContainer:
+			_fail(
+				"ui_launch",
+				"The normal party picker did not add %s" % expected_name,
+			)
+			return false
+	selected_party = _party_summary(
+		panel.charPickRect._selected_party()
+	)
+	var party_level := _party_level_total(
+		panel.charPickRect._selected_party()
+	)
+	var expected_level := maxi(
+		TestPartyFactoryScript.PARTY_SIZE,
+		recommended_party_level,
+	)
+	var has_spellcaster_coverage := false
+	var fully_equipped := true
+	for member: Dictionary in selected_party:
+		if not member.get("spells", []).is_empty():
+			has_spellcaster_coverage = true
+		if member.get("equipment", []).is_empty():
+			fully_equipped = false
+	_verify(
+		"ui_launch",
+		selected_party.size() == TestPartyFactoryScript.PARTY_SIZE
+			and party_level == expected_level
+			and has_spellcaster_coverage
+			and fully_equipped,
+		(
+			"The normal party picker admits the deterministic six-role "
+			+ "level, equipment, and spell fixture"
+		),
+	)
+	return failures.is_empty()
+
+
+func _character_button_named(
+	buttons: Array[Node],
+	character_name: String,
+) -> Button:
 	for button: Node in buttons:
-		if button is Button \
-				and not button.disabled \
-				and button.get("character") != null:
+		if not (button is Button) or button.disabled:
+			continue
+		var character: Variant = button.get("character")
+		if character != null and str(character.get("name")) == character_name:
 			return button
 	return null
+
+
+func _party_summary(party: Array) -> Array[Dictionary]:
+	var summaries: Array[Dictionary] = []
+	var resources: CampaignResources = NodeAccess.__Resources()
+	for character_value: Variant in party:
+		if not (character_value is PlayerCharacter):
+			continue
+		var character: PlayerCharacter = character_value
+		var equipment: Array[String] = []
+		var carried: Array[String] = []
+		for item: ItemInstance in character.item_inventory:
+			var definition := resources.get_item_definition(item)
+			var item_name := (
+				definition.display_name_for(item)
+				if definition != null
+				else item.definition_id
+			)
+			if item.equipped:
+				equipment.append(item_name)
+			else:
+				carried.append(item_name)
+		var spells: Array[String] = []
+		for spell_level: Variant in character.spells:
+			if not (spell_level is Array):
+				continue
+			for spell_value: Variant in spell_level:
+				if spell_value is Dictionary:
+					spells.append(str(spell_value.get("name", "")))
+		summaries.append({
+			"name": character.name,
+			"race": character.get_display_race_name(),
+			"caste": character.get_display_caste_name(),
+			"level": character.level,
+			"equipment": equipment,
+			"carried": carried,
+			"spells": spells,
+		})
+	return summaries
+
+
+func _party_level_total(party: Array) -> int:
+	var total := 0
+	for character_value: Variant in party:
+		if character_value != null:
+			total += maxi(0, int(character_value.get("level")))
+	return total
 
 
 func _runtime_position() -> Dictionary:

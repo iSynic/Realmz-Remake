@@ -83,7 +83,7 @@ const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
 const CLASSIC_INERT_MORALE_MAX := 100
-const MATERIALIZATION_VERSION := 5
+const MATERIALIZATION_VERSION := 6
 
 var last_error := ""
 
@@ -443,20 +443,24 @@ func _native_weapon_requirements(
 		fields["classicRequiredWeaponKind"] = (
 			"blunt" if required_weapon == -1 else "sharp"
 		)
-	elif required_weapon < -2:
-		unsupported_fields.append("distance")
-	elif required_weapon > 0:
-		var item_name := _item_resource_key(
-			required_weapon,
-			item_book,
-			item_texts,
-			item_mapping
-		)
-		if item_name.is_empty():
+	elif required_weapon != 0:
+		# attack.c compares this field with item.itemid - 1024. Preserve the
+		# authored item identity rather than treating the stored delta as an ID.
+		var required_item_id := required_weapon + 1024
+		if required_item_id <= 0:
 			unsupported_fields.append("distance")
 		else:
-			fields["classicRequiredWeaponItemId"] = required_weapon
-			fields["classicRequiredWeaponName"] = item_name
+			var item_name := _item_resource_key(
+				required_item_id,
+				item_book,
+				item_texts,
+				item_mapping
+			)
+			if item_name.is_empty():
+				unsupported_fields.append("distance")
+			else:
+				fields["classicRequiredWeaponItemId"] = required_item_id
+				fields["classicRequiredWeaponName"] = item_name
 
 	var required_magic_plus := int(record.get("magicToHit", 0))
 	if required_magic_plus < 0:
@@ -651,7 +655,13 @@ func _native_stats(record: Dictionary, stamina: int) -> Dictionary:
 	var spell_points := maxi(0, int(record.get("spellPoints", 0)))
 	var stats := {
 		"MaxMovement": maxi(0, int(record.get("movementMax", 0))),
-		"MaxActions": maxi(1, int(record.get("attackCount", 1))),
+		"MaxActions": maxi(
+			1,
+			maxi(
+				int(record.get("attackCount", 1)),
+				int(record.get("magicAttackCount", 0))
+			)
+		),
 		"MaxSpellsPerRound": maxi(0, int(record.get("magicAttackCount", 0))),
 		"Strength": 10,
 		"Intellect": 10,
@@ -731,7 +741,10 @@ func _native_attacks(record: Dictionary) -> Dictionary:
 	var fidelity_fallbacks: Array[String] = []
 	var uses_native_weapon := int(record.get("weapon", 0)) != 0
 	var source: Variant = record.get("attacks", [])
-	var attack_count := maxi(1, int(record.get("attackCount", 1)))
+	var attack_count := int(record.get("attackCount", 1))
+	if attack_count == 0:
+		fidelity_fallbacks.append("zeroMeleeAttacksUseNativeActionFloor")
+	attack_count = maxi(1, attack_count)
 	if source is Array:
 		for attack_index: int in mini(attack_count, source.size()):
 			var row: Variant = source[attack_index]
@@ -818,7 +831,7 @@ func _unsupported_fields(
 			fields.append(field_name)
 	if not SIZE_BY_CLASSIC_VALUE.has(int(record.get("size", 0))):
 		fields.append("size")
-	if int(record.get("attackCount", 0)) < 1 or int(record.get("attackCount", 0)) > 5:
+	if int(record.get("attackCount", 0)) < 0 or int(record.get("attackCount", 0)) > 5:
 		fields.append("attackCount")
 	if int(record.get("canSummon", 0)) not in [-1, 0, 1]:
 		fields.append("canSummon")

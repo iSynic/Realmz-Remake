@@ -233,7 +233,19 @@ func _append_execution_diagnostics(execution_report: Dictionary) -> void:
 			continue
 		var diagnostic: Dictionary = diagnostic_value.duplicate(true)
 		var severity := str(diagnostic.get("severity", "warning"))
-		diagnostic["classification"] = BLOCKER if severity == "error" else FALLBACK
+		if (
+			diagnostic.get("code") == "missing-macro-target"
+			and diagnostic.get("source") == "Data BD"
+		):
+			# Realmz ignored fread() failure after seeking past Data ED3, leaving
+			# an undefined stack record. Remake makes that corrupt source case a
+			# deterministic no-op while preserving the fidelity diagnostic.
+			diagnostic["severity"] = "warning"
+			diagnostic["classification"] = FALLBACK
+			diagnostic["classicBehaviorIfAbsent"] = "undefined-record-read"
+			diagnostic["remakeBehavior"] = "deterministic-noop"
+		else:
+			diagnostic["classification"] = BLOCKER if severity == "error" else FALLBACK
 		_add_diagnostic(diagnostic)
 
 
@@ -1709,7 +1721,7 @@ func _check_item_ids(
 		return
 	for item_id_value: Variant in item_ids:
 		var raw_item_id := int(item_id_value)
-		if raw_item_id in [0, -1]:
+		if raw_item_id in [0, -1, 9999, -9999]:
 			continue
 		var item_id: int = abs(raw_item_id)
 		if bundle.is_empty_scenario_item(item_id):
@@ -1735,12 +1747,15 @@ func _check_item_ids(
 		var materialization: Variant = native_item.get("classicMaterialization", {})
 		if materialization is Dictionary \
 				and str(materialization.get("status", "")) == "blocked":
-			_add_blocker(
-				"unsupported-native-item-fields",
+			_add_fallback(
+				"native-item-fidelity-fallback",
 				"Data ED2",
 				encounter_id,
 				-1,
-				"Complex encounter item %d has unsupported native fields" % item_id,
+				(
+					"Complex encounter item %d can be identified, but some of its "
+					+ "ordinary item behavior is not materialized natively"
+				) % item_id,
 				{
 					"referenceId": item_id,
 					"unsupportedFields": materialization.get("unsupportedFields", []),

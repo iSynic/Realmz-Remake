@@ -604,6 +604,16 @@ not generated reports or machine-specific walkthrough logs. The representative
 acceptance runners under `playtest/` cover campaign lifecycle, City of Bywater
 presentation and battle flow, scenario routes, and custom-monster combat.
 
+The lifecycle acceptance runner creates a disposable six-character party inside
+its temporary profile. It preserves the seven historical stock characters,
+distributes the campaign's recommended **total** party level exactly across
+stable Fighter, Crusader, Rogue, Archer, Sorcerer, and Priest roles, and builds
+each member through the real race/caste progression, inventory-capacity,
+equipment, and spell-learning rules. This makes launch and save/restore checks
+representative from City of Bywater through Mithril Vault without adding dozens
+of permanent characters to a player's roster. It is still a lifecycle gate, not
+proof that the party can win every battle or finish every quest.
+
 ## Spell usage report
 
 `ClassicSpellUsageAudit` inventories spell references separately from launch
