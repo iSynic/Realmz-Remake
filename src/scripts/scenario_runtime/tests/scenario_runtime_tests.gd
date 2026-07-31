@@ -271,6 +271,36 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 	add_child(host)
 	host.configure(RefCounted.new())
 	host.use_campaign(bundle)
+	var battle_behavior: Dictionary = host.runtime.interpreter \
+		.scenario_script_runtime.scripts_by_id[
+			"scenario.providence.campaign-start"
+		].duplicate(true)
+	battle_behavior["id"] = "scenario.providence.battle-start"
+	battle_behavior["name"] = "Battle start"
+	battle_behavior["hook"] = "battle-start"
+	host.runtime.interpreter.scenario_script_runtime.scripts_by_id[
+		"scenario.providence.battle-start"
+	] = battle_behavior
+	host.runtime.interpreter.scenario_script_runtime.behavior_bindings.append({
+		"id": "binding.providence.battle-start",
+		"targetKind": "battle",
+		"recordId": "0",
+		"slot": null,
+		"role": "lifecycle",
+		"hook": "battle-start",
+		"behaviorId": "scenario.providence.battle-start",
+		"arguments": {},
+		"priority": 0,
+	})
+	var battle_start_result: Dictionary = await host.emit_lifecycle_event(
+		"battle-start",
+		{"event": "battle-start", "battleId": 0}
+	)
+	_expect(
+		battle_start_result.get("status") == "ok"
+			and bool(battle_start_result.get("handled", false)),
+		"battle lifecycle behaviors run only through their selected battle boundary"
+	)
 	for role_case: Dictionary in [
 		{
 			"behaviorId": "scenario.providence.spell-effect",

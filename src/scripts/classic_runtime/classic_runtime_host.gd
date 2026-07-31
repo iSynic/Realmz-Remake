@@ -977,6 +977,18 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 		return spell_effect_result
 	event_request["hook"] = hook
 	event_request["campaignId"] = str(runtime.bundle.manifest.get("id", ""))
+	var battle_attachment_result := {"status": "ok", "handled": false}
+	var battle_id := int(event_request.get("battleId", -1))
+	if hook in ["battle-start", "battle-complete"] and battle_id >= 0:
+		battle_attachment_result = await run_behavior_attachments(
+			"lifecycle",
+			hook,
+			"battle",
+			[str(battle_id)],
+			event_request
+		)
+		if str(battle_attachment_result.get("status", "")) == "error":
+			return battle_attachment_result
 	var attachment_result: Dictionary = await run_behavior_attachments(
 		"lifecycle",
 		hook,
@@ -995,6 +1007,7 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 			"status": "ok",
 			"handled": (
 				bool(attachment_result.get("handled", false))
+				or bool(battle_attachment_result.get("handled", false))
 				or bool(spell_effect_result.get("handled", false))
 			),
 		}
@@ -1033,6 +1046,7 @@ func emit_lifecycle_event(hook: String, request := {}) -> Dictionary:
 		"status": "ok",
 		"handled": (
 			bool(attachment_result.get("handled", false))
+			or bool(battle_attachment_result.get("handled", false))
 			or bool(spell_effect_result.get("handled", false))
 		),
 	}

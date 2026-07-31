@@ -1901,7 +1901,13 @@ func start_battle(battlename : String, mapname : String, is_pos_relative : bool,
 			str(participant_value.get("name"))
 				if participant_value is Object else str(participant_value)
 		)
-	var battle_start_result := await emit_classic_lifecycle_event("battle-start", {
+	var scenario_battle_id := int(
+		battle_overrides.get(
+			"classicBattleId",
+			battle_overrides.get("scenarioBattleId", -1)
+		)
+	)
+	var battle_start_request := {
 		"event": "battle-start",
 		"battleName": battlename,
 		"battleMap": mapname,
@@ -1909,7 +1915,13 @@ func start_battle(battlename : String, mapname : String, is_pos_relative : bool,
 		"allowLoss": allow_loss,
 		"allowEscape": allow_escape,
 		"participantNames": participant_names,
-	})
+	}
+	if scenario_battle_id >= 0:
+		battle_start_request["battleId"] = scenario_battle_id
+	var battle_start_result := await emit_classic_lifecycle_event(
+		"battle-start",
+		battle_start_request
+	)
 	if str(battle_start_result.get("status", "")) == "error":
 		push_error(str(battle_start_result.get(
 			"message",
@@ -1951,6 +1963,15 @@ func end_battle(
 ) :
 	if not StateMachine.combat_state.begin_battle_completion():
 		return
+	var scenario_battle_id := int(
+		StateMachine.combat_state.cur_battle_data.get(
+			"classicBattleId",
+			StateMachine.combat_state.cur_battle_data.get("scenarioBattleId", -1)
+		)
+	)
+	var scenario_battle_name := str(
+		StateMachine.combat_state.cur_battle_data.get("battlename", "")
+	)
 	var scenario_defeated_characters: Array = (
 		StateMachine.combat_state.battle_dead_party_members.duplicate()
 	)
@@ -2079,7 +2100,9 @@ func end_battle(
 				await _emit_classic_battle_lifecycle_outcomes(
 					wonfledlost,
 					scenario_defeated_characters,
-					true
+					true,
+					scenario_battle_id,
+					scenario_battle_name
 				)
 				StateMachine.transition_to("Inactive",{})
 				##GameState._state = eGameStates.unchecked
@@ -2099,7 +2122,9 @@ func end_battle(
 	await _emit_classic_battle_lifecycle_outcomes(
 		wonfledlost,
 		scenario_defeated_characters,
-		false
+		false,
+		scenario_battle_id,
+		scenario_battle_name
 	)
 	print("GAMEGLOBAL emit_signal('battle_end', wonfledlost)")
 	emit_signal("battle_end", wonfledlost)
@@ -2113,7 +2138,9 @@ func end_battle(
 func _emit_classic_battle_lifecycle_outcomes(
 	outcome: String,
 	defeated_characters: Array,
-	party_defeated: bool
+	party_defeated: bool,
+	battle_id := -1,
+	battle_name := ""
 ) -> void:
 	for character_value: Variant in defeated_characters:
 		var character_name := ""
@@ -2147,14 +2174,18 @@ func _emit_classic_battle_lifecycle_outcomes(
 				"message",
 				"Scenario party-defeated behavior failed"
 			)))
+	var complete_request := {
+		"event": "battle-complete",
+		"outcome": outcome,
+		"defeatedCharacterCount": defeated_characters.size(),
+		"partyDefeated": party_defeated,
+		"battleName": str(battle_name),
+	}
+	if int(battle_id) >= 0:
+		complete_request["battleId"] = int(battle_id)
 	var complete_result := await emit_classic_lifecycle_event(
 		"battle-complete",
-		{
-			"event": "battle-complete",
-			"outcome": outcome,
-			"defeatedCharacterCount": defeated_characters.size(),
-			"partyDefeated": party_defeated,
-		}
+		complete_request
 	)
 	if str(complete_result.get("status", "")) == "error":
 		push_error(str(complete_result.get(
