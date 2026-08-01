@@ -188,6 +188,39 @@ func _scenario_choice(payload: Dictionary) -> Dictionary:
 	return {"choice": int(selected)}
 
 
+func _scenario_encounter_response(payload: Dictionary) -> Dictionary:
+	var picture_id: Variant = payload.get("pictureId")
+	if picture_id != null and not str(picture_id).is_empty():
+		await _show_classic_picture({"pictureId": int(picture_id)})
+	var sound_id: Variant = payload.get("soundId")
+	if sound_id != null and not str(sound_id).is_empty():
+		await _play_sound_command({"soundId": int(sound_id)})
+	var responses: Variant = payload.get("responses", [])
+	if not (responses is Array) or responses.is_empty():
+		return _error("Scenario Encounter has no available responses")
+	var labels: Array = []
+	for response_value: Variant in responses:
+		if not (response_value is Dictionary):
+			return _error("Scenario Encounter response is invalid")
+		var label := str(response_value.get("label", "")).strip_edges()
+		if label.is_empty():
+			label = str(response_value.get("kind", "Response")).capitalize()
+		labels.append(label)
+	var selected := await _scenario_choice({
+		"prompt": str(payload.get("text", "")),
+		"options": labels,
+	})
+	if str(selected.get("status", "")) == "error":
+		return selected
+	var index := clampi(int(selected.get("choice", 0)), 0, responses.size() - 1)
+	var response: Dictionary = responses[index]
+	selected["responseRef"] = {
+		"kind": str(response.get("kind", "choice")),
+		"responseId": str(response.get("id", "")),
+	}
+	return selected
+
+
 func _wait_for_click(payload: Dictionary) -> Dictionary:
 	var text_rect: Object = service_owner.call("_text_rect")
 	if text_rect == null:

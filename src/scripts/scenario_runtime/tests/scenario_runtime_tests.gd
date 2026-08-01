@@ -1448,7 +1448,7 @@ func _test_classic_enhanced_global_triggers() -> void:
 	script_document["bindings"] = []
 	bundle.documents["remakeScripts"] = script_document
 	bundle.documents["remakeLogic"] = {
-		"schemaVersion": 4,
+		"schemaVersion": 5,
 		"kind": "classic-enhanced",
 		"replacements": [],
 		"mapTriggers": [],

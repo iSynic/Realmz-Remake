@@ -16,7 +16,7 @@ const ClassicExecutionStateScript = preload(
 const ScenarioScriptRuntimeScript = preload(
 	"res://scripts/scenario_runtime/scenario_script_runtime.gd"
 )
-const SNAPSHOT_SCHEMA_VERSION := 3
+const SNAPSHOT_SCHEMA_VERSION := 4
 const MAX_INTERNAL_STEPS := 256
 const MAX_CALL_STACK_DEPTH := 20
 const MAX_RESULT_TRANSITIONS := MAX_INTERNAL_STEPS
@@ -44,6 +44,8 @@ var _classic_executing_anchor: Dictionary = {}
 var _classic_pending_after_anchor: Dictionary = {}
 var _classic_encounter_phase: Dictionary = {}
 var _result_transition_count := 0
+var _semantic_active_response_ref: Variant = null
+var _semantic_active_result_ref: Variant = null
 
 var runtime_state: ClassicRuntimeState:
 	get:
@@ -660,6 +662,17 @@ func record_semantic_encounter_completion(encounter: Dictionary) -> void:
 	var state := scenario_script_runtime.runtime_state
 	if state != null and state.has_method("mark_encounter_completed"):
 		state.call("mark_encounter_completed", encounter)
+
+
+func record_semantic_response_reference(reference: Dictionary) -> void:
+	_semantic_active_response_ref = reference.duplicate(true)
+	_semantic_active_result_ref = null
+
+
+func record_semantic_result_reference(reference: Dictionary) -> bool:
+	_semantic_active_result_ref = reference.duplicate(true)
+	_result_transition_count += 1
+	return _result_transition_count <= MAX_RESULT_TRANSITIONS
 
 
 func execute_nested_scenario_script(
@@ -1986,7 +1999,10 @@ func mixed_execution_state() -> Dictionary:
 		"response",
 		{}
 	).duplicate(true)
-	var active_response: Variant = _classic_response_reference(response)
+	var active_response: Variant = (
+		_classic_response_reference(response)
+		if not _classic_encounter_phase.is_empty() else null
+	)
 	var active_result: Variant = null
 	var enhanced_result_id := str(response.get("enhancedResultId", ""))
 	if not enhanced_result_id.is_empty():
@@ -1994,6 +2010,10 @@ func mixed_execution_state() -> Dictionary:
 	var outcome := int(response.get("outcome", 0))
 	if active_result == null and outcome > 0:
 		active_result = {"kind": "classic", "index": absi(outcome) - 1}
+	if active_response == null and _semantic_active_response_ref is Dictionary:
+		active_response = _semantic_active_response_ref.duplicate(true)
+	if active_result == null and _semantic_active_result_ref is Dictionary:
+		active_result = _semantic_active_result_ref.duplicate(true)
 	var attachment_order: Array = []
 	for instruction_value: Variant in _classic_attachment_queue:
 		if not (instruction_value is Dictionary):
@@ -2261,6 +2281,9 @@ func reset() -> void:
 	trace.clear()
 	halted = true
 	last_result = {}
+	_semantic_active_response_ref = null
+	_semantic_active_result_ref = null
+	_result_transition_count = 0
 	_reset_classic_attachment_plan()
 
 
@@ -2278,6 +2301,9 @@ func start(trigger_id: String, action_index := 0, context := {}) -> Dictionary:
 	pending_command = null
 	execution_context = context.duplicate(true) if context is Dictionary else {}
 	trace.clear()
+	_semantic_active_response_ref = null
+	_semantic_active_result_ref = null
+	_result_transition_count = 0
 	halted = false
 	return {"status": "ok"}
 
@@ -2364,6 +2390,15 @@ func snapshot() -> Dictionary:
 		"trace": trace.duplicate(true),
 		"halted": halted,
 		"lastResult": last_result.duplicate(true),
+		"semanticActiveResponseRef": (
+			_semantic_active_response_ref.duplicate(true)
+			if _semantic_active_response_ref is Dictionary else null
+		),
+		"semanticActiveResultRef": (
+			_semantic_active_result_ref.duplicate(true)
+			if _semantic_active_result_ref is Dictionary else null
+		),
+		"resultTransitionCount": _result_transition_count,
 	}
 	if scenario_script_runtime != null:
 		result["scenarioScriptRuntime"] = scenario_script_runtime.snapshot()
@@ -2387,6 +2422,15 @@ func restore(value: Variant) -> Dictionary:
 	trace = saved["trace"].duplicate(true)
 	halted = bool(saved["halted"])
 	last_result = saved["lastResult"].duplicate(true)
+	_semantic_active_response_ref = (
+		saved.get("semanticActiveResponseRef").duplicate(true)
+		if saved.get("semanticActiveResponseRef") is Dictionary else null
+	)
+	_semantic_active_result_ref = (
+		saved.get("semanticActiveResultRef").duplicate(true)
+		if saved.get("semanticActiveResultRef") is Dictionary else null
+	)
+	_result_transition_count = int(saved.get("resultTransitionCount", 0))
 	if scenario_script_runtime != null:
 		if not saved.has("scenarioScriptRuntime"):
 			return _error("Saved scenario has no Safe behavior state")
@@ -2420,6 +2464,16 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 			return _invalid("Scenario VM snapshot has invalid %s" % field_name)
 	if not (saved.get("halted") is bool):
 		return _invalid("Scenario VM snapshot has invalid halted state")
+	if not _is_nonnegative_integer_number(saved.get("resultTransitionCount", -1)) \
+			or int(saved.get("resultTransitionCount", -1)) > MAX_RESULT_TRANSITIONS:
+		return _invalid("Scenario VM snapshot has invalid result transition count")
+	for field_name: String in [
+		"semanticActiveResponseRef",
+		"semanticActiveResultRef",
+	]:
+		var reference: Variant = saved.get(field_name)
+		if reference != null and not (reference is Dictionary):
+			return _invalid("Scenario VM snapshot has invalid %s" % field_name)
 	if saved.get("pendingCommand") != null:
 		var pending_validation := ScenarioPendingCommand.validate(saved["pendingCommand"])
 		if not bool(pending_validation.get("valid", false)):

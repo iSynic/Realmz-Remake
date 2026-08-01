@@ -87,6 +87,40 @@ func _scenario_choice(request: Dictionary) -> Dictionary:
 	return execute_command("choice", request)
 
 
+func _scenario_encounter_response(request: Dictionary) -> Dictionary:
+	var text := str(request.get("text", ""))
+	if not text.is_empty():
+		transcript.append(text)
+	var picture_id: Variant = request.get("pictureId")
+	if picture_id != null and not str(picture_id).is_empty():
+		pictures.append(int(picture_id))
+	var sound_id: Variant = request.get("soundId")
+	if sound_id != null and not str(sound_id).is_empty():
+		sounds.append(int(sound_id))
+	var responses: Variant = request.get("responses", [])
+	if not (responses is Array) or responses.is_empty():
+		return _invalid_response("Scenario Encounter has no available responses")
+	var selected := 0
+	if choice_response_index < choice_responses.size():
+		selected = choice_responses[choice_response_index]
+		choice_response_index += 1
+	selected = clampi(selected, 0, responses.size() - 1)
+	var response: Dictionary = responses[selected]
+	var result := {
+		"choice": selected,
+		"responseRef": {
+			"kind": str(response.get("kind", "choice")),
+			"responseId": str(response.get("id", "")),
+		},
+	}
+	command_log.append({
+		"commandId": "encounter_response",
+		"request": request.duplicate(true),
+		"response": result.duplicate(true),
+	})
+	return result
+
+
 func snapshot() -> Dictionary:
 	return {
 		"schemaVersion": SNAPSHOT_SCHEMA_VERSION,
@@ -163,3 +197,7 @@ static func _normalized_location(value: Dictionary) -> Dictionary:
 
 static func _invalid(message: String) -> Dictionary:
 	return {"valid": false, "message": message}
+
+
+static func _invalid_response(message: String) -> Dictionary:
+	return {"status": "error", "message": message}

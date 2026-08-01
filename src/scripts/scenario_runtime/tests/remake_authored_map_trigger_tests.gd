@@ -81,9 +81,9 @@ func _test_map_trigger_execution_and_restore() -> void:
 	var save_result := session.make_save_result()
 	_expect(
 		save_result.get("status") == "ok"
-			and save_result.get("save", {}).get("schemaVersion") == 7
+			and save_result.get("save", {}).get("schemaVersion") == 8
 			and save_result.get("save", {}).get("pendingCommand") is Dictionary,
-		"pending Map Trigger produces a schema-7 save"
+		"pending Map Trigger produces a schema-8 save"
 	)
 
 	var restored_services := PreviewServicesScript.new()
@@ -135,6 +135,23 @@ func _test_modern_encounter_execution_and_restore() -> void:
 			and session.host.has_encounter("scenario.fixture.encounter"),
 		"generic runtime host exposes the Modern Encounter"
 	)
+	var encounter_actions: Array = session.interpreter.triggers.get(
+		"scenario.fixture.encounter",
+		{}
+	).get("actions", [])
+	var has_response_instruction := encounter_actions.any(
+		func(action: Dictionary) -> bool:
+			return str(action.get("operation", "")) \
+				== "core.encounter.request-response"
+	)
+	var has_legacy_encounter_instruction := encounter_actions.any(
+		func(action: Dictionary) -> bool:
+			return str(action.get("operation", "")) == "core.encounter.run"
+	)
+	_expect(
+		has_response_instruction and not has_legacy_encounter_instruction,
+		"Modern Encounter compiles into ordinary interpreter instructions"
+	)
 	var result := session.begin_encounter("scenario.fixture.encounter")
 	_expect(
 		result.get("status") == "yield"
@@ -145,29 +162,11 @@ func _test_modern_encounter_execution_and_restore() -> void:
 	result = await _route_and_resume(session, result)
 	_expect(
 		result.get("status") == "yield"
-			and result.get("commandId") == "show_picture",
-		"Modern Encounter presents its opening picture"
-	)
-	result = await _route_and_resume(session, result)
-	_expect(
-		result.get("status") == "yield"
-			and result.get("commandId") == "play_sound",
-		"Modern Encounter resumes into its opening sound"
-	)
-	result = await _route_and_resume(session, result)
-	_expect(
-		result.get("status") == "yield"
-			and result.get("commandId") == "show_text",
-		"Modern Encounter presents node text"
-	)
-	result = await _route_and_resume(session, result)
-	_expect(
-		result.get("status") == "yield"
-			and result.get("commandId") == "choice"
-			and result.get("request", {}).get("options") == [
-				"Accept the work",
-			],
-		"Modern Encounter filters choices through a pure availability Behavior"
+			and result.get("commandId") == "encounter_response"
+			and result.get("request", {}).get("responses", []).size() == 1
+			and result.get("request", {}).get("responses", [])[0].get("label") \
+				== "Accept the work",
+		"Modern Encounter presents its section and filters responses through a pure availability Behavior"
 	)
 	var save_result := session.make_save_result()
 	_expect(
@@ -195,15 +194,9 @@ func _test_modern_encounter_execution_and_restore() -> void:
 	result = await _route_and_resume(restored, restored.interpreter.last_result)
 	_expect(
 		result.get("status") == "yield"
-			and result.get("commandId") == "show_text"
+			and result.get("commandId") == "encounter_response"
 			and result.get("request", {}).get("text") == "The beasts turn on you.",
-		"selected choice branches to the named destination scene"
-	)
-	result = await _route_and_resume(restored, result)
-	_expect(
-		result.get("status") == "yield"
-			and result.get("commandId") == "choice",
-		"destination scene presents its choices"
+		"selected response branches to the named destination section"
 	)
 	result = await _route_and_resume(restored, result)
 	_expect(
@@ -211,6 +204,19 @@ func _test_modern_encounter_execution_and_restore() -> void:
 			and result.get("commandId") == "start_battle"
 			and result.get("request", {}).get("battleId") == 7,
 		"selected result Behavior yields a battle through the Combat port"
+	)
+	var battle_save := restored.make_save_result()
+	_expect(
+		battle_save.get("status") == "ok"
+			and battle_save.get("save", {}).get("activeResponseRef", {}).get(
+				"responseId",
+				""
+			) == "scenario.fixture.encounter.stable.fight"
+			and battle_save.get("save", {}).get("activeResultRef", {}).get(
+				"resultId",
+				""
+			) == "scenario.fixture.encounter.stable.fight-result",
+		"pending result execution saves stable response and result references"
 	)
 	result = await _route_and_resume(restored, result)
 	_expect(
@@ -293,7 +299,7 @@ func _test_typed_state_and_named_variants() -> void:
 	)
 	_expect(
 		restored_configured and restore_result.get("status") == "ok",
-		"typed map state restores through save schema 7: %s"
+		"typed map state restores through save schema 8: %s"
 			% restore_result
 	)
 	result = restored.begin_map_trigger("scenario.fixture.stateful-trigger")
@@ -574,7 +580,7 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 4,
+			"schemaVersion": 5,
 			"kind": "remake-authored",
 			"mapTriggers": [{
 				"id": trigger_id,
@@ -635,7 +641,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"kind": "function",
 		"name": "fixture_encounter_default",
 		"parameters": [],
-		"returnType": "encounter-outcome",
+		"returnType": "action-outcome",
 		"body": [{
 			"kind": "return",
 			"value": {
@@ -670,7 +676,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"kind": "function",
 		"name": "fixture_encounter_fight",
 		"parameters": [],
-		"returnType": "encounter-outcome",
+		"returnType": "action-outcome",
 		"body": [
 			{
 				"kind": "operation",
@@ -692,15 +698,15 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"name": "Fight the Beasts",
 		"description": "Starts the encounter battle.",
 		"kind": "entry",
-		"role": "encounter",
-		"hook": "result",
+		"role": "action",
+		"hook": "run",
 		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
 		"behaviorVersion": 1,
 		"stateSchemaVersion": 1,
 		"parameters": [],
-		"returnType": "encounter-outcome",
+		"returnType": "action-outcome",
 		"requestedCapabilities": ["core.encounter.start-battle"],
 		"stateSchema": state_schema,
 		"stateSchemaHash": ScriptRuntimeScript._sha256_json(state_schema),
@@ -848,7 +854,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 4,
+			"schemaVersion": 5,
 			"kind": "remake-authored",
 			"mapTriggers": [],
 			"eventTriggers": [],
@@ -856,7 +862,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 			"encounters": [{
 				"id": encounter_id,
 				"name": "Beastmaster's Offer",
-				"entryNodeId": opening_id,
+				"entrySectionId": opening_id,
 				"entryBehaviorId": behavior_id,
 				"completionBehaviorId": completion_behavior_id,
 				"repeatPolicy": "once",
@@ -875,7 +881,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 						"behaviorId": behavior_id,
 					},
 				],
-				"nodes": [
+				"sections": [
 					{
 						"id": opening_id,
 						"name": "The Offer",
@@ -885,22 +891,24 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 						"pictureId": "41",
 						"soundId": "42",
 						"presentation": {},
-						"choices": [
+						"responses": [
 							{
 								"id": "%s.accept" % opening_id,
+								"kind": "choice",
 								"label": "Accept the work",
+								"match": {},
 								"availabilityBehaviorId": null,
 								"selectionBehaviorId": null,
-								"nextNodeId": stable_id,
-								"outcome": "branch",
+								"resultId": "%s.accept-result" % opening_id,
 							},
 							{
 								"id": "%s.refuse" % opening_id,
+								"kind": "choice",
 								"label": "Refuse",
+								"match": {},
 								"availabilityBehaviorId": availability_behavior_id,
 								"selectionBehaviorId": null,
-								"nextNodeId": null,
-								"outcome": "close",
+								"resultId": "%s.refuse-result" % opening_id,
 							},
 						],
 					},
@@ -911,14 +919,35 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 						"pictureId": null,
 						"soundId": null,
 						"presentation": {},
-						"choices": [{
+						"responses": [{
 							"id": "%s.fight" % stable_id,
+							"kind": "choice",
 							"label": "Fight",
+							"match": {},
 							"availabilityBehaviorId": null,
-							"selectionBehaviorId": result_behavior_id,
-							"nextNodeId": null,
-							"outcome": "resolve",
+							"selectionBehaviorId": null,
+							"resultId": "%s.fight-result" % stable_id,
 						}],
+					},
+				],
+				"results": [
+					{
+						"id": "%s.accept-result" % opening_id,
+						"name": "Accept the Work",
+						"behaviorId": null,
+						"terminal": {"kind": "section", "sectionId": stable_id},
+					},
+					{
+						"id": "%s.refuse-result" % opening_id,
+						"name": "Refuse",
+						"behaviorId": null,
+						"terminal": {"kind": "close"},
+					},
+					{
+						"id": "%s.fight-result" % stable_id,
+						"name": "Fight the Beasts",
+						"behaviorId": result_behavior_id,
+						"terminal": {"kind": "close"},
 					},
 				],
 			}],
@@ -1055,7 +1084,7 @@ func _state_variant_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 4,
+			"schemaVersion": 5,
 			"kind": "remake-authored",
 			"mapTriggers": [{
 				"id": trigger_id,
@@ -1181,7 +1210,7 @@ func _event_schedule_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 4,
+			"schemaVersion": 5,
 			"kind": "remake-authored",
 			"mapTriggers": [],
 			"eventTriggers": [

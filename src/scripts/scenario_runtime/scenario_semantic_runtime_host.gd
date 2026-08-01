@@ -62,19 +62,19 @@ func run_trigger(
 func run_encounter(
 	encounter_id: String,
 	context := {},
-	start_node_id := ""
+	start_section_id := ""
 ) -> Dictionary:
 	if session == null:
 		return _error("Semantic campaign session is unavailable")
 	command_started.emit("encounter", {
 		"encounterId": encounter_id,
-		"nodeId": start_node_id,
+		"sectionId": start_section_id,
 		"context": context,
 	})
 	var result: Dictionary = await session.run_encounter(
 		encounter_id,
 		context,
-		start_node_id
+		start_section_id
 	)
 	command_finished.emit("encounter", result)
 	_schedule_event_queue_drain()

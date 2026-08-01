@@ -290,7 +290,7 @@ func begin_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 func begin_encounter(
 	encounter_id: String,
 	context := {},
-	start_node_id := ""
+	start_section_id := ""
 ) -> Dictionary:
 	if not semantic_mode or interpreter == null:
 		return _semantic_error("Remake Authored session is not configured")
@@ -316,19 +316,19 @@ func begin_encounter(
 	active_encounter["variantBehaviorId"] = str(
 		selected_variant.get("behaviorId", "")
 	)
-	if not start_node_id.is_empty():
+	if not start_section_id.is_empty():
 		var found := false
-		for node_value: Variant in active_encounter.get("nodes", []):
-			if node_value is Dictionary \
-					and str(node_value.get("id", "")) == start_node_id:
+		for section_value: Variant in active_encounter.get("sections", []):
+			if section_value is Dictionary \
+					and str(section_value.get("id", "")) == start_section_id:
 				found = true
 				break
 		if not found:
 			return _semantic_error(
-				"Modern Encounter '%s' has no scene '%s'"
-				% [encounter_id, start_node_id]
+				"Modern Encounter '%s' has no section '%s'"
+				% [encounter_id, start_section_id]
 			)
-		active_encounter["entryNodeId"] = start_node_id
+		active_encounter["entrySectionId"] = start_section_id
 	_set_vm_encounter(encounter_id, active_encounter)
 	active_encounter_id = encounter_id
 	active_trigger_id = ""
@@ -468,9 +468,9 @@ func run_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 func run_encounter(
 	encounter_id: String,
 	context := {},
-	start_node_id := ""
+	start_section_id := ""
 ) -> Dictionary:
-	var result := begin_encounter(encounter_id, context, start_node_id)
+	var result := begin_encounter(encounter_id, context, start_section_id)
 	while str(result.get("status", "")) == "yield":
 		var response: Dictionary = await command_router.route(
 			str(result.get("commandId", "")),
@@ -799,9 +799,16 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 			)
 			return {}
 		encounters_by_id[encounter_id] = encounter.duplicate(true)
+		var encounter_actions := _compile_encounter_actions(encounter)
+		if encounter_actions.is_empty():
+			_semantic_fail(
+				"Modern Encounter '%s' could not compile an execution plan"
+				% encounter_id
+			)
+			return {}
 		result[encounter_id] = {
 			"id": encounter_id,
-			"actions": [_encounter_run(encounter)],
+			"actions": encounter_actions,
 		}
 	return result
 
@@ -1034,7 +1041,7 @@ func _set_vm_behavior(trigger_id: String, behavior_id: String) -> void:
 
 func _set_vm_encounter(encounter_id: String, encounter: Dictionary) -> void:
 	var vm_trigger: Dictionary = interpreter.triggers.get(encounter_id, {})
-	vm_trigger["actions"] = [_encounter_run(encounter)]
+	vm_trigger["actions"] = _compile_encounter_actions(encounter)
 	interpreter.triggers[encounter_id] = vm_trigger
 
 
@@ -1298,25 +1305,170 @@ static func _default_variant(trigger: Dictionary) -> Dictionary:
 	return {}
 
 
-static func _script_call(behavior_id: String) -> Dictionary:
+static func _script_call(
+	behavior_id: String,
+	role := "action",
+	hook := "run"
+) -> Dictionary:
 	return {
 		"kind": "semantic",
 		"operation": "core.script.call",
 		"parameters": {
 			"behaviorId": behavior_id,
 			"arguments": {},
+			"attachment": {
+				"role": role,
+				"hook": hook,
+			},
 		},
 	}
 
 
-static func _encounter_run(encounter: Dictionary) -> Dictionary:
-	return {
+static func _compile_encounter_actions(encounter: Dictionary) -> Array:
+	var actions: Array = []
+	var encounter_id := str(encounter.get("id", ""))
+	if encounter_id.is_empty():
+		return []
+	var variant_behavior_id := str(encounter.get("variantBehaviorId", ""))
+	if variant_behavior_id.is_empty():
+		var fallback_variant := _default_variant(encounter)
+		variant_behavior_id = str(fallback_variant.get("behaviorId", ""))
+	if not variant_behavior_id.is_empty():
+		actions.append(_script_call(variant_behavior_id, "encounter", "enter"))
+	var entry_behavior_id := _optional_id(encounter.get("entryBehaviorId"))
+	if not entry_behavior_id.is_empty():
+		actions.append(_script_call(entry_behavior_id, "encounter", "enter"))
+
+	var section_indexes: Dictionary = {}
+	var request_indexes: Dictionary = {}
+	var sections: Variant = encounter.get("sections", [])
+	var results: Variant = encounter.get("results", [])
+	if not (sections is Array) or sections.is_empty() or not (results is Array):
+		return []
+	var ordered_sections: Array = sections.duplicate(true)
+	var entry_section_id := str(encounter.get("entrySectionId", ""))
+	if not entry_section_id.is_empty():
+		for section_index: int in range(ordered_sections.size()):
+			var candidate: Variant = ordered_sections[section_index]
+			if candidate is Dictionary \
+					and str(candidate.get("id", "")) == entry_section_id:
+				if section_index > 0:
+					ordered_sections.push_front(ordered_sections.pop_at(section_index))
+				break
+	for section_value: Variant in ordered_sections:
+		if not (section_value is Dictionary):
+			return []
+		var section: Dictionary = section_value
+		var section_id := str(section.get("id", ""))
+		if section_id.is_empty() or section_indexes.has(section_id):
+			return []
+		section_indexes[section_id] = actions.size()
+		request_indexes[section_id] = actions.size()
+		actions.append({
+			"kind": "semantic",
+			"operation": "core.encounter.request-response",
+			"parameters": {
+				"encounterId": encounter_id,
+				"section": section.duplicate(true),
+				"targets": {},
+			},
+		})
+
+	var result_by_id: Dictionary = {}
+	for result_value: Variant in results:
+		if not (result_value is Dictionary):
+			return []
+		var result: Dictionary = result_value
+		var result_id := str(result.get("id", ""))
+		if result_id.is_empty() or result_by_id.has(result_id):
+			return []
+		result_by_id[result_id] = result
+	var response_targets: Dictionary = {}
+	var terminal_action_indexes: Array = []
+	for section_value: Variant in ordered_sections:
+		var section: Dictionary = section_value
+		var section_id := str(section.get("id", ""))
+		var section_targets: Dictionary = {}
+		for response_value: Variant in section.get("responses", []):
+			if not (response_value is Dictionary):
+				return []
+			var response: Dictionary = response_value
+			var response_id := str(response.get("id", ""))
+			var result: Dictionary = result_by_id.get(
+				str(response.get("resultId", "")),
+				{}
+			)
+			if response_id.is_empty() or result.is_empty():
+				return []
+			section_targets[response_id] = actions.size()
+			var selection_behavior_id := _optional_id(
+				response.get("selectionBehaviorId")
+			)
+			if not selection_behavior_id.is_empty():
+				actions.append(_script_call(
+					selection_behavior_id,
+					"encounter",
+					"response"
+				))
+			var result_reference := {
+				"kind": "remake-result",
+				"encounterId": encounter_id,
+				"resultId": str(result.get("id", "")),
+			}
+			actions.append({
+				"kind": "semantic",
+				"operation": "core.flow.mark-result",
+				"parameters": {"resultRef": result_reference.duplicate(true)},
+			})
+			var result_behavior_id := _optional_id(result.get("behaviorId"))
+			if not result_behavior_id.is_empty():
+				actions.append(_script_call(result_behavior_id, "action", "run"))
+			terminal_action_indexes.append(actions.size())
+			actions.append({
+				"kind": "semantic",
+				"operation": "core.flow.branch",
+				"parameters": {
+					"actionIndex": -1,
+					"terminal": result.get("terminal", {}).duplicate(true),
+				},
+			})
+		response_targets[section_id] = section_targets
+
+	var completion_index := actions.size()
+	var completion_behavior_id := _optional_id(encounter.get("completionBehaviorId"))
+	if not completion_behavior_id.is_empty():
+		actions.append(_script_call(
+			completion_behavior_id,
+			"encounter",
+			"complete"
+		))
+	actions.append({
 		"kind": "semantic",
-		"operation": "core.encounter.run",
+		"operation": "core.flow.halt",
 		"parameters": {
-			"encounter": encounter.duplicate(true),
+			"reason": "encounter-complete",
+			"outcome": "close",
 		},
-	}
+	})
+
+	for section_id: Variant in request_indexes:
+		var request_index := int(request_indexes[section_id])
+		actions[request_index]["parameters"]["targets"] = (
+			response_targets.get(section_id, {}).duplicate(true)
+		)
+	for terminal_index_value: Variant in terminal_action_indexes:
+		var terminal_index := int(terminal_index_value)
+		var parameters: Dictionary = actions[terminal_index]["parameters"]
+		var terminal: Dictionary = parameters.get("terminal", {})
+		var terminal_kind := str(terminal.get("kind", "return"))
+		var destination := str(terminal.get("sectionId", ""))
+		parameters["actionIndex"] = int(
+			section_indexes.get(destination, completion_index)
+			if terminal_kind in ["section", "repeat-section"]
+			else completion_index
+		)
+		parameters.erase("terminal")
+	return actions
 
 
 static func _optional_id(value: Variant) -> String:

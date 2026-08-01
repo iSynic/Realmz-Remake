@@ -1,7 +1,7 @@
 class_name ScenarioSaveContract
 extends RefCounted
 
-const SCHEMA_VERSION := 7
+const SCHEMA_VERSION := 8
 const REQUIRED_FIELDS := [
 	"schemaVersion",
 	"campaignId",

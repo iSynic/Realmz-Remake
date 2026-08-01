@@ -18,7 +18,7 @@ const GameplayRuleRegistryScript = preload(
 const GameplayRuleSetScript = preload(
 	"res://scripts/scenario_runtime/gameplay_rule_set.gd"
 )
-const SAVE_SCHEMA_VERSION := 7
+const SAVE_SCHEMA_VERSION := 8
 const IMPLEMENTATION_KIND := "scenario-interpreter"
 
 var install: Object

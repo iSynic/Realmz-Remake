@@ -12,6 +12,62 @@ func _init() -> void:
 	)
 
 
+func semantic_operations() -> PackedStringArray:
+	return PackedStringArray([
+		"core.flow.branch",
+		"core.flow.halt",
+		"core.flow.mark-result",
+	])
+
+
+func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
+	if str(instruction.get("kind", "")) != "semantic":
+		return super.execute(instruction, context)
+	var parameters: Variant = instruction.get("parameters", {})
+	if not (parameters is Dictionary):
+		return ScenarioStepResult.failed(
+			"Semantic flow parameters must be an object"
+		)
+	match str(instruction.get("operation", "")):
+		"core.flow.branch":
+			var action_index := int(parameters.get("actionIndex", -1))
+			if action_index < 0:
+				return ScenarioStepResult.failed(
+					"core.flow.branch requires a non-negative action index"
+				)
+			var result_ref: Variant = parameters.get("resultRef")
+			if result_ref is Dictionary \
+					and context != null \
+					and context.has_method("record_semantic_result_reference"):
+				context.call("record_semantic_result_reference", result_ref)
+			return ScenarioStepResult.branched(action_index)
+		"core.flow.halt":
+			return ScenarioStepResult.halted({
+				"reason": str(parameters.get("reason", "semantic-flow")),
+				"outcome": str(parameters.get("outcome", "continue")),
+			})
+		"core.flow.mark-result":
+			var result_ref: Variant = parameters.get("resultRef")
+			if not (result_ref is Dictionary):
+				return ScenarioStepResult.failed(
+					"core.flow.mark-result requires a result reference"
+				)
+			if context == null \
+					or not context.has_method("record_semantic_result_reference"):
+				return ScenarioStepResult.failed(
+					"Semantic result tracking is unavailable"
+				)
+			if not bool(context.call(
+				"record_semantic_result_reference",
+				result_ref
+			)):
+				return ScenarioStepResult.failed(
+					"Encounter result transition limit exceeded"
+				)
+			return ScenarioStepResult.continued()
+	return ScenarioStepResult.failed("Unsupported semantic flow operation")
+
+
 func execute_on_runtime(instruction: Dictionary, runtime: Object) -> Dictionary:
 	var code := int(instruction.get("code", 0))
 	var record_id := int(instruction.get("id", 0))

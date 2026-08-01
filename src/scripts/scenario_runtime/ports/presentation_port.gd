@@ -7,6 +7,7 @@ const COMMANDS := [
 	"query_media_definition",
 	"show_scrolling_text",
 	"choice",
+	"encounter_response",
 	"start_encounter",
 	"play_sound",
 	"play_music",
@@ -21,6 +22,7 @@ const OPERATIONS := {
 	"query_media_definition": "_query_media_definition",
 	"show_scrolling_text": "_show_scrolling_text",
 	"choice": "_show_yes_no_choice",
+	"encounter_response": "_scenario_encounter_response",
 	"start_encounter": "_show_encounter",
 	"play_sound": "_play_sound_command",
 	"play_music": "_play_scenario_music",
@@ -90,6 +92,55 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 				"message": "Scenario choice presentation is unavailable",
 			}
 		return await _port_runtime.call("_scenario_choice", routed_request)
+	if command_id == "encounter_response":
+		if _port_runtime != null \
+				and _port_runtime.has_method("_scenario_encounter_response"):
+			return await _port_runtime.call(
+				"_scenario_encounter_response",
+				routed_request
+			)
+		if _port_runtime == null \
+				or not _port_runtime.has_method("_scenario_choice"):
+			return {
+				"status": "error",
+				"message": "Scenario encounter-response presentation is unavailable",
+			}
+		var authored_responses: Variant = routed_request.get("responses", [])
+		if not (authored_responses is Array) or authored_responses.is_empty():
+			return {
+				"status": "error",
+				"message": "Scenario Encounter has no available responses",
+			}
+		var labels: Array = []
+		for response_value: Variant in authored_responses:
+			if not (response_value is Dictionary):
+				continue
+			var label := str(response_value.get("label", ""))
+			if label.is_empty():
+				label = str(response_value.get("kind", "Response")).capitalize()
+			labels.append(label)
+		var choice_result: Dictionary = await _port_runtime.call(
+			"_scenario_choice",
+			{
+				"prompt": str(routed_request.get("text", "")),
+				"options": labels,
+				"encounterId": str(routed_request.get("encounterId", "")),
+				"sectionId": str(routed_request.get("sectionId", "")),
+			}
+		)
+		if str(choice_result.get("status", "")) == "error":
+			return choice_result
+		var selected_index := clampi(
+			int(choice_result.get("choice", 0)),
+			0,
+			authored_responses.size() - 1
+		)
+		var selected: Dictionary = authored_responses[selected_index]
+		choice_result["responseRef"] = {
+			"kind": str(selected.get("kind", "choice")),
+			"responseId": str(selected.get("id", "")),
+		}
+		return choice_result
 	if command_id == "wait_for_click" \
 			and not bool(
 				rule_option("presentation", "waitForAuthoredClicks", true)

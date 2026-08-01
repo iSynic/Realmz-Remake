@@ -400,7 +400,7 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 			return
 		await _run_preview_encounter(
 			encounter_id,
-			str(entry.get("nodeId", ""))
+			str(entry.get("sectionId", entry.get("nodeId", "")))
 		)
 	elif kind in [
 		"encounter",
@@ -721,7 +721,7 @@ func _run_preview_trigger(trigger_id: String, slot: int) -> void:
 	})
 
 
-func _run_preview_encounter(encounter_id: String, node_id: String) -> void:
+func _run_preview_encounter(encounter_id: String, section_id: String) -> void:
 	var debug_result := _prepare_debugger_for_entry()
 	if str(debug_result.get("status", "")) != "ok":
 		_send({
@@ -735,13 +735,13 @@ func _run_preview_encounter(encounter_id: String, node_id: String) -> void:
 	var result: Dictionary = await session.host.run_encounter(
 		encounter_id,
 		{"source": "providence-preview"},
-		node_id
+		section_id
 	)
 	_send({
 		"type": "runtime-event",
 		"event": "encounter-finished",
 		"encounterId": encounter_id,
-		"nodeId": node_id,
+		"sectionId": section_id,
 		"result": result,
 		"trace": _vm_trace(),
 		"assertions": _assertion_report(),
@@ -1034,8 +1034,8 @@ func _entry_points() -> Dictionary:
 			modern_encounters.append({
 				"id": encounter_value.get("id", ""),
 				"name": encounter_value.get("name", ""),
-				"entryNodeId": encounter_value.get("entryNodeId", ""),
-				"nodes": encounter_value.get("nodes", []),
+				"entrySectionId": encounter_value.get("entrySectionId", ""),
+				"sections": encounter_value.get("sections", []),
 			})
 	var battles: Array[Dictionary] = []
 	var battle_values: Variant = install.bundle.documents.get(
