@@ -149,6 +149,29 @@ func _test_preview_wire_json() -> void:
 			and decoded.get("persistentValues", {}).get(state_key) == 7,
 		"preview wire JSON preserves internal state keys"
 	)
+	var response_validation := PreviewHostScript.validate_driver_response({
+		"status": "ok",
+		"selectedIndex": 1,
+		"responseRef": {"responseId": "choice:1"},
+	})
+	_expect(
+		response_validation.get("status") == "ok",
+		"preview driver accepts bounded response objects"
+	)
+	var oversized: Array = []
+	oversized.resize(513)
+	_expect(
+		PreviewHostScript.validate_driver_response({"values": oversized}).get(
+			"status"
+		) == "error",
+		"preview driver rejects oversized response objects"
+	)
+	_expect(
+		PreviewHostScript._normalized_save_slot("sealed-shrine_1") \
+			== "sealed-shrine_1"
+			and PreviewHostScript._normalized_save_slot("../escape") == "",
+		"preview save slots remain bounded identifiers"
+	)
 
 
 func _test_sandbox_helper_discovery() -> void:

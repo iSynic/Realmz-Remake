@@ -1,7 +1,9 @@
 class_name ScenarioPreviewHost
 extends Node
 
-const PROTOCOL_VERSION := 1
+const PROTOCOL_VERSION := 2
+const MAX_DRIVER_RESPONSE_DEPTH := 12
+const MAX_DRIVER_RESPONSE_ENTRIES := 512
 const InstallScript = preload(
 	"res://scripts/scenario_runtime/scenario_campaign_install.gd"
 )
@@ -30,6 +32,9 @@ var _debug_breakpoints: Array = []
 var _debug_pause_on_start := false
 var _preview_assertions: Array = []
 var _preview_watches: Array[String] = []
+var _manual_preview_active := false
+var _manual_preview_result: Dictionary = {}
+var _preview_save_slots: Dictionary = {}
 
 
 func start_from_command_line() -> bool:
@@ -112,6 +117,14 @@ func _handle_message(message: Dictionary) -> void:
 				"status": "ok",
 				"summary": _state_summary(),
 			})
+		"pending-preview":
+			_respond(request_id, _manual_preview_state())
+		"respond-pending":
+			_respond_manual_preview(request_id, message.get("response", {}))
+		"save-session":
+			_save_preview_session(request_id, str(message.get("slot", "default")))
+		"restore-session":
+			_restore_preview_session(request_id, str(message.get("slot", "default")))
 		"set-watches":
 			var watch_result := _set_preview_watches(message.get("watches", []))
 			_respond(request_id, watch_result)
@@ -243,6 +256,9 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 		})
 		return
 	var entry: Dictionary = entry_value if entry_value is Dictionary else {}
+	_manual_preview_active = bool(entry.get("manualResponses", false))
+	_manual_preview_result.clear()
+	_preview_save_slots.clear()
 	var fixture: Dictionary = (
 		entry.get("fixture", {})
 		if entry.get("fixture", {}) is Dictionary
@@ -285,7 +301,15 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 				),
 			})
 			return
-		await _run_preview_trigger(trigger_id, int(entry.get("slot", 0)))
+		if _manual_preview_active and kind == "map-trigger" \
+				and session.has_method("begin_map_trigger"):
+			_manual_preview_result = session.begin_map_trigger(
+				trigger_id,
+				{"source": "providence-preview-driver"}
+			)
+		else:
+			_manual_preview_active = false
+			await _run_preview_trigger(trigger_id, int(entry.get("slot", 0)))
 	elif kind == "event-trigger":
 		var trigger_id := str(entry.get("triggerId", ""))
 		if trigger_id.is_empty() \
@@ -398,10 +422,18 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 				"message": "Preview Modern Encounter is unavailable",
 			})
 			return
-		await _run_preview_encounter(
-			encounter_id,
-			str(entry.get("sectionId", entry.get("nodeId", "")))
-		)
+		if _manual_preview_active and session.has_method("begin_encounter"):
+			_manual_preview_result = session.begin_encounter(
+				encounter_id,
+				{"source": "providence-preview-driver"},
+				str(entry.get("sectionId", entry.get("nodeId", "")))
+			)
+		else:
+			_manual_preview_active = false
+			await _run_preview_encounter(
+				encounter_id,
+				str(entry.get("sectionId", entry.get("nodeId", "")))
+			)
 	elif kind in [
 		"encounter",
 		"spell",
@@ -432,8 +464,189 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 		),
 		"fixture": fixture_result,
 		"assertions": _assertion_report(),
+		"manualPreview": _manual_preview_state(),
 	})
 	_launching = false
+
+
+func _respond_manual_preview(request_id: String, response_value: Variant) -> void:
+	if not _manual_preview_active or not is_instance_valid(session) \
+			or not session.has_method("resume_remake_command"):
+		_respond(request_id, {
+			"status": "error",
+			"message": "No manually controlled preview is active",
+		})
+		return
+	if str(_manual_preview_result.get("status", "")) != "yield":
+		_respond(request_id, {
+			"status": "error",
+			"message": "The preview is not waiting for a response",
+		})
+		return
+	var validation := validate_driver_response(response_value)
+	if str(validation.get("status", "")) != "ok":
+		_respond(request_id, validation)
+		return
+	_manual_preview_result = session.resume_remake_command(
+		validation.get("response", {})
+	)
+	_respond(request_id, _manual_preview_state())
+
+
+func _save_preview_session(request_id: String, slot_value: String) -> void:
+	if not _manual_preview_active or not is_instance_valid(session):
+		_respond(request_id, {
+			"status": "error",
+			"message": "No manually controlled preview is active",
+		})
+		return
+	var slot := _normalized_save_slot(slot_value)
+	if slot.is_empty():
+		_respond(request_id, {
+			"status": "error",
+			"message": "Preview save slot must use letters, numbers, dots, dashes, or underscores",
+		})
+		return
+	var save_result: Dictionary = session.make_save_result()
+	if str(save_result.get("status", "")) != "ok":
+		_respond(request_id, save_result)
+		return
+	_preview_save_slots[slot] = save_result.get("payload", {}).duplicate(true)
+	_respond(request_id, {
+		"status": "ok",
+		"slot": slot,
+		"pending": str(_manual_preview_result.get("status", "")) == "yield",
+		"state": _state_summary(),
+	})
+
+
+func _restore_preview_session(request_id: String, slot_value: String) -> void:
+	if not _manual_preview_active or not is_instance_valid(session):
+		_respond(request_id, {
+			"status": "error",
+			"message": "No manually controlled preview is active",
+		})
+		return
+	var slot := _normalized_save_slot(slot_value)
+	if slot.is_empty() or not _preview_save_slots.has(slot):
+		_respond(request_id, {
+			"status": "error",
+			"message": "Preview save slot '%s' is unavailable" % slot_value,
+		})
+		return
+	var restore_result: Dictionary = session.restore_save_payload(
+		_preview_save_slots[slot].duplicate(true)
+	)
+	if str(restore_result.get("status", "")) == "error":
+		_respond(request_id, restore_result)
+		return
+	_manual_preview_result = _restored_manual_preview_result()
+	var state := _manual_preview_state()
+	state["slot"] = slot
+	state["restore"] = restore_result
+	_respond(request_id, state)
+
+
+func _manual_preview_state() -> Dictionary:
+	if not _manual_preview_active:
+		return {
+			"status": "ok",
+			"active": false,
+			"pending": false,
+		}
+	var status := str(_manual_preview_result.get("status", ""))
+	return {
+		"status": "ok",
+		"active": true,
+		"pending": status == "yield",
+		"commandId": str(_manual_preview_result.get("commandId", "")),
+		"request": (
+			_manual_preview_result.get("request", {}).duplicate(true)
+			if _manual_preview_result.get("request", {}) is Dictionary
+			else {}
+		),
+		"result": _manual_preview_result.duplicate(true),
+		"state": _state_summary(),
+		"trace": _vm_trace(),
+	}
+
+
+func _restored_manual_preview_result() -> Dictionary:
+	if session.get("interpreter") == null:
+		return {"status": "ok"}
+	var interpreter_value: Object = session.get("interpreter")
+	if interpreter_value.pending_command == null:
+		return {"status": "ok"}
+	var last_result: Variant = interpreter_value.get("last_result")
+	if last_result is Dictionary \
+			and str(last_result.get("status", "")) == "yield":
+		return last_result.duplicate(true)
+	var pending: Dictionary = interpreter_value.pending_command.to_dictionary()
+	return {
+		"status": "yield",
+		"commandId": str(pending.get("commandId", "")),
+		"request": {},
+	}
+
+
+static func validate_driver_response(value: Variant) -> Dictionary:
+	if not (value is Dictionary):
+		return {
+			"status": "error",
+			"message": "Preview response must be an object",
+		}
+	var budget := {"entries": 0}
+	if not _validate_driver_value(value, 0, budget):
+		return {
+			"status": "error",
+			"message": "Preview response exceeds the bounded JSON contract",
+		}
+	return {"status": "ok", "response": value.duplicate(true)}
+
+
+static func _validate_driver_value(
+	value: Variant,
+	depth: int,
+	budget: Dictionary
+) -> bool:
+	if depth > MAX_DRIVER_RESPONSE_DEPTH:
+		return false
+	if value == null or value is bool or value is int \
+			or value is float or value is String:
+		return true
+	if value is Array:
+		budget["entries"] = int(budget["entries"]) + value.size()
+		if int(budget["entries"]) > MAX_DRIVER_RESPONSE_ENTRIES:
+			return false
+		for entry: Variant in value:
+			if not _validate_driver_value(entry, depth + 1, budget):
+				return false
+		return true
+	if value is Dictionary:
+		budget["entries"] = int(budget["entries"]) + value.size()
+		if int(budget["entries"]) > MAX_DRIVER_RESPONSE_ENTRIES:
+			return false
+		for key: Variant in value:
+			if not (key is String) \
+					or not _validate_driver_value(value[key], depth + 1, budget):
+				return false
+		return true
+	return false
+
+
+static func _normalized_save_slot(value: String) -> String:
+	var normalized := value.strip_edges()
+	if normalized.is_empty() or normalized.length() > 64:
+		return ""
+	for index: int in normalized.length():
+		var code := normalized.unicode_at(index)
+		var allowed := (code >= 48 and code <= 57) \
+			or (code >= 65 and code <= 90) \
+			or (code >= 97 and code <= 122) \
+			or code in [45, 46, 95]
+		if not allowed:
+			return ""
+	return normalized
 
 
 func _launch_deterministic_party(fixture: Dictionary = {}) -> Dictionary:
