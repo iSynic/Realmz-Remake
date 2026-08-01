@@ -121,6 +121,8 @@ func _handle_message(message: Dictionary) -> void:
 			_respond(request_id, _manual_preview_state())
 		"respond-pending":
 			_respond_manual_preview(request_id, message.get("response", {}))
+		"begin-manual-entry":
+			_begin_manual_preview_entry(request_id, message.get("entry", {}))
 		"save-session":
 			_save_preview_session(request_id, str(message.get("slot", "default")))
 		"restore-session":
@@ -491,6 +493,58 @@ func _respond_manual_preview(request_id: String, response_value: Variant) -> voi
 		validation.get("response", {})
 	)
 	_respond(request_id, _manual_preview_state())
+
+
+func _begin_manual_preview_entry(request_id: String, entry_value: Variant) -> void:
+	if not _manual_preview_active or not is_instance_valid(session):
+		_respond(request_id, {
+			"status": "error",
+			"message": "No manually controlled preview is active",
+		})
+		return
+	if str(_manual_preview_result.get("status", "")) == "yield":
+		_respond(request_id, {
+			"status": "error",
+			"message": "Finish the pending preview command before starting another entry",
+		})
+		return
+	var entry: Dictionary = entry_value if entry_value is Dictionary else {}
+	var kind := str(entry.get("kind", "map-trigger"))
+	if kind == "map-trigger" and session.has_method("begin_map_trigger"):
+		var trigger_id := str(entry.get("triggerId", ""))
+		if trigger_id.is_empty() or not session.host.has_trigger(trigger_id):
+			_respond(request_id, {
+				"status": "error",
+				"message": "Preview Map Trigger is unavailable",
+			})
+			return
+		_manual_preview_result = session.begin_map_trigger(
+			trigger_id,
+			{"source": "providence-preview-driver-reentry"}
+		)
+	elif kind == "encounter" and session.has_method("begin_encounter"):
+		var encounter_id := str(entry.get("encounterId", ""))
+		if encounter_id.is_empty() or not session.host.has_method("has_encounter") \
+				or not session.host.has_encounter(encounter_id):
+			_respond(request_id, {
+				"status": "error",
+				"message": "Preview Modern Encounter is unavailable",
+			})
+			return
+		_manual_preview_result = session.begin_encounter(
+			encounter_id,
+			{"source": "providence-preview-driver-reentry"},
+			str(entry.get("sectionId", entry.get("nodeId", "")))
+		)
+	else:
+		_respond(request_id, {
+			"status": "error",
+			"message": "Manual preview entry kind '%s' is unavailable" % kind,
+		})
+		return
+	var state := _manual_preview_state()
+	state["entry"] = entry.duplicate(true)
+	_respond(request_id, state)
 
 
 func _save_preview_session(request_id: String, slot_value: String) -> void:
