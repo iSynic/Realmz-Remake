@@ -111,19 +111,15 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 				"status": "error",
 				"message": "Scenario Encounter has no available responses",
 			}
-		var labels: Array = []
-		for response_value: Variant in authored_responses:
-			if not (response_value is Dictionary):
-				continue
-			var label := str(response_value.get("label", ""))
-			if label.is_empty():
-				label = str(response_value.get("kind", "Response")).capitalize()
-			labels.append(label)
+		var direct_model := fallback_direct_response_model(authored_responses)
+		if str(direct_model.get("status", "")) == "error":
+			return direct_model
+		var direct_responses: Array = direct_model.get("responses", [])
 		var choice_result: Dictionary = await _port_runtime.call(
 			"_scenario_choice",
 			{
 				"prompt": str(routed_request.get("text", "")),
-				"options": labels,
+				"options": direct_model.get("labels", []),
 				"encounterId": str(routed_request.get("encounterId", "")),
 				"sectionId": str(routed_request.get("sectionId", "")),
 			}
@@ -133,9 +129,9 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		var selected_index := clampi(
 			int(choice_result.get("choice", 0)),
 			0,
-			authored_responses.size() - 1
+			direct_responses.size() - 1
 		)
-		var selected: Dictionary = authored_responses[selected_index]
+		var selected: Dictionary = direct_responses[selected_index]
 		choice_result["responseRef"] = {
 			"kind": str(selected.get("kind", "choice")),
 			"responseId": str(selected.get("id", "")),
@@ -169,3 +165,45 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 			return extension_result
 		return await super.execute(command_id, routed_request)
 	return await super.execute(command_id, routed_request)
+
+
+static func fallback_direct_response_model(responses: Array) -> Dictionary:
+	var labels: Array = []
+	var direct_responses: Array = []
+	for response_value: Variant in responses:
+		if not (response_value is Dictionary):
+			continue
+		var response: Dictionary = response_value
+		var kind := str(response.get("kind", "choice"))
+		if kind in ["typed-reply", "spell", "item"]:
+			continue
+		if kind == "rogue" \
+				and str(response.get("match", {}).get("outcome", "attempt")) \
+				!= "attempt":
+			continue
+		if kind not in ["choice", "rogue", "back-out"]:
+			continue
+		var response_id := str(response.get("id", "")).strip_edges()
+		if response_id.is_empty():
+			return {
+				"status": "error",
+				"message": "Scenario Encounter response has no stable ID",
+			}
+		var label := str(response.get("label", "")).strip_edges()
+		if label.is_empty():
+			label = "Back out" if kind == "back-out" else kind.capitalize()
+		labels.append(label)
+		direct_responses.append(response)
+	if direct_responses.is_empty():
+		return {
+			"status": "error",
+			"message": (
+				"Scenario Encounter requires the specialized Speak, Cast a spell, "
+				+ "or Use an item presenter"
+			),
+		}
+	return {
+		"status": "ok",
+		"labels": labels,
+		"responses": direct_responses,
+	}

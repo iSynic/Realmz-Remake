@@ -60,6 +60,9 @@ const RuleModifierPipelineScript = preload(
 const PreviewHostScript = preload(
 	"res://scripts/scenario_runtime/preview/scenario_preview_host.gd"
 )
+const PresentationPortScript = preload(
+	"res://scripts/scenario_runtime/ports/presentation_port.gd"
+)
 const SandboxClientScript = preload(
 	"res://scripts/scenario_runtime/scenario_sandbox_client.gd"
 )
@@ -98,6 +101,7 @@ func _ready() -> void:
 	_test_engine_plugin_store()
 	_test_engine_plugin_settings_ui()
 	_test_preview_wire_json()
+	_test_encounter_fallback_presentation()
 	_test_sandbox_helper_discovery()
 	await _test_gameplay_rules()
 	_test_handler_registry()
@@ -733,6 +737,37 @@ func _test_providence_scripting_acceptance_bundle() -> void:
 		xap_attachment_hooks == ["run", "run"],
 		"Extra Action Point record attachments fire exactly once in order: %s"
 			% str(xap_attachment_hooks)
+	)
+
+
+func _test_encounter_fallback_presentation() -> void:
+	var model: Dictionary = PresentationPortScript.fallback_direct_response_model([
+		{"id": "typed", "kind": "typed-reply", "label": "Continue"},
+		{"id": "spell", "kind": "spell", "label": "Continue"},
+		{"id": "item", "kind": "item", "label": "Continue"},
+		{"id": "choice", "kind": "choice", "label": "Ask about the ruins"},
+		{"id": "leave", "kind": "back-out", "label": "Leave"},
+	])
+	_expect(
+		model.get("labels", []) == ["Ask about the ruins", "Leave"],
+		"generic Encounter fallback never presents typed, spell, or item labels"
+	)
+	var selected_ids: Array = model.get("responses", []).map(
+		func(response: Dictionary) -> String: return str(response.get("id", ""))
+	)
+	_expect(
+		selected_ids == ["choice", "leave"],
+		"generic Encounter fallback retains stable direct-response identities"
+	)
+	var specialized_only: Dictionary = (
+		PresentationPortScript.fallback_direct_response_model([
+			{"id": "item", "kind": "item", "label": "Continue"},
+		])
+	)
+	_expect(
+		str(specialized_only.get("status", "")) == "error"
+			and str(specialized_only.get("message", "")).contains("Use an item"),
+		"generic fallback requests the specialized item presenter instead of inventing a choice"
 	)
 
 
