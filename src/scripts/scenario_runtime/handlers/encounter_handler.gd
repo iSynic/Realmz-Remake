@@ -169,15 +169,70 @@ func _validate_section(section: Dictionary, targets: Dictionary) -> String:
 	if not (responses is Array) or responses.is_empty():
 		return "Encounter section '%s' has no responses" % section_id
 	var ids: Dictionary = {}
+	var match_keys: Dictionary = {}
 	for response_value: Variant in responses:
 		if not (response_value is Dictionary):
 			return "Encounter section '%s' has an invalid response" % section_id
 		var response_id := str(response_value.get("id", ""))
 		if response_id.is_empty() or ids.has(response_id):
 			return "Encounter response IDs must be unique"
+		var response_error := _validate_semantic_response(response_value)
+		if not response_error.is_empty():
+			return "Encounter response '%s' %s" % [response_id, response_error]
+		var match_key := _semantic_response_match_key(response_value)
+		if not match_key.is_empty() and match_keys.has(match_key):
+			return "Encounter responses cannot use the same typed, spell, or item match twice"
+		if not match_key.is_empty():
+			match_keys[match_key] = true
 		if not targets.has(response_id) or int(targets.get(response_id, -1)) < 0:
 			return "Encounter response '%s' has no execution target" % response_id
 		ids[response_id] = true
+	return ""
+
+
+static func _validate_semantic_response(response: Dictionary) -> String:
+	var kind := str(response.get("kind", "choice"))
+	if kind not in [
+		"choice",
+		"typed-reply",
+		"spell",
+		"item",
+		"rogue",
+		"back-out",
+	]:
+		return "has an unsupported kind '%s'" % kind
+	var match_value: Variant = response.get("match", {})
+	if not (match_value is Dictionary):
+		return "has invalid matching data"
+	var response_match: Dictionary = match_value
+	if kind == "typed-reply" \
+			and str(response_match.get("text", "")).strip_edges().is_empty():
+		return "requires matching text"
+	if kind in ["spell", "item"] \
+			and str(response_match.get("recordId", "")).strip_edges().is_empty():
+		return "requires a stable record ID"
+	if kind == "rogue" \
+			and str(response_match.get("outcome", "attempt")) != "attempt":
+		return (
+			"must be a selectable attempt; success and failure routing belongs "
+			+ "inside its Behavior"
+		)
+	return ""
+
+
+static func _semantic_response_match_key(response: Dictionary) -> String:
+	var kind := str(response.get("kind", ""))
+	var response_match: Dictionary = response.get("match", {})
+	if kind == "typed-reply":
+		return "%s:%s" % [
+			kind,
+			str(response_match.get("text", "")).strip_edges().to_lower(),
+		]
+	if kind in ["spell", "item"]:
+		return "%s:%s" % [
+			kind,
+			str(response_match.get("recordId", "")).strip_edges().to_lower(),
+		]
 	return ""
 
 

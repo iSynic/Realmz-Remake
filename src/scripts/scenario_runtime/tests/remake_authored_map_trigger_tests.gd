@@ -18,6 +18,12 @@ const PreviewServicesScript = preload(
 const MapMaterializerScript = preload(
 	"res://scripts/classic_runtime/classic_map_materializer.gd"
 )
+const PresentationServicesScript = preload(
+	"res://scripts/scenario_runtime/godot/scenario_godot_presentation_services.gd"
+)
+const EncounterHandlerScript = preload(
+	"res://scripts/scenario_runtime/handlers/encounter_handler.gd"
+)
 
 var failures := 0
 
@@ -25,6 +31,7 @@ var failures := 0
 func _ready() -> void:
 	await _test_map_trigger_execution_and_restore()
 	await _test_modern_encounter_execution_and_restore()
+	_test_specialized_encounter_response_matching()
 	await _test_typed_state_and_named_variants()
 	await _test_event_and_scheduled_triggers()
 	if failures == 0:
@@ -33,6 +40,92 @@ func _ready() -> void:
 	else:
 		push_error("Remake Authored Map Trigger tests failed: %d" % failures)
 		get_tree().quit(1)
+
+
+func _test_specialized_encounter_response_matching() -> void:
+	var responses := [
+		{
+			"id": "reply.open-sesame",
+			"kind": "typed-reply",
+			"label": "Speak the password",
+			"match": {"text": "Open Sesame"},
+		},
+		{
+			"id": "spell.knock",
+			"kind": "spell",
+			"label": "Cast Knock",
+			"match": {"recordId": "shared:spell:knock"},
+		},
+		{
+			"id": "item.key",
+			"kind": "item",
+			"label": "Use the silver key",
+			"match": {"recordId": "402"},
+		},
+		{
+			"id": "rogue.attempt",
+			"kind": "rogue",
+			"label": "Pick the lock",
+			"match": {"outcome": "attempt"},
+		},
+		{
+			"id": "rogue.success",
+			"kind": "rogue",
+			"label": "Lock opened",
+			"match": {"outcome": "success"},
+		},
+	]
+	_expect(
+		PresentationServicesScript.matching_scenario_typed_response(
+			responses,
+			"  OPEN SESAME  "
+		).get("id") == "reply.open-sesame",
+		"Modern typed replies match case-insensitively by authored text"
+	)
+	_expect(
+		PresentationServicesScript.matching_scenario_record_response(
+			responses,
+			"spell",
+			["Knock", "shared:spell:knock"]
+		).get("id") == "spell.knock",
+		"Modern spell responses match the selected spell's stable identities"
+	)
+	_expect(
+		PresentationServicesScript.matching_scenario_record_response(
+			responses,
+			"item",
+			["402", "Silver Key"]
+		).get("id") == "item.key",
+		"Modern item responses match the selected item definition"
+	)
+	var presenter := PresentationServicesScript.new()
+	var choice_model: Dictionary = presenter.call(
+		"_scenario_response_choice_model",
+		responses
+	)
+	_expect(
+		choice_model.get("tokens", []).has("mode:typed-reply")
+			and choice_model.get("tokens", []).has("mode:spell")
+			and choice_model.get("tokens", []).has("mode:item")
+			and choice_model.get("tokens", []).has("response:rogue.attempt")
+			and not choice_model.get("tokens", []).has("response:rogue.success"),
+		"specialized response launchers expose only selectable rogue attempts"
+	)
+	var stable_result: Dictionary = PresentationServicesScript._scenario_response_result(
+		responses[1],
+		{"spellName": "Knock", "recordIds": ["shared:spell:knock"]}
+	)
+	_expect(
+		stable_result.get("responseRef", {}).get("responseId") == "spell.knock",
+		"specialized selectors return the authored stable response identity"
+	)
+	_expect(
+		EncounterHandlerScript._validate_semantic_response({
+			"kind": "rogue",
+			"match": {"outcome": "failure"},
+		}).contains("inside its Behavior"),
+		"Modern rogue result logic cannot masquerade as a selectable response"
+	)
 
 
 func _test_map_trigger_execution_and_restore() -> void:

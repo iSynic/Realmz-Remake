@@ -198,27 +198,190 @@ func _scenario_encounter_response(payload: Dictionary) -> Dictionary:
 	var responses: Variant = payload.get("responses", [])
 	if not (responses is Array) or responses.is_empty():
 		return _error("Scenario Encounter has no available responses")
+	var choice_model := _scenario_response_choice_model(responses)
+	if str(choice_model.get("status", "")) == "error":
+		return choice_model
+	var text_rect: Object = service_owner.call("_text_rect")
+	if text_rect == null:
+		return _error("Realmz HUD TextRect is unavailable")
+	while true:
+		var prompt := str(payload.get("text", ""))
+		if not prompt.is_empty():
+			text_rect.set_text(prompt, false)
+		var selected_token := str(await service_owner.call(
+			"_show_choices",
+			text_rect,
+			choice_model.get("labels", []),
+			choice_model.get("tokens", [])
+		))
+		if selected_token.begins_with("response:"):
+			var direct := _scenario_response_by_id(
+				responses,
+				selected_token.trim_prefix("response:")
+			)
+			if direct.is_empty():
+				return _error("Scenario Encounter returned an invalid response")
+			var direct_context: Dictionary = {}
+			if str(direct.get("kind", "")) == "rogue":
+				direct_context["rogueOutcome"] = "attempt"
+			return _scenario_response_result(direct, direct_context)
+
+		var selection: Dictionary
+		var matched: Dictionary
+		match selected_token:
+			"mode:typed-reply":
+				selection = await service_owner.call(
+					"_select_scenario_word_response"
+				)
+				matched = matching_scenario_typed_response(
+					responses,
+					str(selection.get("spokenText", ""))
+				)
+			"mode:spell":
+				selection = await service_owner.call(
+					"_select_scenario_spell_response"
+				)
+				matched = matching_scenario_record_response(
+					responses,
+					"spell",
+					selection.get("recordIds", [])
+				)
+			"mode:item":
+				selection = await service_owner.call(
+					"_select_scenario_item_response"
+				)
+				matched = matching_scenario_record_response(
+					responses,
+					"item",
+					selection.get("recordIds", [])
+				)
+			_:
+				return _error("Scenario Encounter returned an invalid response mode")
+		if str(selection.get("status", "")) == "error":
+			return selection
+		if str(selection.get("status", "")) == "cancelled":
+			continue
+		if matched.is_empty():
+			continue
+		return _scenario_response_result(matched, selection)
+	return _error("Scenario Encounter response selection ended unexpectedly")
+
+
+func _scenario_response_choice_model(responses: Array) -> Dictionary:
 	var labels: Array = []
+	var tokens: Array = []
+	var modes := {
+		"typed-reply": false,
+		"spell": false,
+		"item": false,
+	}
 	for response_value: Variant in responses:
 		if not (response_value is Dictionary):
 			return _error("Scenario Encounter response is invalid")
-		var label := str(response_value.get("label", "")).strip_edges()
+		var response: Dictionary = response_value
+		var response_id := str(response.get("id", "")).strip_edges()
+		if response_id.is_empty():
+			return _error("Scenario Encounter response has no stable ID")
+		var kind := str(response.get("kind", "choice"))
+		if kind in modes:
+			if not bool(modes[kind]) and _scenario_response_mode_available(kind):
+				modes[kind] = true
+				labels.append({
+					"typed-reply": "Speak",
+					"spell": "Cast a spell",
+					"item": "Use an item",
+				}.get(kind, kind.capitalize()))
+				tokens.append("mode:%s" % kind)
+			continue
+		if kind == "rogue" \
+				and str(response.get("match", {}).get("outcome", "attempt")) \
+				!= "attempt":
+			continue
+		if kind not in ["choice", "rogue", "back-out"]:
+			return _error("Scenario Encounter response kind '%s' is invalid" % kind)
+		var label := str(response.get("label", "")).strip_edges()
 		if label.is_empty():
-			label = str(response_value.get("kind", "Response")).capitalize()
+			label = "Back out" if kind == "back-out" else kind.capitalize()
 		labels.append(label)
-	var selected := await _scenario_choice({
-		"prompt": str(payload.get("text", "")),
-		"options": labels,
-	})
-	if str(selected.get("status", "")) == "error":
-		return selected
-	var index := clampi(int(selected.get("choice", 0)), 0, responses.size() - 1)
-	var response: Dictionary = responses[index]
-	selected["responseRef"] = {
+		tokens.append("response:%s" % response_id)
+	if labels.is_empty():
+		return _error(
+			"Scenario Encounter has no selectable responses; rogue success and "
+			+ "failure routes require a selectable attempt"
+		)
+	return {"labels": labels, "tokens": tokens}
+
+
+func _scenario_response_mode_available(kind: String) -> bool:
+	if service_owner == null:
+		return true
+	if kind == "spell":
+		return service_owner.call("_first_spellcaster") != null
+	if kind == "item":
+		return service_owner.call("_first_item_holder") != null
+	return true
+
+
+static func matching_scenario_typed_response(
+	responses: Array,
+	entered_text: String
+) -> Dictionary:
+	var entered := entered_text.strip_edges().to_lower()
+	for response_value: Variant in responses:
+		if response_value is Dictionary \
+				and str(response_value.get("kind", "")) == "typed-reply" \
+				and str(response_value.get("match", {}).get("text", "")) \
+				.strip_edges().to_lower() == entered:
+			return response_value
+	return {}
+
+
+static func matching_scenario_record_response(
+	responses: Array,
+	kind: String,
+	selected_record_ids: Variant
+) -> Dictionary:
+	if not (selected_record_ids is Array):
+		return {}
+	var selected: Array[String] = []
+	for id_value: Variant in selected_record_ids:
+		var normalized := str(id_value).strip_edges().to_lower()
+		if not normalized.is_empty() and not selected.has(normalized):
+			selected.append(normalized)
+	for response_value: Variant in responses:
+		if not (response_value is Dictionary) \
+				or str(response_value.get("kind", "")) != kind:
+			continue
+		var expected := str(
+			response_value.get("match", {}).get("recordId", "")
+		).strip_edges().to_lower()
+		if not expected.is_empty() and selected.has(expected):
+			return response_value
+	return {}
+
+
+static func _scenario_response_by_id(
+	responses: Array,
+	response_id: String
+) -> Dictionary:
+	for response_value: Variant in responses:
+		if response_value is Dictionary \
+				and str(response_value.get("id", "")) == response_id:
+			return response_value
+	return {}
+
+
+static func _scenario_response_result(
+	response: Dictionary,
+	selection: Dictionary
+) -> Dictionary:
+	var result := selection.duplicate(true)
+	result.erase("outcome")
+	result["responseRef"] = {
 		"kind": str(response.get("kind", "choice")),
 		"responseId": str(response.get("id", "")),
 	}
-	return selected
+	return result
 
 
 func _wait_for_click(payload: Dictionary) -> Dictionary:

@@ -2533,6 +2533,10 @@ func _select_complex_word(encounter: Dictionary) -> Dictionary:
 	}
 
 
+func _select_scenario_word_response() -> Dictionary:
+	return await _select_complex_word({})
+
+
 func _select_complex_spell(encounter: Dictionary, include_spell_user := false) -> Dictionary:
 	var caster := _first_spellcaster()
 	if caster == null:
@@ -2575,6 +2579,7 @@ func _select_complex_spell(encounter: Dictionary, include_spell_user := false) -
 		),
 		"spellName": str(spell.get("name")),
 		"spellPower": power,
+		"recordIds": _scenario_spell_record_ids(spell),
 		"classicSpecial": int(spell.get("classic_special")) \
 			if spell.get("classic_special") != null else 0,
 	}
@@ -2586,6 +2591,10 @@ func _select_complex_spell(encounter: Dictionary, include_spell_user := false) -
 	if include_spell_user:
 		result["_spellUser"] = picked_character
 	return result
+
+
+func _select_scenario_spell_response() -> Dictionary:
+	return await _select_complex_spell({})
 
 
 func _select_complex_item(
@@ -2634,6 +2643,7 @@ func _select_complex_item(
 	)
 	if str(response.get("status", "")) == "error":
 		return response
+	response["recordIds"] = _scenario_item_record_ids(selected_item)
 	if required_mode == "scroll" \
 			and not is_complex_scroll_item(selected_item, available_scenario_items):
 		return {"status": "cancelled"}
@@ -2645,6 +2655,84 @@ func _select_complex_item(
 	if include_spell_user and str(response.get("mode", "")) == "spell-item":
 		response["_spellUser"] = picked_holder
 	return response
+
+
+func _select_scenario_item_response() -> Dictionary:
+	var holder := _first_item_holder()
+	if holder == null:
+		return _error("Scenario Encounter has no conscious item holder")
+	var ui: Object = _autoload("UI")
+	if ui == null or ui.ow_hud == null:
+		return _error("Realmz HUD is unavailable for Encounter item selection")
+	var encounter_control: Object = ui.ow_hud.encounterControl
+	var item_menu: Object = (
+		encounter_control.useitemRect if encounter_control != null else null
+	)
+	if item_menu == null or not item_menu.has_method("initialize_for_encounter"):
+		return _error("Realmz Encounter item picker is unavailable")
+	for button: Node in encounter_control.boxContainer.get_children():
+		button.hide()
+	encounter_control.itemButton.show()
+	encounter_control.show()
+	item_menu.initialize_for_encounter(holder)
+	item_menu.show()
+	await item_menu.encounter_item_picked
+	encounter_control.hide()
+	var selected_item: Variant = item_menu.picked_item
+	if not (selected_item is ItemInstance or selected_item is Dictionary):
+		return {"status": "cancelled"}
+	return {
+		"itemName": _item_display_name(selected_item),
+		"recordIds": _scenario_item_record_ids(selected_item),
+	}
+
+
+func _scenario_spell_record_ids(spell: Variant) -> Array[String]:
+	var result: Array[String] = []
+	if not (spell is Object or spell is Dictionary):
+		return result
+	_append_scenario_record_id(result, spell.get("name"))
+	_append_scenario_record_id(result, spell.get("id"))
+	_append_scenario_record_id(result, spell.get("stable_id"))
+	_append_scenario_record_id(result, spell.get("resource_path"))
+	_append_scenario_record_id(result, spell.get("classic_spell_id"))
+	_append_scenario_record_ids(result, spell.get("classic_spell_ids"))
+	_append_scenario_record_id(result, spell.get("classicSpellId"))
+	_append_scenario_record_ids(result, spell.get("classicSpellIds"))
+	return result
+
+
+func _scenario_item_record_ids(item: Variant) -> Array[String]:
+	var result: Array[String] = []
+	_append_scenario_record_id(result, _item_display_name(item))
+	if item is ItemInstance:
+		_append_scenario_record_id(result, item.definition_id)
+	elif item is Dictionary:
+		_append_scenario_record_id(result, item.get("definitionId"))
+		_append_scenario_record_id(result, item.get("definition_id"))
+	for classic_id: int in _classic_item_ids(item):
+		_append_scenario_record_id(result, classic_id)
+	return result
+
+
+static func _append_scenario_record_ids(
+	target: Array[String],
+	values: Variant
+) -> void:
+	if values is Array:
+		for value: Variant in values:
+			_append_scenario_record_id(target, value)
+
+
+static func _append_scenario_record_id(
+	target: Array[String],
+	value: Variant
+) -> void:
+	if value == null:
+		return
+	var candidate := str(value).strip_edges()
+	if not candidate.is_empty() and not target.has(candidate):
+		target.append(candidate)
 
 
 func _apply_rogue_spell_response(
