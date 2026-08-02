@@ -337,6 +337,7 @@ Bundle v3 contains:
 - `classic/evidence.json`, with source/provenance/decoding evidence;
 - `runtime.json`, with profiles, requirements, provider bindings, and target
   support;
+- semantic `remake/logic.json` schema 6 for Remake Authored campaigns;
 - `remake/scripts.json` schema 3, with behaviors, state, typed anchors,
   Encounter overlays, migrations, and sandbox source manifests;
 - immutable scenario-owned assets and decoded runtime media.
@@ -351,7 +352,7 @@ GDScript.
 
 ## Saves and content updates
 
-Campaign save schema 7 records:
+The current pre-release campaign save schema 8 records:
 
 - campaign identity, content version, and package hash;
 - API catalog hash;

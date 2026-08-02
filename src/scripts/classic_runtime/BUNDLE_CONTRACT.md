@@ -7,6 +7,9 @@ the package; Realmz Remake installs, validates, previews, and executes it.
 Bundle v3 is still pre-release. The current contract is completed in place:
 Remake accepts only the current document shapes, Providence exports only those
 shapes, and the 13 built-in campaigns are regenerated with the app.
+Experimental document and save schemas are not compatibility targets. The
+contract present at the first public release will be published as schema 1
+rather than exposing the prototype version history.
 
 `campaignKind` is one of `classic-interpreted`, `classic-enhanced`, or
 `remake-authored`. Classic Enhanced packages retain source-preserving Classic
@@ -69,10 +72,13 @@ invalid.
 
 ## Runtime data and evidence
 
-Gameplay/runtime documents use `schemaVersion: 4`. Classic records keep
-stable IDs and gameplay fields. Source paths, record indices, byte ranges,
-confidence, source hashes, decoding evidence, and diagnostics live in
-`classic/evidence.json`, keyed by record kind and stable record ID.
+Source-preserving Classic gameplay documents use `schemaVersion: 4`, as does
+`runtime.json`. Semantic `remake/logic.json` uses the current pre-release
+schema 6 and `remake/scripts.json` uses schema 3. Remake accepts only those
+current shapes. Classic records keep stable IDs and gameplay fields. Source
+paths, record indices, byte ranges, confidence, source hashes, decoding
+evidence, and diagnostics live in `classic/evidence.json`, keyed by record kind
+and stable record ID.
 
 The installer verifies the evidence sidecar's integrity and shape. Ordinary
 gameplay does not load it. Preview and debug tooling can resolve trace IDs
@@ -92,6 +98,27 @@ data under stable trigger and slot identities.
 
 Requirements are explicit. An unavailable extension, plug-in, provider, or API
 version blocks readiness; it never selects a fallback implementation.
+
+## Semantic activation
+
+Repeat frequency and record availability are independent contracts. Map
+Triggers support every activation, once per campaign, and once per map visit.
+Modern Encounters support every time and once. Each may reference a Safe
+`Available when` behavior whose result is boolean and whose contract is pure,
+synchronous, and non-yielding.
+
+An activation attempt is evaluated in this order:
+
+1. enabled and repeat-state gate;
+2. record-level `Available when` condition;
+3. Map Trigger chance, when applicable;
+4. named-variant selection;
+5. entry or Trigger Steps.
+
+A false availability result skips execution without consuming a once-only
+activation. Event and Scheduled Trigger conditions follow the same pure
+condition contract; a skipped scheduled occurrence does not mark that
+occurrence as dispatched.
 
 ## Instructions and central execution
 
@@ -351,7 +378,7 @@ plug-ins named in `runtime.requiredPlugins` are activated for a campaign.
 
 ## Persistence and scenario updates
 
-Campaign saves use schema 5 and pin:
+Campaign saves use the current pre-release schema 8 and pin:
 
 - campaign ID, content version, and package hash;
 - Scenario API catalog hash;
