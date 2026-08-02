@@ -4458,6 +4458,21 @@ func _test_installed_classic_campaign_layout() -> void:
 	var serialized_payload := JSON.stringify(save_payload)
 	var parsed_payload: Variant = JSON.parse_string(serialized_payload)
 	_expect(parsed_payload is Dictionary, "campaign save payload is JSON serializable")
+	var save_load_script: GDScript = load(
+		"res://scenes/UI/HUD/SaveLoad/save_load_rect.gd"
+	)
+	var disk_serialized: String = save_load_script.serialize_game_data({
+		"classic_runtime": save_payload,
+	})
+	var disk_parsed: Variant = JSON.parse_string(disk_serialized)
+	_expect(
+		disk_parsed is Dictionary
+			and disk_parsed.get("classic_runtime", {}).has("activeResponseRef")
+			and disk_parsed.get("classic_runtime", {}).get("activeResponseRef") == null
+			and disk_parsed.get("classic_runtime", {}).has("activeResultRef")
+			and disk_parsed.get("classic_runtime", {}).get("activeResultRef") == null,
+		"native save serialization preserves idle scenario references as JSON null"
+	)
 	var version_one_payload: Dictionary = parsed_payload.duplicate(true)
 	version_one_payload["schemaVersion"] = 1
 	version_one_payload.erase("continuationState")

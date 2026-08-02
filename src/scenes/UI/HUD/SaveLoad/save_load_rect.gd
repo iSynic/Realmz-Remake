@@ -1,6 +1,11 @@
 extends NinePatchRect
 class_name SaveLoadCtrl
 
+
+static func serialize_game_data(value: Dictionary) -> String:
+	return JSON.stringify(value)
+
+
 var can_save : bool = false
 
 @export var scenarios_panel : SaveLoad_Scenarios_Panel
@@ -230,7 +235,7 @@ func save_game(campaignname : String, savename : String) :
 		#set_cfg_setting(path, section, key, value) :
 		var profile_settings_path : String = Paths.profilesfolderpath+Paths.currentProfileFolderName+'/profile_settings.cfg'
 		Utils.FileHandler.set_cfg_setting(profile_settings_path,"HONEST_MODE", "money_banked", str(GameGlobal.money_banked))
-	save_data_file.store_line(str(dict_to_save))
+	save_data_file.store_line(serialize_game_data(dict_to_save))
 	save_data_file.close()
 	save_data_file = FileAccess.open(save_path+"/shops.json", FileAccess.ModeFlags.WRITE)
 	var shops_data := _shops_data_for_save()
