@@ -79,6 +79,8 @@ const V1_FIXTURE := \
 	"res://scripts/scenario_runtime/tests/fixtures/v1_rejected"
 const PROVIDENCE_SCRIPTING_ACCEPTANCE_FIXTURE := \
 	"res://scripts/scenario_runtime/tests/fixtures/providence-scripting-acceptance"
+const SEMANTIC_AUTHORING_CONTRACT_LEDGER := \
+	"res://scripts/scenario_runtime/semantic_authoring_contracts.v1.json"
 const CITY_OF_BYWATER_CAMPAIGN := \
 	"res://Campaigns/City of Bywater (Classic)"
 
@@ -94,6 +96,7 @@ class PartyItemCarrier:
 
 
 func _ready() -> void:
+	_test_semantic_authoring_contract_ledger()
 	_test_v3_bundle_contract()
 	_test_definition_snapshot_services()
 	_test_extension_registry()
@@ -134,6 +137,41 @@ func _ready() -> void:
 	else:
 		push_error("Scenario runtime tests failed: %d" % failures)
 		get_tree().quit(1)
+
+
+func _test_semantic_authoring_contract_ledger() -> void:
+	var file := FileAccess.open(SEMANTIC_AUTHORING_CONTRACT_LEDGER, FileAccess.READ)
+	_expect(file != null, "semantic authoring contract ledger is readable")
+	if file == null:
+		return
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	_expect(parsed is Dictionary, "semantic authoring contract ledger is valid JSON")
+	if not (parsed is Dictionary):
+		return
+	_expect(parsed.get("schemaVersion") == 1, "semantic contract schema")
+	var entries: Variant = parsed.get("entries", [])
+	_expect(entries is Array and entries.size() == 22, "semantic contract entries are complete")
+	if not (entries is Array):
+		return
+	var by_id := {}
+	for entry_value: Variant in entries:
+		if entry_value is Dictionary:
+			by_id[str(entry_value.get("id", ""))] = entry_value
+	_expect(
+		by_id.get("map-trigger.repeat", {}).get("values", []) \
+			== ["always", "once", "once-per-map-entry"],
+		"map repeat contract excludes conditional availability"
+	)
+	_expect(
+		by_id.get("encounter.repeat", {}).get("values", []) \
+			== ["always", "once"],
+		"encounter repeat contract excludes conditional availability"
+	)
+	_expect(
+		by_id.has("classic-enhanced.anchor")
+			and by_id.has("semantic-step.contextual-reachability"),
+		"semantic contract covers Enhanced anchors and shared Steps"
+	)
 
 
 func _test_preview_wire_json() -> void:

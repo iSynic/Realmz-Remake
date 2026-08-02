@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "id": "map-trigger.event",
+      "surface": "Map Triggers",
+      "values": ["enter", "leave", "search", "interact", "item-use", "map-enter", "map-leave"],
+      "projectFields": ["logic.mapTriggers[].event"],
+      "validator": "validateRemakeMapTriggers",
+      "exportedDocument": "remake/logic.json:mapTriggers[].event",
+      "runtimeConsumer": "ScenarioCampaignSession.begin_map_trigger",
+      "previewCase": "map-trigger-event-dispatch",
+      "saveExpectation": "event identity is package-pinned"
+    },
+    {
+      "id": "map-trigger.location",
+      "surface": "Map Triggers",
+      "values": ["point", "rectangle"],
+      "projectFields": ["logic.mapTriggers[].location"],
+      "validator": "validateRemakeMapTriggers",
+      "exportedDocument": "remake/logic.json:mapTriggers[].location",
+      "runtimeConsumer": "ScenarioCampaignSession.match_map_triggers",
+      "previewCase": "map-trigger-location",
+      "saveExpectation": "location is package-pinned"
+    },
+    {
+      "id": "map-trigger.chance",
+      "surface": "Map Triggers",
+      "values": ["percent"],
+      "projectFields": ["logic.mapTriggers[].chance"],
+      "validator": "validateRemakeMapTriggers",
+      "exportedDocument": "remake/logic.json:mapTriggers[].chance",
+      "runtimeConsumer": "ScenarioCampaignSession.begin_map_trigger",
+      "previewCase": "map-trigger-deterministic-chance",
+      "saveExpectation": "scenario RNG state restores"
+    },
+    {
+      "id": "map-trigger.repeat",
+      "surface": "Map Triggers",
+      "values": ["always", "once", "once-per-map-entry"],
+      "projectFields": ["logic.mapTriggers[].repeatPolicy"],
+      "validator": "validateRemakeMapTriggers",
+      "exportedDocument": "remake/logic.json:mapTriggers[].repeatPolicy",
+      "runtimeConsumer": "ScenarioSemanticState.can_run_trigger",
+      "previewCase": "map-trigger-repeat",
+      "saveExpectation": "completed trigger and map-entry markers restore"
+    },
+    {
+      "id": "map-trigger.availability",
+      "surface": "Map Triggers",
+      "values": ["none", "safe-bool"],
+      "projectFields": ["logic.mapTriggers[].activationConditionBehaviorId"],
+      "validator": "validateRemakeMapTriggers",
+      "exportedDocument": "remake/logic.json:mapTriggers[].activationConditionBehaviorId",
+      "runtimeConsumer": "ScenarioCampaignSession.begin_map_trigger",
+      "previewCase": "map-trigger-availability",
+      "saveExpectation": "pure conditions add no pending save state"
+    },
+    {
+      "id": "map-trigger.variant",
+      "surface": "Map Triggers",
+      "values": ["conditional", "default"],
+      "projectFields": ["logic.mapTriggers[].variants", "logic.mapTriggers[].defaultVariantId"],
+      "validator": "validateRemakeMapTriggers",
+      "exportedDocument": "remake/logic.json:mapTriggers[].variants",
+      "runtimeConsumer": "ScenarioCampaignSession._select_named_variant",
+      "previewCase": "map-trigger-variant-order",
+      "saveExpectation": "active variant is captured by the interpreter context"
+    },
+    {
+      "id": "event-trigger.event",
+      "surface": "Events and Schedules",
+      "values": ["campaign-start", "campaign-end", "map-enter", "map-leave", "movement", "rest", "time", "battle-start", "battle-end", "character-defeat", "party-defeat", "spell", "item", "combat-round"],
+      "projectFields": ["logic.eventTriggers[].event"],
+      "validator": "validateRemakeGlobalTriggers",
+      "exportedDocument": "remake/logic.json:eventTriggers[].event",
+      "runtimeConsumer": "ScenarioCampaignSession.begin_event_dispatch",
+      "previewCase": "event-trigger-dispatch",
+      "saveExpectation": "queued event identity restores"
+    },
+    {
+      "id": "event-trigger.availability",
+      "surface": "Events and Schedules",
+      "values": ["none", "safe-bool"],
+      "projectFields": ["logic.eventTriggers[].conditionBehaviorId"],
+      "validator": "validateRemakeGlobalTriggers",
+      "exportedDocument": "remake/logic.json:eventTriggers[].conditionBehaviorId",
+      "runtimeConsumer": "ScenarioCampaignSession._start_next_queued_trigger",
+      "previewCase": "event-trigger-availability",
+      "saveExpectation": "pure conditions add no pending save state"
+    },
+    {
+      "id": "event-trigger.order",
+      "surface": "Events and Schedules",
+      "values": ["enabled", "priority", "stable-id-tiebreak"],
+      "projectFields": ["logic.eventTriggers[].enabled", "logic.eventTriggers[].priority"],
+      "validator": "validateRemakeGlobalTriggers",
+      "exportedDocument": "remake/logic.json:eventTriggers[]",
+      "runtimeConsumer": "ScenarioCampaignSession.begin_event_dispatch",
+      "previewCase": "event-trigger-order",
+      "saveExpectation": "pending queue order restores"
+    },
+    {
+      "id": "scheduled-trigger.schedule",
+      "surface": "Events and Schedules",
+      "values": ["absolute", "elapsed", "recurring"],
+      "projectFields": ["logic.scheduledTriggers[].schedule"],
+      "validator": "validateRemakeGlobalTriggers",
+      "exportedDocument": "remake/logic.json:scheduledTriggers[].schedule",
+      "runtimeConsumer": "ScenarioSemanticState.scheduled_due_marker",
+      "previewCase": "scheduled-trigger-schedule",
+      "saveExpectation": "last due markers restore"
+    },
+    {
+      "id": "scheduled-trigger.location",
+      "surface": "Events and Schedules",
+      "values": ["anywhere", "point", "rectangle"],
+      "projectFields": ["logic.scheduledTriggers[].location"],
+      "validator": "validateRemakeGlobalTriggers",
+      "exportedDocument": "remake/logic.json:scheduledTriggers[].location",
+      "runtimeConsumer": "ScenarioCampaignSession._scheduled_location_matches",
+      "previewCase": "scheduled-trigger-location",
+      "saveExpectation": "location is package-pinned"
+    },
+    {
+      "id": "scheduled-trigger.availability",
+      "surface": "Events and Schedules",
+      "values": ["none", "safe-bool"],
+      "projectFields": ["logic.scheduledTriggers[].conditionBehaviorId"],
+      "validator": "validateRemakeGlobalTriggers",
+      "exportedDocument": "remake/logic.json:scheduledTriggers[].conditionBehaviorId",
+      "runtimeConsumer": "ScenarioCampaignSession._start_next_queued_trigger",
+      "previewCase": "scheduled-trigger-availability",
+      "saveExpectation": "a false condition does not consume a due marker"
+    },
+    {
+      "id": "encounter.repeat",
+      "surface": "Modern Encounters",
+      "values": ["always", "once"],
+      "projectFields": ["logic.encounters[].repeatPolicy"],
+      "validator": "validateRemakeEncounter",
+      "exportedDocument": "remake/logic.json:encounters[].repeatPolicy",
+      "runtimeConsumer": "ScenarioSemanticState.can_run_encounter",
+      "previewCase": "encounter-repeat",
+      "saveExpectation": "completed encounter markers restore"
+    },
+    {
+      "id": "encounter.availability",
+      "surface": "Modern Encounters",
+      "values": ["none", "safe-bool"],
+      "projectFields": ["logic.encounters[].activationConditionBehaviorId"],
+      "validator": "validateRemakeEncounter",
+      "exportedDocument": "remake/logic.json:encounters[].activationConditionBehaviorId",
+      "runtimeConsumer": "ScenarioCampaignSession.begin_encounter",
+      "previewCase": "encounter-availability",
+      "saveExpectation": "pure conditions add no pending save state"
+    },
+    {
+      "id": "encounter.variant",
+      "surface": "Modern Encounters",
+      "values": ["conditional", "default"],
+      "projectFields": ["logic.encounters[].variants", "logic.encounters[].defaultVariantId"],
+      "validator": "validateRemakeEncounter",
+      "exportedDocument": "remake/logic.json:encounters[].variants",
+      "runtimeConsumer": "ScenarioCampaignSession._select_named_variant",
+      "previewCase": "encounter-variant-order",
+      "saveExpectation": "active variant is captured by the encounter context"
+    },
+    {
+      "id": "encounter.lifecycle",
+      "surface": "Modern Encounters",
+      "values": ["entry", "completion"],
+      "projectFields": ["logic.encounters[].entryBehaviorId", "logic.encounters[].completionBehaviorId"],
+      "validator": "validateRemakeEncounter",
+      "exportedDocument": "remake/logic.json:encounters[]",
+      "runtimeConsumer": "ScenarioInterpreter encounter lifecycle",
+      "previewCase": "encounter-lifecycle",
+      "saveExpectation": "lifecycle frames and pending commands restore"
+    },
+    {
+      "id": "encounter.response",
+      "surface": "Modern Encounters",
+      "values": ["choice", "typed-reply", "spell", "item", "rogue", "back-out"],
+      "projectFields": ["logic.encounters[].sections[].responses[]"],
+      "validator": "validateRemakeEncounter",
+      "exportedDocument": "remake/logic.json:encounters[].sections[].responses[]",
+      "runtimeConsumer": "ScenarioGodotPresentationServices encounter responseRef",
+      "previewCase": "encounter-response-kinds",
+      "saveExpectation": "active stable response reference restores"
+    },
+    {
+      "id": "encounter.result-terminal",
+      "surface": "Modern Encounters",
+      "values": ["return", "close", "repeat-section", "section"],
+      "projectFields": ["logic.encounters[].results[].terminal"],
+      "validator": "validateRemakeEncounter",
+      "exportedDocument": "remake/logic.json:encounters[].results[].terminal",
+      "runtimeConsumer": "ScenarioInterpreter encounter result transition",
+      "previewCase": "encounter-result-terminal",
+      "saveExpectation": "active result and transition count restore"
+    },
+    {
+      "id": "encounter.result-sharing",
+      "surface": "Modern Encounters",
+      "values": ["single-use", "shared", "redirect"],
+      "projectFields": ["logic.encounters[].responses[].resultId", "logic.encounters[].results[]"],
+      "validator": "validateRemakeEncounter",
+      "exportedDocument": "remake/logic.json:encounters[]",
+      "runtimeConsumer": "ScenarioInterpreter encounter result dispatch",
+      "previewCase": "encounter-shared-result-and-redirect",
+      "saveExpectation": "a displaced result never resumes or double-fires"
+    },
+    {
+      "id": "behavior.tier",
+      "surface": "Contextual Steps and Scripting",
+      "values": ["safe", "sandboxed"],
+      "projectFields": ["remakeRuntime.behaviors[].tier"],
+      "validator": "validateRemakeRuntimeCatalog",
+      "exportedDocument": "remake/scripts.json:behaviors[].tier",
+      "runtimeConsumer": "ScenarioScriptRuntime",
+      "previewCase": "behavior-tier",
+      "saveExpectation": "safe frames and explicit sandbox state restore"
+    },
+    {
+      "id": "classic-enhanced.anchor",
+      "surface": "Classic Enhanced contextual Steps",
+      "values": ["record-start", "record-complete", "classic-action-before", "classic-action-after", "encounter-response-availability", "encounter-response-selected", "encounter-result-body-start", "encounter-result-body", "encounter-result-body-complete", "encounter-result-action-before", "encounter-result-action-after", "domain"],
+      "projectFields": ["remakeRuntime.bindings[].anchor"],
+      "validator": "validateRemakeRuntimeCatalog",
+      "exportedDocument": "remake/scripts.json:bindings[].anchor",
+      "runtimeConsumer": "ScenarioInterpreter mixed sequence anchors",
+      "previewCase": "classic-enhanced-anchor-order",
+      "saveExpectation": "mixed sequence cursor and attachment order restore"
+    },
+    {
+      "id": "semantic-step.contextual-reachability",
+      "surface": "Shared semantic Step workbench",
+      "values": ["map-trigger", "encounter-result", "classic-ap-xap", "classic-encounter-result", "spell", "item", "monster", "battle", "lifecycle", "rule", "reusable-helper"],
+      "projectFields": ["remakeRuntime.behaviors[].ast"],
+      "validator": "semanticActionPresentationCoverage",
+      "exportedDocument": "remake/scripts.json:behaviors[].ast",
+      "runtimeConsumer": "ScenarioScriptRuntime safe AST",
+      "previewCase": "semantic-step-contexts",
+      "saveExpectation": "safe frames restore at every yielding operation"
+    }
+  ]
+}
