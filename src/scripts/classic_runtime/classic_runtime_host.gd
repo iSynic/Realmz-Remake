@@ -40,6 +40,7 @@ var _bound_behavior_depth := 0
 var _campaign_completion_active := false
 var _script_event_queue_draining := false
 var _campaign_start_pending := false
+var manual_control_active := false
 var enhanced_trigger_state: ScenarioSemanticState
 var enhanced_event_triggers_by_id: Dictionary = {}
 var enhanced_scheduled_triggers_by_id: Dictionary = {}
@@ -1925,6 +1926,70 @@ func start_trigger(trigger_id: String, start_slot := 0, context := {}) -> bool:
 	return true
 
 
+func begin_manual_trigger(
+	trigger_id: String,
+	start_slot := 0,
+	context := {}
+) -> Dictionary:
+	if active:
+		return _continuation_error("A Classic action point is already active")
+	manual_control_active = true
+	if not start_trigger(trigger_id, start_slot, context):
+		manual_control_active = false
+		return runtime.last_result.duplicate(true)
+	return _manual_runtime_result()
+
+
+func resume_manual_command(response: Dictionary) -> Dictionary:
+	if not manual_control_active or not active:
+		return _continuation_error("No manually controlled Classic command is active")
+	var pending := _manual_runtime_result()
+	if str(pending.get("status", "")) != "yield":
+		return pending
+	var command := str(pending.get("commandId", ""))
+	command_finished.emit(command, response)
+	if str(response.get("status", "")) == "error":
+		manual_control_active = false
+		_stop_with_error(
+			str(response.get("message", "Classic preview response failed")),
+			command
+		)
+		return _continuation_error(
+			str(response.get("message", "Classic preview response failed"))
+		)
+	_resume_after_command(command, pending.get("request", {}), response)
+	return _manual_runtime_result()
+
+
+func resume_manual_restored_continuation() -> Dictionary:
+	if not restored_continuation_pending:
+		return _continuation_error("No restored Classic command is waiting")
+	restored_continuation_pending = false
+	manual_control_active = true
+	active = true
+	return _manual_runtime_result()
+
+
+func _manual_runtime_result() -> Dictionary:
+	if runtime == null:
+		return _continuation_error("Classic runtime is unavailable")
+	var result := runtime.last_result.duplicate(true)
+	if str(result.get("status", "")) != "yield":
+		return result
+	var request: Dictionary = (
+		result.get("payload", {}).duplicate(true)
+		if result.get("payload", {}) is Dictionary else {}
+	)
+	for context_key: Variant in command_context:
+		if not request.has(context_key):
+			request[context_key] = command_context[context_key]
+	return {
+		"status": "yield",
+		"commandId": str(result.get("command", "")),
+		"request": {"payload": request},
+	}
+
+
 func make_continuation_snapshot() -> Dictionary:
 	if nested_trigger_active:
 		return _continuation_error(
@@ -1933,7 +1998,8 @@ func make_continuation_snapshot() -> Dictionary:
 	if not active:
 		return runtime.make_continuation_snapshot()
 	var command := str(runtime.last_result.get("command", ""))
-	if command_adapter != null \
+	if not manual_control_active \
+			and command_adapter != null \
 			and command_adapter.has_method("classic_continuation_save_policy"):
 		var policy: Variant = command_adapter.call(
 			"classic_continuation_save_policy",
@@ -1994,6 +2060,8 @@ func _on_command_requested(command: String, payload: Dictionary) -> void:
 		if not command_payload.has(context_key):
 			command_payload[context_key] = command_context[context_key]
 	command_started.emit(command, command_payload)
+	if manual_control_active:
+		return
 	var response_value: Variant = await command_router.route(command, command_payload)
 	if not active:
 		return

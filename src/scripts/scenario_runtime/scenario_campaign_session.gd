@@ -287,6 +287,16 @@ func begin_map_trigger(trigger_id: String, context := {}) -> Dictionary:
 	return _finish_if_complete(interpreter.run(interpreter))
 
 
+func begin_classic_trigger(
+	trigger_id: String,
+	start_slot := 0,
+	context := {}
+) -> Dictionary:
+	if semantic_mode or host == null:
+		return _semantic_error("Classic scenario session is not configured")
+	return host.begin_manual_trigger(trigger_id, start_slot, context)
+
+
 func begin_encounter(
 	encounter_id: String,
 	context := {},
@@ -444,7 +454,11 @@ func begin_scheduled_dispatch(clock: Dictionary, context := {}) -> Dictionary:
 
 
 func resume_remake_command(response: Dictionary) -> Dictionary:
-	if not semantic_mode or interpreter == null:
+	if not semantic_mode:
+		if host == null:
+			return _semantic_error("Classic scenario session is not configured")
+		return host.resume_manual_command(response)
+	if interpreter == null:
 		return _semantic_error("Remake Authored session is not configured")
 	var result := _finish_if_complete(interpreter.resume(response, interpreter))
 	if host != null and host.has_method("_schedule_event_queue_drain"):

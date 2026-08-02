@@ -303,7 +303,14 @@ func _launch_entry(entry_value: Variant, request_id: String) -> void:
 				),
 			})
 			return
-		if _manual_preview_active and kind == "map-trigger" \
+		if _manual_preview_active and kind == "ap" \
+				and session.has_method("begin_classic_trigger"):
+			_manual_preview_result = session.begin_classic_trigger(
+				trigger_id,
+				int(entry.get("slot", 0)),
+				{"source": "providence-preview-driver"}
+			)
+		elif _manual_preview_active and kind == "map-trigger" \
 				and session.has_method("begin_map_trigger"):
 			_manual_preview_result = session.begin_map_trigger(
 				trigger_id,
@@ -510,7 +517,20 @@ func _begin_manual_preview_entry(request_id: String, entry_value: Variant) -> vo
 		return
 	var entry: Dictionary = entry_value if entry_value is Dictionary else {}
 	var kind := str(entry.get("kind", "map-trigger"))
-	if kind == "map-trigger" and session.has_method("begin_map_trigger"):
+	if kind == "ap" and session.has_method("begin_classic_trigger"):
+		var trigger_id := str(entry.get("triggerId", ""))
+		if trigger_id.is_empty() or not session.host.has_trigger(trigger_id):
+			_respond(request_id, {
+				"status": "error",
+				"message": "Preview action point is unavailable",
+			})
+			return
+		_manual_preview_result = session.begin_classic_trigger(
+			trigger_id,
+			int(entry.get("slot", 0)),
+			{"source": "providence-preview-driver-reentry"}
+		)
+	elif kind == "map-trigger" and session.has_method("begin_map_trigger"):
 		var trigger_id := str(entry.get("triggerId", ""))
 		if trigger_id.is_empty() or not session.host.has_trigger(trigger_id):
 			_respond(request_id, {
@@ -626,6 +646,10 @@ func _manual_preview_state() -> Dictionary:
 
 
 func _restored_manual_preview_result() -> Dictionary:
+	if session.get("semantic_mode") == false \
+			and session.host != null \
+			and session.host.has_method("resume_manual_restored_continuation"):
+		return session.host.resume_manual_restored_continuation()
 	if session.get("interpreter") == null:
 		return {"status": "ok"}
 	var interpreter_value: Object = session.get("interpreter")

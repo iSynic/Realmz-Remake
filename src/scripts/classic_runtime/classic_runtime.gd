@@ -315,6 +315,9 @@ static func validate_continuation_snapshot(snapshot: Variant) -> Dictionary:
 
 
 func _pending_state_matches(command: String) -> bool:
+	if interpreter.scenario_script_runtime != null \
+			and not interpreter.scenario_script_runtime.pending_operation.is_empty():
+		return true
 	match command:
 		"choice":
 			return not interpreter.pending_choice.is_empty()

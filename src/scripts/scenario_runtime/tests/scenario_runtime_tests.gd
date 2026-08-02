@@ -101,6 +101,7 @@ func _ready() -> void:
 	_test_engine_plugin_store()
 	_test_engine_plugin_settings_ui()
 	_test_preview_wire_json()
+	_test_classic_manual_preview_control()
 	_test_encounter_fallback_presentation()
 	_test_sandbox_helper_discovery()
 	await _test_gameplay_rules()
@@ -172,6 +173,50 @@ func _test_preview_wire_json() -> void:
 			and PreviewHostScript._normalized_save_slot("../escape") == "",
 		"preview save slots remain bounded identifiers"
 	)
+
+
+func _test_classic_manual_preview_control() -> void:
+	var scripted_runtime := RuntimeScript.new()
+	scripted_runtime.interpreter.scenario_script_runtime = ScenarioScriptRuntimeScript.new()
+	scripted_runtime.interpreter.scenario_script_runtime.pending_operation = {
+		"capability": "core.presentation.choice",
+	}
+	_expect(
+		scripted_runtime._pending_state_matches("choice"),
+		"Classic continuation recognizes a pending Enhanced script command"
+	)
+	var bundle := BundleScript.new()
+	_expect(bundle.load_from_directory(V3_FIXTURE), "manual-preview Classic fixture loads")
+	if not bundle.last_error.is_empty():
+		return
+	var trigger := bundle.get_trigger("Data ED3:macro:1027")
+	var host := HostScript.new()
+	add_child(host)
+	host.configure(RefCounted.new())
+	host.use_campaign(bundle)
+	var result: Dictionary = host.begin_manual_trigger(str(trigger.get("id", "")))
+	_expect(
+		result.get("status") == "yield"
+			and not str(result.get("commandId", "")).is_empty()
+			and result.get("request", {}) is Dictionary,
+		"manual preview exposes the first Classic command without routing it"
+	)
+	var snapshot_result: Dictionary = host.make_continuation_snapshot()
+	_expect(
+		snapshot_result.get("status") == "ok",
+		"manual Classic preview remains a valid save boundary"
+	)
+	var restored: Dictionary = host.restore_continuation(
+		snapshot_result.get("snapshot", {})
+	)
+	_expect(restored.get("status") == "ok", "manual Classic preview restores")
+	var restored_pending := host.resume_manual_restored_continuation()
+	_expect(
+		restored_pending.get("status") == "yield"
+			and restored_pending.get("commandId") == result.get("commandId"),
+		"manual Classic preview restores the exact pending command"
+	)
+	host.queue_free()
 
 
 func _test_sandbox_helper_discovery() -> void:
