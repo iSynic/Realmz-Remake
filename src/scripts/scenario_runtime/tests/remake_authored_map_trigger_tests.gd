@@ -245,6 +245,14 @@ func _test_map_trigger_execution_and_restore() -> void:
 	session.triggers_by_id["scenario.fixture.map-trigger"][
 		"activationConditionBehaviorId"
 	] = "scenario.fixture.map-trigger.available.true"
+	session.triggers_by_id["scenario.fixture.map-trigger"]["chance"] = 0
+	result = session.begin_map_trigger("scenario.fixture.map-trigger")
+	_expect(
+		result.get("status") == "skipped"
+			and result.get("reason") == "chance",
+		"Map Trigger availability is evaluated before deterministic chance"
+	)
+	session.triggers_by_id["scenario.fixture.map-trigger"]["chance"] = 100
 	result = session.begin_map_trigger("scenario.fixture.map-trigger")
 	_expect(
 		result.get("status") == "yield"
@@ -758,6 +766,21 @@ func _test_event_and_scheduled_triggers() -> void:
 		"restored lifecycle events drain after the active trigger completes"
 	)
 
+	result = restored.begin_scheduled_dispatch({
+		"elapsedMinutes": 60,
+		"day": 1,
+		"minute": 60,
+	})
+	_expect(
+		result.get("handled") == false
+			and not restored.semantic_state.scheduled_markers.has(
+				"scenario.fixture.hourly"
+			),
+		"false Scheduled Trigger availability does not consume its due marker"
+	)
+	restored.scheduled_triggers_by_id["scenario.fixture.hourly"][
+		"conditionBehaviorId"
+	] = "scenario.fixture.global.available.true"
 	result = restored.begin_scheduled_dispatch({
 		"elapsedMinutes": 60,
 		"day": 1,
@@ -1571,7 +1594,44 @@ func _state_variant_bundle() -> ScenarioCampaignBundle:
 func _event_schedule_bundle() -> ScenarioCampaignBundle:
 	var catalog := CapabilityCatalogScript.new()
 	catalog.load_builtin()
+	var condition_state_schema := {}
+	var unavailable_program := {
+		"kind": "function",
+		"name": "fixture_global_unavailable",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{"kind": "return", "value": _literal(false)}],
+	}
+	var available_program := {
+		"kind": "function",
+		"name": "fixture_global_available",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{"kind": "return", "value": _literal(true)}],
+	}
 	var behaviors := [
+		_safe_behavior(
+			"scenario.fixture.global.available.false",
+			"Global Trigger Unavailable",
+			"helper",
+			"helper",
+			"",
+			"bool",
+			[],
+			unavailable_program,
+			condition_state_schema
+		),
+		_safe_behavior(
+			"scenario.fixture.global.available.true",
+			"Global Trigger Available",
+			"helper",
+			"helper",
+			"",
+			"bool",
+			[],
+			available_program,
+			condition_state_schema
+		),
 		_safe_behavior(
 			"scenario.fixture.event-first.run",
 			"First Map Event",
@@ -1629,6 +1689,15 @@ func _event_schedule_bundle() -> ScenarioCampaignBundle:
 			"mapTriggers": [],
 			"eventTriggers": [
 				{
+					"id": "scenario.fixture.event-unavailable",
+					"name": "Unavailable Map Event",
+					"event": "map-enter",
+					"enabled": true,
+					"priority": 0,
+					"conditionBehaviorId": "scenario.fixture.global.available.false",
+					"behaviorId": "scenario.fixture.event-first.run",
+				},
+				{
 					"id": "scenario.fixture.event-second",
 					"name": "Second Map Event",
 					"event": "map-enter",
@@ -1667,7 +1736,7 @@ func _event_schedule_bundle() -> ScenarioCampaignBundle:
 					"width": 1,
 					"height": 1,
 				},
-				"conditionBehaviorId": null,
+				"conditionBehaviorId": "scenario.fixture.global.available.false",
 				"behaviorId": "scenario.fixture.hourly.run",
 			}],
 			"encounters": [],
