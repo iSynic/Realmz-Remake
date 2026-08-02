@@ -51,6 +51,7 @@ class ShareClassicAssetsTests(unittest.TestCase):
             )
 
             plan = MODULE.build_plan(root, 2)
+            self.assertTrue(MODULE.audit_plan(plan)["requiresApply"])
             self.assertEqual(plan["summary"]["uniquePayloads"], 2)
             self.assertEqual(plan["summary"]["localFilesRemoved"], 4)
             self.assertEqual(
@@ -59,6 +60,7 @@ class ShareClassicAssetsTests(unittest.TestCase):
             )
             MODULE.apply_plan(plan)
             rerun = MODULE.build_plan(root, 2)
+            self.assertFalse(MODULE.audit_plan(rerun)["requiresApply"])
             self.assertEqual(rerun["summary"]["localFilesRemoved"], 0)
             self.assertEqual(
                 rerun["summary"]["grossBytesSaved"],
@@ -104,11 +106,20 @@ class ShareClassicAssetsTests(unittest.TestCase):
                 manifest.pop("sharedAssets")
                 manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             recovered = MODULE.build_plan(root, 2)
+            recovery_audit = MODULE.audit_plan(recovered)
+            self.assertTrue(recovery_audit["requiresApply"])
+            self.assertEqual(
+                recovery_audit["campaignManifestsNeedingUpdate"],
+                ["First (Classic)", "Second (Classic)"],
+            )
             self.assertEqual(
                 recovered["summary"]["campaignReferences"],
                 plan["summary"]["campaignReferences"],
             )
             MODULE.apply_plan(recovered)
+            self.assertFalse(
+                MODULE.audit_plan(MODULE.build_plan(root, 2))["requiresApply"]
+            )
             for campaign_name in ["First (Classic)", "Second (Classic)"]:
                 manifest = json.loads(
                     (campaigns / campaign_name / "campaign.json").read_text(

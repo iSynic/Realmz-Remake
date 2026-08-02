@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
@@ -33,10 +34,16 @@ def parse_args() -> argparse.Namespace:
         default=13,
         help="Require this many built-in Classic campaign directories",
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--apply",
         action="store_true",
         help="Write the store/manifests and remove the shared local copies",
+    )
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Fail when the checked-in store or campaign manifests need regeneration",
     )
     parser.add_argument(
         "--report",
@@ -492,6 +499,80 @@ def apply_plan(plan: dict[str, Any]) -> None:
             tilesets.rmdir()
 
 
+def planned_store(plan: dict[str, Any]) -> dict[str, Any]:
+    files: dict[str, Any] = {}
+    for digest, record in sorted(plan["payloads"].items()):
+        files[digest] = {
+            "bytes": record["bytes"],
+            "extension": record["extension"],
+            "owners": sorted(
+                record["owners"],
+                key=lambda owner: (
+                    owner["campaignDirectory"].lower(),
+                    owner["logicalPath"].lower(),
+                ),
+            ),
+        }
+    return {
+        "format": FORMAT,
+        "formatVersion": FORMAT_VERSION,
+        "hashAlgorithm": HASH_ALGORITHM,
+        "files": files,
+    }
+
+
+def planned_campaign_manifests(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    references_by_campaign: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for reference in plan["references"]:
+        references_by_campaign[reference["campaign"]["name"]].append(
+            {
+                "bytes": reference["bytes"],
+                "kind": SHARED_KIND,
+                "logicalPath": reference["logicalPath"],
+                "sha256": reference["sha256"],
+            }
+        )
+    manifests: dict[str, dict[str, Any]] = {}
+    for campaign in plan["campaigns"]:
+        manifest = json.loads(json.dumps(campaign["manifest"]))
+        records = sorted(
+            references_by_campaign.get(campaign["name"], []),
+            key=lambda record: record["logicalPath"].lower(),
+        )
+        if records:
+            manifest["sharedAssets"] = {
+                "format": FORMAT,
+                "formatVersion": FORMAT_VERSION,
+                "files": records,
+            }
+        else:
+            manifest.pop("sharedAssets", None)
+        refresh_campaign_integrity(manifest, records)
+        manifests[campaign["name"]] = manifest
+    return manifests
+
+
+def audit_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    expected_store = planned_store(plan)
+    store_path: Path = plan["storeRoot"] / "store.json"
+    store_needs_update = (
+        not store_path.is_file() or read_json(store_path) != expected_store
+    )
+    expected_manifests = planned_campaign_manifests(plan)
+    manifest_updates = [
+        campaign["name"]
+        for campaign in plan["campaigns"]
+        if campaign["manifest"] != expected_manifests[campaign["name"]]
+    ]
+    local_files = len(plan["selectedLocal"])
+    return {
+        "requiresApply": bool(store_needs_update or manifest_updates or local_files),
+        "storeMetadataNeedsUpdate": store_needs_update,
+        "campaignManifestsNeedingUpdate": manifest_updates,
+        "localFilesNeedingDeduplication": local_files,
+    }
+
+
 def serializable_summary(plan: dict[str, Any]) -> dict[str, Any]:
     by_campaign: dict[str, dict[str, int]] = defaultdict(
         lambda: {"files": 0, "bytes": 0}
@@ -511,13 +592,22 @@ def main() -> int:
     plan = build_plan(args.root, args.expected_campaigns)
     if args.apply:
         apply_plan(plan)
+        plan = build_plan(args.root, args.expected_campaigns)
     summary = serializable_summary(plan)
+    summary.update(audit_plan(plan))
     summary["applied"] = args.apply
     rendered = json.dumps(summary, indent=2, sort_keys=True) + "\n"
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(rendered, encoding="utf-8", newline="\n")
     print(rendered, end="")
+    if args.check and summary["requiresApply"]:
+        print(
+            "Built-in Classic shared assets are not finalized. "
+            "Run this command again with --apply.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

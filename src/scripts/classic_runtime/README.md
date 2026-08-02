@@ -604,6 +604,20 @@ not generated reports or machine-specific walkthrough logs. The representative
 acceptance runners under `playtest/` cover campaign lifecycle, City of Bywater
 presentation and battle flow, scenario routes, and custom-monster combat.
 
+After replacing or regenerating any built-in campaign package, finalize the
+shared stock tilesets before testing or building:
+
+```powershell
+python asset_scripts/share_classic_assets.py --root src --expected-campaigns 13 --apply
+python asset_scripts/share_classic_assets.py --root src --expected-campaigns 13 --check
+```
+
+The first command restores each campaign manifest's logical ownership records,
+updates package integrity, and moves byte-identical local tilesets into the
+content-addressed `ClassicAssets` store. The second command is read-only and
+fails when a manifest, store record, or duplicate local file still needs that
+finalization. Export builds run the same check through the export-hygiene gate.
+
 The lifecycle acceptance runner creates a disposable six-character party inside
 its temporary profile. It preserves the seven historical stock characters,
 distributes the campaign's recommended **total** party level exactly across

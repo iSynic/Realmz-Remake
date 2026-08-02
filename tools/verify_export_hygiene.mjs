@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,3 +33,26 @@ if (failures.length > 0) {
 }
 
 console.log(`Verified ${sections.length} Godot export presets exclude res://build.`);
+
+const python = process.platform === "win32" ? "python" : "python3";
+const sharedAssets = spawnSync(
+  python,
+  [
+    path.join(repositoryRoot, "asset_scripts", "share_classic_assets.py"),
+    "--root",
+    path.join(repositoryRoot, "src"),
+    "--expected-campaigns",
+    "13",
+    "--check",
+  ],
+  { encoding: "utf8" },
+);
+if (sharedAssets.error) {
+  throw new Error(`Could not validate built-in Classic shared assets: ${sharedAssets.error.message}`);
+}
+if (sharedAssets.status !== 0) {
+  throw new Error(
+    `Built-in Classic shared assets are not export-ready.\n${sharedAssets.stdout}${sharedAssets.stderr}`,
+  );
+}
+console.log("Verified built-in Classic shared-asset ownership and integrity.");
