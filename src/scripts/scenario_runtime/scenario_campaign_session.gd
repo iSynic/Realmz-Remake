@@ -311,6 +311,19 @@ func begin_encounter(
 		)
 	if not semantic_state.can_run_encounter(encounter):
 		return {"status": "skipped", "reason": "repeat-policy"}
+	var activation_id := _optional_id(
+		encounter.get("activationConditionBehaviorId")
+	)
+	if not activation_id.is_empty():
+		var activation := _evaluate_condition(
+			activation_id,
+			{"encounter": encounter.duplicate(true)},
+			"Modern Encounter availability"
+		)
+		if str(activation.get("status", "")) == "error":
+			return activation
+		if not bool(activation.get("value", false)):
+			return {"status": "skipped", "reason": "activation-condition"}
 	var active_encounter := encounter.duplicate(true)
 	var variant_result := _select_named_variant(
 		active_encounter,
@@ -739,6 +752,30 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 		if trigger_id.is_empty() or result.has(trigger_id):
 			_semantic_fail("Remake Map Trigger IDs must be unique")
 			return {}
+		if str(trigger.get("repeatPolicy", "")) not in [
+			"always", "once", "once-per-map-entry",
+		]:
+			_semantic_fail("Map Trigger '%s' has an invalid repeat policy" % trigger_id)
+			return {}
+		if str(trigger.get("event", "")) not in [
+			"enter", "leave", "search", "interact", "item-use", "map-enter", "map-leave",
+		]:
+			_semantic_fail("Map Trigger '%s' has an invalid event" % trigger_id)
+			return {}
+		var chance := int(trigger.get("chance", -1))
+		if chance < 0 or chance > 100:
+			_semantic_fail("Map Trigger '%s' chance must be from 0 to 100" % trigger_id)
+			return {}
+		var location_validation := _validate_semantic_location(
+			trigger.get("location"),
+			false
+		)
+		if str(location_validation.get("status", "")) == "error":
+			_semantic_fail(
+				"Map Trigger '%s': %s"
+				% [trigger_id, location_validation.get("message", "invalid location")]
+			)
+			return {}
 		var default_variant := _default_variant(trigger)
 		if default_variant.is_empty():
 			_semantic_fail("Map Trigger '%s' has no default variant" % trigger_id)
@@ -789,6 +826,16 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 				% [trigger_id, schedule_validation.get("message", "invalid schedule")]
 			)
 			return {}
+		var location_validation := _validate_semantic_location(
+			trigger.get("location"),
+			true
+		)
+		if str(location_validation.get("status", "")) == "error":
+			_semantic_fail(
+				"Scheduled Trigger '%s': %s"
+				% [trigger_id, location_validation.get("message", "invalid location")]
+			)
+			return {}
 		var behavior_id := str(trigger.get("behaviorId", ""))
 		if behavior_id.is_empty():
 			_semantic_fail("Scheduled Trigger '%s' has no behavior" % trigger_id)
@@ -806,6 +853,11 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 		var encounter_id := str(encounter.get("id", ""))
 		if encounter_id.is_empty() or result.has(encounter_id):
 			_semantic_fail("Semantic trigger and Encounter IDs must be unique")
+			return {}
+		if str(encounter.get("repeatPolicy", "")) not in ["always", "once"]:
+			_semantic_fail(
+				"Modern Encounter '%s' has an invalid repeat policy" % encounter_id
+			)
 			return {}
 		if _default_variant(encounter).is_empty():
 			_semantic_fail(
@@ -825,6 +877,21 @@ func _build_vm_triggers(logic: Dictionary) -> Dictionary:
 			"actions": encounter_actions,
 		}
 	return result
+
+
+func _validate_semantic_location(value: Variant, allow_null: bool) -> Dictionary:
+	if value == null:
+		return {"status": "ok"} if allow_null else _semantic_error("location is required")
+	if not (value is Dictionary):
+		return _semantic_error("location must be an object")
+	var location: Dictionary = value
+	if str(location.get("kind", "")) not in ["point", "rectangle"]:
+		return _semantic_error("location kind must be point or rectangle")
+	if str(location.get("mapId", "")).is_empty():
+		return _semantic_error("location requires a map")
+	if int(location.get("width", 0)) <= 0 or int(location.get("height", 0)) <= 0:
+		return _semantic_error("location width and height must be positive")
+	return {"status": "ok"}
 
 
 func _start_next_queued_trigger() -> Dictionary:

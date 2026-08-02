@@ -35,6 +35,7 @@ func _ready() -> void:
 	_test_specialized_encounter_response_matching()
 	await _test_typed_state_and_named_variants()
 	await _test_event_and_scheduled_triggers()
+	_test_invalid_semantic_contract_readiness()
 	if failures == 0:
 		print("Remake Authored scenario logic tests passed")
 		get_tree().quit(0)
@@ -129,6 +130,78 @@ func _test_specialized_encounter_response_matching() -> void:
 	)
 
 
+func _test_invalid_semantic_contract_readiness() -> void:
+	var invalid_map_repeat := _map_trigger_bundle()
+	invalid_map_repeat.documents["remakeLogic"]["mapTriggers"][0][
+		"repeatPolicy"
+	] = "while-condition"
+	_expect_bundle_rejected(
+		invalid_map_repeat,
+		"invalid repeat policy",
+		"runtime readiness rejects removed Map Trigger repeat policies"
+	)
+
+	var invalid_encounter_repeat := _encounter_bundle()
+	invalid_encounter_repeat.documents["remakeLogic"]["encounters"][0][
+		"repeatPolicy"
+	] = "while-condition"
+	_expect_bundle_rejected(
+		invalid_encounter_repeat,
+		"invalid repeat policy",
+		"runtime readiness rejects removed Encounter repeat policies"
+	)
+
+	var missing_condition := _map_trigger_bundle()
+	missing_condition.documents["remakeLogic"]["mapTriggers"][0][
+		"activationConditionBehaviorId"
+	] = "scenario.fixture.missing-condition"
+	_expect_bundle_rejected(
+		missing_condition,
+		"missing behavior",
+		"runtime readiness rejects missing availability conditions"
+	)
+
+	var non_boolean := _map_trigger_bundle()
+	for behavior_value: Variant in non_boolean.documents["remakeScripts"]["behaviors"]:
+		if behavior_value is Dictionary and str(behavior_value.get("id", "")) \
+				== "scenario.fixture.map-trigger.available.false":
+			behavior_value["returnType"] = "int"
+	_expect_bundle_rejected(
+		non_boolean,
+		"Safe boolean behavior",
+		"runtime readiness rejects non-boolean availability conditions"
+	)
+
+	var yielding := _map_trigger_bundle()
+	for behavior_value: Variant in yielding.documents["remakeScripts"]["behaviors"]:
+		if behavior_value is Dictionary and str(behavior_value.get("id", "")) \
+				== "scenario.fixture.map-trigger.available.false":
+			behavior_value["requestedCapabilities"] = ["core.presentation.text"]
+	_expect_bundle_rejected(
+		yielding,
+		"unavailable to role 'helper'",
+		"runtime readiness rejects yielding availability conditions"
+	)
+
+
+func _expect_bundle_rejected(
+	bundle: ScenarioCampaignBundle,
+	expected_message: String,
+	label: String
+) -> void:
+	var session := SessionScript.new()
+	add_child(session)
+	var configured := session.configure_remake_bundle(
+		bundle,
+		PreviewServicesScript.new()
+	)
+	_expect(
+		not configured and session.semantic_last_error.contains(expected_message),
+		"%s: %s" % [label, session.semantic_last_error]
+	)
+	session.queue_free()
+
+
 func _test_map_trigger_execution_and_restore() -> void:
 	var bundle := _map_trigger_bundle()
 	var services := PreviewServicesScript.new()
@@ -161,6 +234,18 @@ func _test_map_trigger_execution_and_restore() -> void:
 		return
 	services.apply_fixture({"choiceResponses": [1]})
 	var result := session.begin_map_trigger("scenario.fixture.map-trigger")
+	_expect(
+		result.get("status") == "skipped"
+			and result.get("reason") == "activation-condition"
+			and not session.semantic_state.completed_triggers.has(
+				"scenario.fixture.map-trigger"
+			),
+		"false Map Trigger availability does not consume once-only execution"
+	)
+	session.triggers_by_id["scenario.fixture.map-trigger"][
+		"activationConditionBehaviorId"
+	] = "scenario.fixture.map-trigger.available.true"
+	result = session.begin_map_trigger("scenario.fixture.map-trigger")
 	_expect(
 		result.get("status") == "yield"
 			and result.get("commandId") == "show_text",
@@ -211,6 +296,15 @@ func _test_map_trigger_execution_and_restore() -> void:
 		"once-only Map Trigger cannot double-fire: %s"
 			% restored.semantic_state.snapshot()
 	)
+	restored.triggers_by_id["scenario.fixture.map-trigger"]["repeatPolicy"] = "always"
+	restored.triggers_by_id["scenario.fixture.map-trigger"][
+		"activationConditionBehaviorId"
+	] = "scenario.fixture.map-trigger.available.false"
+	_expect(
+		restored.begin_map_trigger("scenario.fixture.map-trigger").get("reason")
+			== "activation-condition",
+		"Map Trigger availability is re-evaluated after becoming false again"
+	)
 	session.queue_free()
 	restored.queue_free()
 
@@ -220,10 +314,24 @@ func _test_modern_encounter_execution_and_restore() -> void:
 	var services := PreviewServicesScript.new()
 	var session := SessionScript.new()
 	add_child(session)
+	var configured := session.configure_remake_bundle(bundle, services)
+	_expect(configured, "generic campaign session configures Modern Encounters")
+	if not configured:
+		push_error(session.semantic_last_error)
+		session.queue_free()
+		return
+	var unavailable := session.begin_encounter("scenario.fixture.encounter")
 	_expect(
-		session.configure_remake_bundle(bundle, services),
-		"generic campaign session configures Modern Encounters"
+		unavailable.get("status") == "skipped"
+			and unavailable.get("reason") == "activation-condition"
+			and not session.semantic_state.completed_encounters.has(
+				"scenario.fixture.encounter"
+			),
+		"false Encounter availability does not consume once-only execution"
 	)
+	session.encounters_by_id["scenario.fixture.encounter"][
+		"activationConditionBehaviorId"
+	] = "scenario.fixture.encounter.available.true"
 	_expect(
 		is_instance_valid(session.host)
 			and session.host.has_encounter("scenario.fixture.encounter"),
@@ -342,6 +450,15 @@ func _test_modern_encounter_execution_and_restore() -> void:
 		).get("reason") == "repeat-policy",
 		"once-only Modern Encounter cannot double-fire"
 	)
+	restored.encounters_by_id["scenario.fixture.encounter"]["repeatPolicy"] = "always"
+	restored.encounters_by_id["scenario.fixture.encounter"][
+		"activationConditionBehaviorId"
+	] = "scenario.fixture.encounter.available.false"
+	_expect(
+		restored.begin_encounter("scenario.fixture.encounter").get("reason")
+			== "activation-condition",
+		"Encounter availability is re-evaluated after becoming false again"
+	)
 	session.queue_free()
 	restored.queue_free()
 
@@ -349,6 +466,9 @@ func _test_modern_encounter_execution_and_restore() -> void:
 func _test_modern_encounter_response_redirect() -> void:
 	var bundle := _encounter_bundle()
 	var encounter: Dictionary = bundle.documents["remakeLogic"]["encounters"][0]
+	encounter["activationConditionBehaviorId"] = (
+		"scenario.fixture.encounter.available.true"
+	)
 	var opening: Dictionary = encounter["sections"][0]
 	var close_behavior_id := "scenario.fixture.encounter.leave"
 	var displaced_behavior_id := "scenario.fixture.encounter.displaced"
@@ -778,6 +898,42 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 		"contentHash": ScriptRuntimeScript._sha256_json(program),
 		"program": program,
 	}
+	var unavailable_program := {
+		"kind": "function",
+		"name": "fixture_map_trigger_unavailable",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{"kind": "return", "value": _literal(false)}],
+	}
+	var available_program := {
+		"kind": "function",
+		"name": "fixture_map_trigger_available",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{"kind": "return", "value": _literal(true)}],
+	}
+	var unavailable_behavior := _safe_behavior(
+		"scenario.fixture.map-trigger.available.false",
+		"Map Trigger Unavailable",
+		"helper",
+		"helper",
+		"",
+		"bool",
+		[],
+		unavailable_program,
+		state_schema
+	)
+	var available_behavior := _safe_behavior(
+		"scenario.fixture.map-trigger.available.true",
+		"Map Trigger Available",
+		"helper",
+		"helper",
+		"",
+		"bool",
+		[],
+		available_program,
+		state_schema
+	)
 	var trigger_id := "scenario.fixture.map-trigger"
 	var variant_id := "%s.default" % trigger_id
 	var bundle := BundleScript.new()
@@ -797,7 +953,7 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 5,
+			"schemaVersion": 6,
 			"kind": "remake-authored",
 			"mapTriggers": [{
 				"id": trigger_id,
@@ -822,7 +978,7 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 					"conditionBehaviorId": null,
 					"behaviorId": behavior["id"],
 				}],
-				"activationConditionBehaviorId": null,
+				"activationConditionBehaviorId": unavailable_behavior["id"],
 			}],
 			"eventTriggers": [],
 			"scheduledTriggers": [],
@@ -832,7 +988,7 @@ func _map_trigger_bundle() -> ScenarioCampaignBundle:
 			"schemaVersion": 3,
 			"apiVersion": 2,
 			"capabilityCatalogHash": catalog.catalog_hash(),
-			"behaviors": [behavior],
+			"behaviors": [behavior, unavailable_behavior, available_behavior],
 			"bindings": [],
 			"stateDefinitions": [],
 			"migrations": [],
@@ -854,6 +1010,8 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 	var availability_behavior_id := "scenario.fixture.encounter.refuse.available"
 	var remembered_behavior_id := "scenario.fixture.encounter.remembered"
 	var remembered_condition_id := "%s.condition" % remembered_behavior_id
+	var encounter_unavailable_id := "scenario.fixture.encounter.available.false"
+	var encounter_available_id := "scenario.fixture.encounter.available.true"
 	var program := {
 		"kind": "function",
 		"name": "fixture_encounter_default",
@@ -987,9 +1145,9 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		"id": availability_behavior_id,
 		"name": "Refuse is unavailable",
 		"description": "Exercises pure encounter choice availability.",
-		"kind": "helper",
-		"role": "helper",
-		"hook": "",
+		"kind": "entry",
+		"role": "encounter",
+		"hook": "availability",
 		"libraryScope": "project",
 		"tier": "safe",
 		"apiVersion": 2,
@@ -1053,6 +1211,42 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 		remembered_condition_program,
 		state_schema
 	)
+	var encounter_unavailable_program := {
+		"kind": "function",
+		"name": "fixture_encounter_unavailable",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{"kind": "return", "value": _literal(false)}],
+	}
+	var encounter_available_program := {
+		"kind": "function",
+		"name": "fixture_encounter_available",
+		"parameters": [],
+		"returnType": "bool",
+		"body": [{"kind": "return", "value": _literal(true)}],
+	}
+	var encounter_unavailable := _safe_behavior(
+		encounter_unavailable_id,
+		"Encounter Unavailable",
+		"helper",
+		"helper",
+		"",
+		"bool",
+		[],
+		encounter_unavailable_program,
+		state_schema
+	)
+	var encounter_available := _safe_behavior(
+		encounter_available_id,
+		"Encounter Available",
+		"helper",
+		"helper",
+		"",
+		"bool",
+		[],
+		encounter_available_program,
+		state_schema
+	)
 	var encounter_id := "scenario.fixture.encounter"
 	var opening_id := "%s.opening" % encounter_id
 	var stable_id := "%s.stable" % encounter_id
@@ -1071,7 +1265,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 5,
+			"schemaVersion": 6,
 			"kind": "remake-authored",
 			"mapTriggers": [],
 			"eventTriggers": [],
@@ -1083,6 +1277,7 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 				"entryBehaviorId": behavior_id,
 				"completionBehaviorId": completion_behavior_id,
 				"repeatPolicy": "once",
+				"activationConditionBehaviorId": encounter_unavailable_id,
 				"defaultVariantId": "%s.default" % encounter_id,
 				"variants": [
 					{
@@ -1180,6 +1375,8 @@ func _encounter_bundle() -> ScenarioCampaignBundle:
 				availability_behavior,
 				remembered_behavior,
 				remembered_condition,
+				encounter_unavailable,
+				encounter_available,
 			],
 			"bindings": [],
 			"stateDefinitions": [],
@@ -1301,7 +1498,7 @@ func _state_variant_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 5,
+			"schemaVersion": 6,
 			"kind": "remake-authored",
 			"mapTriggers": [{
 				"id": trigger_id,
@@ -1427,7 +1624,7 @@ func _event_schedule_bundle() -> ScenarioCampaignBundle:
 			"startup": {"mapId": "land:0", "x": 2, "y": 2},
 		},
 		"remakeLogic": {
-			"schemaVersion": 5,
+			"schemaVersion": 6,
 			"kind": "remake-authored",
 			"mapTriggers": [],
 			"eventTriggers": [

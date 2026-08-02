@@ -10,7 +10,7 @@ const ScenarioScriptRuntimeScript = preload(
 
 const FORMAT := "realmz-remake-scenario"
 const FORMAT_VERSION := 3
-const DOCUMENT_SCHEMA_VERSION := 5
+const DOCUMENT_SCHEMA_VERSION := 6
 const CAMPAIGN_KINDS := [
 	"classic-interpreted",
 	"classic-enhanced",

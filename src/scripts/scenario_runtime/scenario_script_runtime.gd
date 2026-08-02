@@ -1256,6 +1256,13 @@ static func validate_document(
 				str(script.get("contentHash", ""))
 			):
 				return _invalid("%s source hash does not match its manifest" % context)
+	var direct_contract_validation := _validate_direct_behavior_contracts(
+		document,
+		seen_scripts,
+		campaign_bundle
+	)
+	if not bool(direct_contract_validation.get("valid", false)):
+		return direct_contract_validation
 	var seen_bindings: Dictionary = {}
 	var binding_counts_by_behavior := _direct_behavior_owner_counts(campaign_bundle)
 	var anchor_orders: Dictionary = {}
@@ -1393,6 +1400,7 @@ static func _direct_behavior_owner_counts(campaign_bundle: Object) -> Dictionary
 		if not (encounter_value is Dictionary):
 			continue
 		var encounter: Dictionary = encounter_value
+		_count_direct_behavior_owner(counts, encounter.get("activationConditionBehaviorId"))
 		_count_direct_behavior_owner(counts, encounter.get("entryBehaviorId"))
 		_count_direct_behavior_owner(counts, encounter.get("completionBehaviorId"))
 		for variant_value: Variant in encounter.get("variants", []):
@@ -1410,6 +1418,265 @@ static func _direct_behavior_owner_counts(campaign_bundle: Object) -> Dictionary
 			if result_value is Dictionary:
 				_count_direct_behavior_owner(counts, result_value.get("behaviorId"))
 	return counts
+
+
+static func _validate_direct_behavior_contracts(
+	document: Dictionary,
+	seen_scripts: Dictionary,
+	campaign_bundle: Object
+) -> Dictionary:
+	if campaign_bundle == null:
+		return {"valid": true}
+	var documents_value: Variant = campaign_bundle.get("documents")
+	if not (documents_value is Dictionary):
+		return _invalid("Scenario bundle documents are unavailable")
+	var logic_value: Variant = documents_value.get("remakeLogic", {})
+	if not (logic_value is Dictionary):
+		return _invalid("Scenario logic document is unavailable")
+	var logic: Dictionary = logic_value
+	for trigger_value: Variant in logic.get("mapTriggers", []):
+		if not (trigger_value is Dictionary):
+			return _invalid("Map Trigger entry must be an object")
+		var trigger: Dictionary = trigger_value
+		var context := "Map Trigger '%s'" % str(trigger.get("id", ""))
+		var validation := _validate_pure_condition_behavior(
+			document,
+			seen_scripts,
+			trigger.get("activationConditionBehaviorId"),
+			"%s availability" % context
+		)
+		if not bool(validation.get("valid", false)):
+			return validation
+		for variant_value: Variant in trigger.get("variants", []):
+			if not (variant_value is Dictionary):
+				return _invalid("%s variant must be an object" % context)
+			var variant: Dictionary = variant_value
+			validation = _validate_pure_condition_behavior(
+				document,
+				seen_scripts,
+				variant.get("conditionBehaviorId"),
+				"%s variant condition" % context
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+			validation = _validate_direct_behavior(
+				document,
+				seen_scripts,
+				variant.get("behaviorId"),
+				"entry",
+				"action",
+				"run",
+				"action-outcome",
+				false,
+				"%s variant Steps" % context,
+				true
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+	for collection_name: String in ["eventTriggers", "scheduledTriggers"]:
+		for trigger_value: Variant in logic.get(collection_name, []):
+			if not (trigger_value is Dictionary):
+				return _invalid("Semantic Trigger entry must be an object")
+			var trigger: Dictionary = trigger_value
+			var context := "%s '%s'" % [collection_name, str(trigger.get("id", ""))]
+			var validation := _validate_pure_condition_behavior(
+				document,
+				seen_scripts,
+				trigger.get("conditionBehaviorId"),
+				"%s availability" % context
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+			validation = _validate_direct_behavior(
+				document,
+				seen_scripts,
+				trigger.get("behaviorId"),
+				"entry",
+				"action",
+				"run",
+				"action-outcome",
+				false,
+				"%s Steps" % context,
+				true
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+	for encounter_value: Variant in logic.get("encounters", []):
+		if not (encounter_value is Dictionary):
+			return _invalid("Modern Encounter entry must be an object")
+		var encounter: Dictionary = encounter_value
+		var context := "Modern Encounter '%s'" % str(encounter.get("id", ""))
+		var validation := _validate_pure_condition_behavior(
+			document,
+			seen_scripts,
+			encounter.get("activationConditionBehaviorId"),
+			"%s availability" % context
+		)
+		if not bool(validation.get("valid", false)):
+			return validation
+		for pair: Array in [
+			["entryBehaviorId", "enter", "entry Steps"],
+			["completionBehaviorId", "complete", "completion Steps"],
+		]:
+			validation = _validate_direct_behavior(
+				document,
+				seen_scripts,
+				encounter.get(pair[0]),
+				"entry",
+				"encounter",
+				pair[1],
+				"encounter-outcome",
+				false,
+				"%s %s" % [context, pair[2]]
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+		for variant_value: Variant in encounter.get("variants", []):
+			if not (variant_value is Dictionary):
+				return _invalid("%s variant must be an object" % context)
+			var variant: Dictionary = variant_value
+			validation = _validate_pure_condition_behavior(
+				document,
+				seen_scripts,
+				variant.get("conditionBehaviorId"),
+				"%s variant condition" % context
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+			validation = _validate_direct_behavior(
+				document,
+				seen_scripts,
+				variant.get("behaviorId"),
+				"entry",
+				"encounter",
+				"enter",
+				"encounter-outcome",
+				false,
+				"%s variant Steps" % context,
+				true
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+		for section_value: Variant in encounter.get("sections", []):
+			if not (section_value is Dictionary):
+				return _invalid("%s section must be an object" % context)
+			for response_value: Variant in section_value.get("responses", []):
+				if not (response_value is Dictionary):
+					return _invalid("%s response must be an object" % context)
+				var response: Dictionary = response_value
+				validation = _validate_direct_behavior(
+					document,
+					seen_scripts,
+					response.get("availabilityBehaviorId"),
+					"entry",
+					"encounter",
+					"availability",
+					"bool",
+					true,
+					"%s response availability" % context
+				)
+				if not bool(validation.get("valid", false)):
+					return validation
+				validation = _validate_direct_behavior(
+					document,
+					seen_scripts,
+					response.get("selectionBehaviorId"),
+					"entry",
+					"encounter",
+					"response",
+					"encounter-outcome",
+					false,
+					"%s response Steps" % context
+				)
+				if not bool(validation.get("valid", false)):
+					return validation
+		for result_value: Variant in encounter.get("results", []):
+			if not (result_value is Dictionary):
+				return _invalid("%s Result must be an object" % context)
+			validation = _validate_direct_behavior(
+				document,
+				seen_scripts,
+				result_value.get("behaviorId"),
+				"entry",
+				"action",
+				"run",
+				"action-outcome",
+				false,
+				"%s Result Steps" % context
+			)
+			if not bool(validation.get("valid", false)):
+				return validation
+	return {"valid": true}
+
+
+static func _validate_pure_condition_behavior(
+	document: Dictionary,
+	seen_scripts: Dictionary,
+	behavior_id_value: Variant,
+	context: String
+) -> Dictionary:
+	if behavior_id_value == null or str(behavior_id_value).is_empty():
+		return {"valid": true}
+	var behavior_id := str(behavior_id_value)
+	if not seen_scripts.has(behavior_id):
+		return _invalid("%s references missing behavior '%s'" % [context, behavior_id])
+	var behavior_value: Variant = document["behaviors"][int(seen_scripts[behavior_id])]
+	if not (behavior_value is Dictionary):
+		return _invalid("%s behavior is invalid" % context)
+	var behavior: Dictionary = behavior_value
+	var helper_condition := str(behavior.get("kind", "")) == "helper" \
+		and str(behavior.get("role", "")) == "helper" \
+		and str(behavior.get("hook", "")).is_empty()
+	if not helper_condition:
+		return _invalid("%s must use a pure condition behavior" % context)
+	if str(behavior.get("tier", "")) != "safe" \
+			or str(behavior.get("returnType", "")) != "bool":
+		return _invalid("%s must use a synchronous Safe boolean behavior" % context)
+	return {"valid": true}
+
+
+static func _validate_direct_behavior(
+	document: Dictionary,
+	seen_scripts: Dictionary,
+	behavior_id_value: Variant,
+	expected_kind: String,
+	expected_role: String,
+	expected_hook: String,
+	expected_return_type: String,
+	require_safe: bool,
+	context: String,
+	required := false
+) -> Dictionary:
+	if behavior_id_value == null or str(behavior_id_value).is_empty():
+		return _invalid("%s requires a behavior" % context) if required else {"valid": true}
+	var behavior_id := str(behavior_id_value)
+	if not seen_scripts.has(behavior_id):
+		return _invalid("%s references missing behavior '%s'" % [context, behavior_id])
+	var behavior_value: Variant = document["behaviors"][int(seen_scripts[behavior_id])]
+	if not (behavior_value is Dictionary):
+		return _invalid("%s behavior is invalid" % context)
+	var behavior: Dictionary = behavior_value
+	if str(behavior.get("kind", "")) != expected_kind \
+			or str(behavior.get("role", "")) != expected_role \
+			or str(behavior.get("hook", "")) != expected_hook \
+			or str(behavior.get("returnType", "")) != expected_return_type:
+		return _invalid(
+			"%s has behavior contract %s/%s/%s -> %s; expected %s/%s/%s -> %s"
+			% [
+				context,
+				str(behavior.get("kind", "")),
+				str(behavior.get("role", "")),
+				str(behavior.get("hook", "")),
+				str(behavior.get("returnType", "")),
+				expected_kind,
+				expected_role,
+				expected_hook,
+				expected_return_type,
+			]
+		)
+	if require_safe and str(behavior.get("tier", "")) != "safe":
+		return _invalid("%s must use a synchronous Safe behavior" % context)
+	return {"valid": true}
 
 
 static func _count_direct_behavior_owner(counts: Dictionary, value: Variant) -> void:
