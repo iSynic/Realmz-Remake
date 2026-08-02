@@ -1257,7 +1257,7 @@ static func validate_document(
 			):
 				return _invalid("%s source hash does not match its manifest" % context)
 	var seen_bindings: Dictionary = {}
-	var binding_counts_by_behavior: Dictionary = {}
+	var binding_counts_by_behavior := _direct_behavior_owner_counts(campaign_bundle)
 	var anchor_orders: Dictionary = {}
 	for binding_value: Variant in document["bindings"]:
 		if not (binding_value is Dictionary):
@@ -1324,7 +1324,7 @@ static func validate_document(
 		if library_scope == "inline" \
 				and int(binding_counts_by_behavior.get(behavior_id, 0)) != 1:
 			return _invalid(
-				"Inline scenario behavior '%s' must have exactly one binding"
+				"Inline scenario behavior '%s' must have exactly one owner"
 				% behavior_id
 			)
 	var seen_migrations: Dictionary = {}
@@ -1362,6 +1362,63 @@ static func validate_document(
 		seen_migrations[migration_id] = true
 		migration_origins[from_version] = to_version
 	return {"valid": true}
+
+
+static func _direct_behavior_owner_counts(campaign_bundle: Object) -> Dictionary:
+	var counts: Dictionary = {}
+	if campaign_bundle == null:
+		return counts
+	var documents_value: Variant = campaign_bundle.get("documents")
+	if not (documents_value is Dictionary):
+		return counts
+	var logic_value: Variant = documents_value.get("remakeLogic", {})
+	if not (logic_value is Dictionary):
+		return counts
+	var logic: Dictionary = logic_value
+	for trigger_value: Variant in logic.get("mapTriggers", []):
+		if not (trigger_value is Dictionary):
+			continue
+		var trigger: Dictionary = trigger_value
+		_count_direct_behavior_owner(counts, trigger.get("activationConditionBehaviorId"))
+		for variant_value: Variant in trigger.get("variants", []):
+			if variant_value is Dictionary:
+				_count_direct_behavior_owner(counts, variant_value.get("behaviorId"))
+				_count_direct_behavior_owner(counts, variant_value.get("conditionBehaviorId"))
+	for collection_name: String in ["eventTriggers", "scheduledTriggers"]:
+		for trigger_value: Variant in logic.get(collection_name, []):
+			if trigger_value is Dictionary:
+				_count_direct_behavior_owner(counts, trigger_value.get("behaviorId"))
+				_count_direct_behavior_owner(counts, trigger_value.get("conditionBehaviorId"))
+	for encounter_value: Variant in logic.get("encounters", []):
+		if not (encounter_value is Dictionary):
+			continue
+		var encounter: Dictionary = encounter_value
+		_count_direct_behavior_owner(counts, encounter.get("entryBehaviorId"))
+		_count_direct_behavior_owner(counts, encounter.get("completionBehaviorId"))
+		for variant_value: Variant in encounter.get("variants", []):
+			if variant_value is Dictionary:
+				_count_direct_behavior_owner(counts, variant_value.get("behaviorId"))
+				_count_direct_behavior_owner(counts, variant_value.get("conditionBehaviorId"))
+		for section_value: Variant in encounter.get("sections", []):
+			if not (section_value is Dictionary):
+				continue
+			for response_value: Variant in section_value.get("responses", []):
+				if response_value is Dictionary:
+					_count_direct_behavior_owner(counts, response_value.get("availabilityBehaviorId"))
+					_count_direct_behavior_owner(counts, response_value.get("selectionBehaviorId"))
+		for result_value: Variant in encounter.get("results", []):
+			if result_value is Dictionary:
+				_count_direct_behavior_owner(counts, result_value.get("behaviorId"))
+	return counts
+
+
+static func _count_direct_behavior_owner(counts: Dictionary, value: Variant) -> void:
+	if value == null:
+		return
+	var behavior_id := str(value)
+	if behavior_id.is_empty():
+		return
+	counts[behavior_id] = int(counts.get(behavior_id, 0)) + 1
 
 
 static func _validate_binding_anchor(binding: Dictionary) -> Dictionary:

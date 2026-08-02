@@ -1308,18 +1308,22 @@ static func _default_variant(trigger: Dictionary) -> Dictionary:
 static func _script_call(
 	behavior_id: String,
 	role := "action",
-	hook := "run"
+	hook := "run",
+	attachment_details := {}
 ) -> Dictionary:
+	var attachment := {
+		"role": role,
+		"hook": hook,
+	}
+	if attachment_details is Dictionary:
+		attachment.merge(attachment_details, true)
 	return {
 		"kind": "semantic",
 		"operation": "core.script.call",
 		"parameters": {
 			"behaviorId": behavior_id,
 			"arguments": {},
-			"attachment": {
-				"role": role,
-				"hook": hook,
-			},
+			"attachment": attachment,
 		},
 	}
 
@@ -1385,6 +1389,7 @@ static func _compile_encounter_actions(encounter: Dictionary) -> Array:
 		result_by_id[result_id] = result
 	var response_targets: Dictionary = {}
 	var terminal_action_indexes: Array = []
+	var response_behavior_action_indexes: Array = []
 	for section_value: Variant in ordered_sections:
 		var section: Dictionary = section_value
 		var section_id := str(section.get("id", ""))
@@ -1405,10 +1410,18 @@ static func _compile_encounter_actions(encounter: Dictionary) -> Array:
 				response.get("selectionBehaviorId")
 			)
 			if not selection_behavior_id.is_empty():
+				response_behavior_action_indexes.append(actions.size())
 				actions.append(_script_call(
 					selection_behavior_id,
 					"encounter",
-					"response"
+					"response",
+					{
+						"outcomeTargets": {
+							"close": -1,
+							"repeat": int(request_indexes[section_id]),
+						},
+						"sectionTargets": section_indexes.duplicate(true),
+					}
 				))
 			var result_reference := {
 				"kind": "remake-result",
@@ -1442,14 +1455,6 @@ static func _compile_encounter_actions(encounter: Dictionary) -> Array:
 			"encounter",
 			"complete"
 		))
-	actions.append({
-		"kind": "semantic",
-		"operation": "core.flow.halt",
-		"parameters": {
-			"reason": "encounter-complete",
-			"outcome": "close",
-		},
-	})
 
 	for section_id: Variant in request_indexes:
 		var request_index := int(request_indexes[section_id])
@@ -1468,6 +1473,12 @@ static func _compile_encounter_actions(encounter: Dictionary) -> Array:
 			else completion_index
 		)
 		parameters.erase("terminal")
+	for response_action_index_value: Variant in response_behavior_action_indexes:
+		var response_action_index := int(response_action_index_value)
+		var attachment: Dictionary = actions[response_action_index][
+			"parameters"
+		]["attachment"]
+		attachment["outcomeTargets"]["close"] = completion_index
 	return actions
 
 

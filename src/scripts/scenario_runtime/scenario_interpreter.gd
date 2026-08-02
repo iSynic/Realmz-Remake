@@ -2368,7 +2368,8 @@ func resume(response: Dictionary, context: Object) -> Dictionary:
 	var applied := _apply_step_result(
 		step_result,
 		handler.handler_id(),
-		saved_pending.action_identity
+		saved_pending.action_identity,
+		false
 	)
 	if str(applied.get("status", "")) != "continue":
 		return applied
@@ -2490,11 +2491,13 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 func _apply_step_result(
 	result: ScenarioStepResult,
 	handler_id: String,
-	action_identity: Dictionary
+	action_identity: Dictionary,
+	advance_instruction := true
 ) -> Dictionary:
 	match result.kind:
 		ScenarioStepResult.CONTINUE:
-			current_action_index += 1
+			if advance_instruction:
+				current_action_index += 1
 			return {"status": "continue"}
 		ScenarioStepResult.YIELD:
 			var command_id := str(result.data.get("commandId", ""))
@@ -2506,7 +2509,8 @@ func _apply_step_result(
 				action_identity,
 				result.data.get("continuation", {})
 			)
-			current_action_index += 1
+			if advance_instruction:
+				current_action_index += 1
 			last_result = {
 				"status": "yield",
 				"commandId": command_id,
@@ -2586,6 +2590,14 @@ func _action_identity(instruction: Dictionary) -> Dictionary:
 		identity["id"] = int(instruction.get("id", 0))
 	else:
 		identity["operation"] = str(instruction.get("operation", ""))
+		var parameters: Variant = instruction.get("parameters", {})
+		var attachment: Variant = (
+			parameters.get("attachment") if parameters is Dictionary else null
+		)
+		if attachment is Dictionary:
+			identity["attachmentRole"] = str(attachment.get("role", "action"))
+			identity["attachmentHook"] = str(attachment.get("hook", "run"))
+			identity["attachment"] = attachment.duplicate(true)
 	return identity
 
 

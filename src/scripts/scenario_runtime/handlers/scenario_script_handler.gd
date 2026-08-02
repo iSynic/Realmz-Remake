@@ -66,7 +66,8 @@ func execute(instruction: Dictionary, context: Object) -> ScenarioStepResult:
 	)
 	return _apply_behavior_outcome(
 		result,
-		str(attachment.get("role", "action"))
+		str(attachment.get("role", "action")),
+		attachment
 	)
 
 
@@ -83,15 +84,20 @@ func resume(
 	)
 	return _apply_behavior_outcome(
 		result,
-		str(_pending.action_identity.get("attachmentRole", "action"))
+		str(_pending.action_identity.get("attachmentRole", "action")),
+		(
+			_pending.action_identity.get("attachment", {}).duplicate(true)
+			if _pending.action_identity.get("attachment") is Dictionary else {}
+		)
 	)
 
 
 func _apply_behavior_outcome(
 	result: ScenarioStepResult,
-	role: String
+	role: String,
+	attachment := {}
 ) -> ScenarioStepResult:
-	if role != "action":
+	if role not in ["action", "encounter"]:
 		return result
 	if result == null or result.kind != ScenarioStepResult.CONTINUE:
 		return result
@@ -99,6 +105,8 @@ func _apply_behavior_outcome(
 	if not (value is Dictionary):
 		return result
 	var outcome: Dictionary = value
+	if role == "encounter":
+		return _apply_encounter_outcome(outcome, attachment)
 	match str(outcome.get("kind", "continue")):
 		"continue":
 			return ScenarioStepResult.continued()
@@ -128,4 +136,37 @@ func _apply_behavior_outcome(
 			return ScenarioStepResult.returned()
 	return ScenarioStepResult.failed(
 		"Action behavior returned an unsupported outcome"
+	)
+
+
+func _apply_encounter_outcome(
+	outcome: Dictionary,
+	attachment: Dictionary
+) -> ScenarioStepResult:
+	var kind := str(outcome.get("kind", "continue"))
+	if kind == "continue":
+		return ScenarioStepResult.continued()
+	var targets: Variant = attachment.get("outcomeTargets", {})
+	if not (targets is Dictionary):
+		return ScenarioStepResult.failed(
+			"Encounter behavior has no control-flow targets"
+		)
+	if kind in ["close", "resolve", "repeat"]:
+		var target_key := "close" if kind in ["close", "resolve"] else "repeat"
+		if not targets.has(target_key):
+			return ScenarioStepResult.failed(
+				"Encounter behavior outcome '%s' is unavailable here" % kind
+			)
+		return ScenarioStepResult.branched(int(targets[target_key]))
+	if kind == "branch":
+		var section_id := str(outcome.get("sectionId", ""))
+		var sections: Variant = attachment.get("sectionTargets", {})
+		if section_id.is_empty() or not (sections is Dictionary) \
+				or not sections.has(section_id):
+			return ScenarioStepResult.failed(
+				"Encounter branch outcome requires a valid section ID"
+			)
+		return ScenarioStepResult.branched(int(sections[section_id]))
+	return ScenarioStepResult.failed(
+		"Encounter behavior returned an unsupported outcome"
 	)

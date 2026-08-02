@@ -31,6 +31,7 @@ var failures := 0
 func _ready() -> void:
 	await _test_map_trigger_execution_and_restore()
 	await _test_modern_encounter_execution_and_restore()
+	await _test_modern_encounter_response_redirect()
 	_test_specialized_encounter_response_matching()
 	await _test_typed_state_and_named_variants()
 	await _test_event_and_scheduled_triggers()
@@ -343,6 +344,129 @@ func _test_modern_encounter_execution_and_restore() -> void:
 	)
 	session.queue_free()
 	restored.queue_free()
+
+
+func _test_modern_encounter_response_redirect() -> void:
+	var bundle := _encounter_bundle()
+	var encounter: Dictionary = bundle.documents["remakeLogic"]["encounters"][0]
+	var opening: Dictionary = encounter["sections"][0]
+	var close_behavior_id := "scenario.fixture.encounter.leave"
+	var displaced_behavior_id := "scenario.fixture.encounter.displaced"
+	var close_program := {
+		"kind": "function",
+		"name": "fixture_leave_encounter",
+		"parameters": [],
+		"returnType": "encounter-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {"text": _literal("You turn away.")},
+			},
+			{
+				"kind": "return",
+				"value": {
+					"kind": "record",
+					"fields": {"kind": _literal("close")},
+				},
+			},
+		],
+	}
+	var displaced_program := {
+		"kind": "function",
+		"name": "fixture_displaced_result",
+		"parameters": [],
+		"returnType": "action-outcome",
+		"body": [
+			{
+				"kind": "operation",
+				"capability": "core.presentation.text",
+				"arguments": {"text": _literal("This result must not run.")},
+			},
+			{
+				"kind": "return",
+				"value": {
+					"kind": "record",
+					"fields": {"kind": _literal("continue")},
+				},
+			},
+		],
+	}
+	bundle.documents["remakeScripts"]["behaviors"].append(_safe_behavior(
+		close_behavior_id,
+		"Leave the Encounter",
+		"entry",
+		"encounter",
+		"response",
+		"encounter-outcome",
+		["core.presentation.text"],
+		close_program,
+		{}
+	))
+	bundle.documents["remakeScripts"]["behaviors"].append(_safe_behavior(
+		displaced_behavior_id,
+		"Displaced Result",
+		"entry",
+		"action",
+		"run",
+		"action-outcome",
+		["core.presentation.text"],
+		displaced_program,
+		{}
+	))
+	var response_id := "%s.leave" % str(opening.get("id", ""))
+	var result_id := "%s.result" % response_id
+	opening["responses"].append({
+		"id": response_id,
+		"kind": "back-out",
+		"label": "Leave",
+		"match": {},
+		"availabilityBehaviorId": null,
+		"selectionBehaviorId": close_behavior_id,
+		"resultId": result_id,
+	})
+	encounter["results"].append({
+		"id": result_id,
+		"name": "Displaced Leave Result",
+		"behaviorId": displaced_behavior_id,
+		"terminal": {"kind": "close"},
+	})
+
+	var services := PreviewServicesScript.new()
+	var session := SessionScript.new()
+	add_child(session)
+	_expect(
+		session.configure_remake_bundle(bundle, services),
+		"Modern Encounter redirect fixture configures"
+	)
+	var result := session.begin_encounter("scenario.fixture.encounter")
+	result = session.resume_remake_command({})
+	result = session.resume_remake_command({
+		"choice": 1,
+		"responseRef": {
+			"kind": "back-out",
+			"responseId": response_id,
+		},
+	})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("commandId") == "show_text"
+			and result.get("request", {}).get("text") == "You turn away.",
+		"Modern Encounter response Behavior may yield before redirecting"
+	)
+	result = session.resume_remake_command({})
+	_expect(
+		result.get("status") == "yield"
+			and result.get("request", {}).get("text") == "The job is done."
+			and "This result must not run." not in services.transcript,
+		"response redirect displaces its originally routed Result"
+	)
+	result = session.resume_remake_command({})
+	_expect(
+		result.get("status") == "complete",
+		"redirected Modern Encounter completes through the central interpreter"
+	)
+	session.queue_free()
 
 
 func _test_typed_state_and_named_variants() -> void:
