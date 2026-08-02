@@ -102,6 +102,7 @@ func _ready() -> void:
 	_test_engine_plugin_settings_ui()
 	_test_preview_wire_json()
 	_test_classic_manual_preview_control()
+	_test_classic_manual_preview_nested_encounter_behavior()
 	_test_encounter_fallback_presentation()
 	_test_sandbox_helper_discovery()
 	await _test_gameplay_rules()
@@ -215,6 +216,55 @@ func _test_classic_manual_preview_control() -> void:
 		restored_pending.get("status") == "yield"
 			and restored_pending.get("commandId") == result.get("commandId"),
 		"manual Classic preview restores the exact pending command"
+	)
+	host.queue_free()
+
+
+func _test_classic_manual_preview_nested_encounter_behavior() -> void:
+	var bundle = _classic_enhanced_city_encounter_bundle()
+	if bundle == null:
+		return
+	var host := HostScript.new()
+	add_child(host)
+	host.configure(RefCounted.new())
+	host.use_campaign(bundle)
+	var result: Dictionary = host.begin_manual_trigger("Data DD:0:0")
+	for _step: int in range(16):
+		if str(result.get("status", "")) != "yield":
+			break
+		var request: Dictionary = result.get("request", {}).get(
+			"payload",
+			{}
+		)
+		if str(result.get("commandId", "")) == "show_text" \
+				and int(request.get("messageId", 0)) == -52:
+			result = host.resume_manual_command({})
+			break
+		if str(result.get("commandId", "")) == "start_encounter":
+			var saved := host.make_continuation_snapshot()
+			_expect(
+				str(saved.get("status", "")) == "ok",
+				"Manual Classic Encounter preview saves before its response"
+			)
+			var restored := host.restore_continuation(saved.get("snapshot", {}))
+			_expect(
+				str(restored.get("status", "")) == "ok",
+				"Manual Classic Encounter preview restores before its response"
+			)
+			result = host.resume_manual_restored_continuation()
+			result = host.resume_manual_command({
+				"outcome": 1,
+				"optionSlot": 0,
+			})
+		else:
+			result = host.resume_manual_command({})
+	_expect(
+		str(result.get("status", "")) == "yield"
+			and str(result.get("commandId", "")) == "show_text"
+			and result.get("request", {}).get("payload", {}).get("text")
+				== "After preserved result action 1.",
+		"Manual Classic preview exposes a yielding Behavior after a preserved "
+			+ "Encounter result action: %s" % str(result)
 	)
 	host.queue_free()
 
