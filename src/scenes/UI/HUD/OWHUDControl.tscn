@@ -1,4 +1,4 @@
-[gd_scene load_steps=83 format=3 uid="uid://bcm4yk3e2uv7"]
+[gd_scene load_steps=85 format=3 uid="uid://bcm4yk3e2uv7"]
 
 [ext_resource type="PackedScene" uid="uid://y2mh6jttjyop" path="res://scenes/UI/HUD/Multiple Choices/ChoicesButton.tscn" id="1"]
 [ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="2"]
@@ -59,6 +59,11 @@
 [ext_resource type="PackedScene" path="res://scenes/UI/HUD/ClassicTorch/classic_torch_button.tscn" id="82_torch"]
 [ext_resource type="Texture2D" uid="uid://hgowxiea5c08" path="res://shared_assets/UI/buttonShopText.png" id="83_shop"]
 [ext_resource type="Theme" path="res://scenes/UI/HUD/Theme/realmz_hud_theme.tres" id="84_theme"]
+[ext_resource type="Texture2D" uid="uid://meib7vx3ar3" path="res://scenes/UI/HUD/EffectsAnimations.png" id="85_effects"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_search_icon"]
+atlas = ExtResource("85_effects")
+region = Rect2(0, 128, 32, 32)
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_kbh82"]
 
@@ -128,13 +133,13 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 0
 
 [node name="HBoxTop" type="HBoxContainer" parent="VBoxScreen" unique_id=1927436939]
 layout_mode = 2
 size_flags_vertical = 3
 mouse_filter = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 0
 
 [node name="MapArea" type="Control" parent="VBoxScreen/HBoxTop" unique_id=264081784]
 layout_mode = 2
@@ -217,7 +222,7 @@ grow_vertical = 2
 
 [node name="VBoxCharTime" type="VBoxContainer" parent="VBoxScreen/HBoxTop" unique_id=525991618]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 0
 
 [node name="CharactersRect" type="TextureRect" parent="VBoxScreen/HBoxTop/VBoxCharTime" unique_id=954997641]
 custom_minimum_size = Vector2(320, 32)
@@ -241,7 +246,7 @@ scroll_deadzone = 60
 layout_mode = 2
 
 [node name="TimeRect" type="NinePatchRect" parent="VBoxScreen/HBoxTop/VBoxCharTime" unique_id=1659684271]
-custom_minimum_size = Vector2(320, 40)
+custom_minimum_size = Vector2(320, 80)
 layout_mode = 2
 mouse_filter = 0
 texture = ExtResource("2")
@@ -254,10 +259,10 @@ axis_stretch_vertical = 1
 
 [node name="FatigueLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=1147863674]
 layout_mode = 0
-offset_left = 5.0
-offset_top = 5.0
-offset_right = 65.0
-offset_bottom = 22.0
+offset_left = 10.0
+offset_top = 7.0
+offset_right = 72.0
+offset_bottom = 25.0
 theme_override_colors/font_color = Color(1, 0.960784, 0, 1)
 theme_override_colors/font_shadow_color = Color(0.12549, 0.12549, 0.12549, 1)
 theme_override_colors/font_outline_color = Color(0.0941176, 0.0941176, 0.0941176, 1)
@@ -270,10 +275,10 @@ text = "Fatigue :"
 
 [node name="TimeLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=16579321]
 layout_mode = 0
-offset_left = 5.0
-offset_top = 20.0
-offset_right = 47.0
-offset_bottom = 37.0
+offset_left = 10.0
+offset_top = 29.0
+offset_right = 55.0
+offset_bottom = 49.0
 theme_override_colors/font_color = Color(1, 0.960784, 0, 1)
 theme_override_colors/font_shadow_color = Color(0.12549, 0.12549, 0.12549, 1)
 theme_override_colors/font_outline_color = Color(0.0941176, 0.0941176, 0.0941176, 1)
@@ -286,19 +291,19 @@ text = "Time :"
 
 [node name="TimeCntrLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=1992380956]
 layout_mode = 0
-offset_left = 52.1892
-offset_top = 15.9482
-offset_right = 172.189
-offset_bottom = 46.9482
+offset_left = 58.0
+offset_top = 28.0
+offset_right = 185.0
+offset_bottom = 49.0
 theme_override_font_sizes/font_size = 12
 text = "0d 24h 60m 60s"
 
 [node name="LightLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=203745971]
 layout_mode = 0
-offset_left = 175.0
-offset_top = 20.0
-offset_right = 214.0
-offset_bottom = 38.0
+offset_left = 10.0
+offset_top = 51.0
+offset_right = 55.0
+offset_bottom = 72.0
 theme_override_colors/font_color = Color(1, 0.960784, 0, 1)
 theme_override_colors/font_shadow_color = Color(0.12549, 0.12549, 0.12549, 1)
 theme_override_colors/font_outline_color = Color(0.0941176, 0.0941176, 0.0941176, 1)
@@ -311,29 +316,28 @@ text = "Light :"
 
 [node name="LightCntrLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=594858880]
 layout_mode = 0
-offset_left = 218.189
-offset_top = 18.9482
-offset_right = 322.189
-offset_bottom = 38.9482
+offset_left = 58.0
+offset_top = 51.0
+offset_right = 200.0
+offset_bottom = 72.0
 theme_override_font_sizes/font_size = 12
-text = "0 s
-"
+text = "0 s"
 
 [node name="LightPCntrLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=361570543]
 layout_mode = 0
-offset_left = 294.0
-offset_top = 18.0
-offset_right = 317.0
-offset_bottom = 38.0
+offset_left = 224.0
+offset_top = 51.0
+offset_right = 308.0
+offset_bottom = 72.0
 theme_override_font_sizes/font_size = 12
 text = "P:0"
 
 [node name="XLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=1418811042]
 layout_mode = 0
-offset_left = 193.189
-offset_top = 4.94816
-offset_right = 217.189
-offset_bottom = 22.9482
+offset_left = 193.0
+offset_top = 29.0
+offset_right = 216.0
+offset_bottom = 49.0
 theme_override_colors/font_color = Color(1, 0, 0, 1)
 theme_override_colors/font_shadow_color = Color(0.12549, 0.12549, 0.12549, 1)
 theme_override_colors/font_outline_color = Color(0.0941176, 0.0941176, 0.0941176, 1)
@@ -346,10 +350,10 @@ text = "X :"
 
 [node name="YLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=1733786326]
 layout_mode = 0
-offset_left = 253.189
-offset_top = 4.94816
-offset_right = 277.189
-offset_bottom = 22.9482
+offset_left = 254.0
+offset_top = 29.0
+offset_right = 277.0
+offset_bottom = 49.0
 theme_override_colors/font_color = Color(1, 0, 0, 1)
 theme_override_colors/font_shadow_color = Color(0.12549, 0.12549, 0.12549, 1)
 theme_override_colors/font_outline_color = Color(0.0941176, 0.0941176, 0.0941176, 1)
@@ -362,28 +366,28 @@ text = "Y :"
 
 [node name="XnumberLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=440970947]
 layout_mode = 0
-offset_left = 218.0
-offset_top = 4.0
-offset_right = 255.0
-offset_bottom = 24.0
+offset_left = 217.0
+offset_top = 28.0
+offset_right = 251.0
+offset_bottom = 49.0
 theme_override_font_sizes/font_size = 12
 text = "0"
 
 [node name="YnumberLabel" type="Label" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=1681081862]
 layout_mode = 0
-offset_left = 272.0
-offset_top = 4.0
+offset_left = 278.0
+offset_top = 28.0
 offset_right = 310.0
-offset_bottom = 24.0
+offset_bottom = 49.0
 theme_override_font_sizes/font_size = 12
 text = "0"
 
 [node name="FatigueBar" type="TextureProgressBar" parent="VBoxScreen/HBoxTop/VBoxCharTime/TimeRect" unique_id=54743519]
 layout_mode = 0
-offset_left = 66.0
-offset_top = 9.0
-offset_right = 194.0
-offset_bottom = 17.0
+offset_left = 75.0
+offset_top = 13.0
+offset_right = 308.0
+offset_bottom = 21.0
 value = 30.0
 nine_patch_stretch = true
 stretch_margin_left = 2
@@ -395,7 +399,7 @@ texture_progress = ExtResource("15_3lusa")
 
 [node name="HBoxBot" type="HBoxContainer" parent="VBoxScreen" unique_id=1755434344]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 0
 
 [node name="TextRect" type="NinePatchRect" parent="VBoxScreen/HBoxBot" unique_id=1359688254 node_paths=PackedStringArray("choicesContainer")]
 custom_minimum_size = Vector2(32, 200)
@@ -490,7 +494,7 @@ visible = false
 layout_mode = 2
 
 [node name="BotRightPanel" type="TextureRect" parent="VBoxScreen/HBoxBot" unique_id=1580127324 node_paths=PackedStringArray("spellCastButton")]
-custom_minimum_size = Vector2(320, 200)
+custom_minimum_size = Vector2(490, 200)
 layout_mode = 2
 mouse_filter = 0
 texture = ExtResource("6")
@@ -498,12 +502,74 @@ stretch_mode = 1
 script = ExtResource("20_oijwo")
 spellCastButton = NodePath("SpellButton")
 
+[node name="PartyLabel" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+layout_mode = 0
+offset_left = 6.0
+offset_top = 20.0
+offset_right = 58.0
+offset_bottom = 44.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.83, 0.27, 1)
+theme_override_fonts/font = ExtResource("67_o5gys")
+theme_override_font_sizes/font_size = 13
+text = "Party"
+vertical_alignment = 1
+
+[node name="ExploreLabel" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+layout_mode = 0
+offset_left = 6.0
+offset_top = 82.0
+offset_right = 58.0
+offset_bottom = 106.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.83, 0.27, 1)
+theme_override_fonts/font = ExtResource("67_o5gys")
+theme_override_font_sizes/font_size = 13
+text = "Explore"
+vertical_alignment = 1
+
+[node name="SystemLabel" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+layout_mode = 0
+offset_left = 6.0
+offset_top = 144.0
+offset_right = 58.0
+offset_bottom = 168.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.83, 0.27, 1)
+theme_override_fonts/font = ExtResource("67_o5gys")
+theme_override_font_sizes/font_size = 13
+text = "System"
+vertical_alignment = 1
+
+[node name="StatusDivider" type="ColorRect" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+layout_mode = 0
+offset_left = 368.0
+offset_top = 8.0
+offset_right = 370.0
+offset_bottom = 192.0
+mouse_filter = 2
+color = Color(0.57, 0.49, 0.3, 0.8)
+
+[node name="StatusLabel" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+layout_mode = 0
+offset_left = 374.0
+offset_top = 5.0
+offset_right = 486.0
+offset_bottom = 27.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.83, 0.27, 1)
+theme_override_fonts/font = ExtResource("67_o5gys")
+theme_override_font_sizes/font_size = 13
+text = "Effects"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="InventoryButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1150905170]
 layout_mode = 0
-offset_left = 1.18921
-offset_top = 49.9481
-offset_right = 51.1892
-offset_bottom = 99.9479
+offset_left = 62.0
+offset_top = 8.0
+offset_right = 110.0
+offset_bottom = 56.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -517,9 +583,10 @@ vertical_icon_alignment = 0
 [node name="CharSwapButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=280344644]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 270.0
-offset_right = 320.0
-offset_bottom = 50.0
+offset_left = 262.0
+offset_top = 8.0
+offset_right = 310.0
+offset_bottom = 56.0
 focus_mode = 0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
@@ -533,10 +600,10 @@ icon = ExtResource("23")
 [node name="SettingsButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=597566954]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 270.0
-offset_top = 150.0
-offset_right = 320.0
-offset_bottom = 200.0
+offset_left = 262.0
+offset_top = 132.0
+offset_right = 310.0
+offset_bottom = 180.0
 focus_mode = 0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
@@ -549,9 +616,10 @@ icon = ExtResource("36")
 [node name="EncounterButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=585543019]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_top = 150.0
-offset_right = 50.0
-offset_bottom = 200.0
+offset_left = 262.0
+offset_top = 70.0
+offset_right = 310.0
+offset_bottom = 118.0
 focus_mode = 0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
@@ -561,11 +629,81 @@ theme_override_styles/focus = SubResource("StyleBoxEmpty_jwj8b")
 shortcut_in_tooltip = false
 icon = ExtResource("39")
 
+[node name="LabelBackdrop" type="ColorRect" parent="VBoxScreen/HBoxBot/BotRightPanel/EncounterButton"]
+layout_mode = 0
+offset_left = 2.0
+offset_top = 33.0
+offset_right = 46.0
+offset_bottom = 47.0
+mouse_filter = 2
+color = Color(0.07, 0.07, 0.06, 0.92)
+
+[node name="Label" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel/EncounterButton"]
+layout_mode = 0
+offset_left = 1.0
+offset_top = 31.0
+offset_right = 47.0
+offset_bottom = 47.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.960784, 0, 1)
+theme_override_fonts/font = ExtResource("67_o5gys")
+theme_override_font_sizes/font_size = 9
+text = "Encounter"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ClassicSearchActionButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+layout_mode = 0
+offset_left = 312.0
+offset_top = 70.0
+offset_right = 360.0
+offset_bottom = 118.0
+theme_override_styles/normal = ExtResource("12_c6hp3")
+theme_override_styles/pressed = ExtResource("14_pjtj6")
+theme_override_styles/hover = ExtResource("13_dm23x")
+theme_override_styles/disabled = ExtResource("15_rs5dt")
+disabled = true
+toggle_mode = true
+
+[node name="Icon" type="TextureRect" parent="VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton"]
+layout_mode = 0
+offset_left = 8.0
+offset_top = 2.0
+offset_right = 40.0
+offset_bottom = 34.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_search_icon")
+
+[node name="LabelBackdrop" type="ColorRect" parent="VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton"]
+layout_mode = 0
+offset_left = 2.0
+offset_top = 33.0
+offset_right = 46.0
+offset_bottom = 47.0
+mouse_filter = 2
+color = Color(0.07, 0.07, 0.06, 0.92)
+
+[node name="Label" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton"]
+layout_mode = 0
+offset_left = 1.0
+offset_top = 31.0
+offset_right = 47.0
+offset_bottom = 47.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(1, 0.960784, 0, 1)
+theme_override_fonts/font = ExtResource("67_o5gys")
+theme_override_font_sizes/font_size = 10
+text = "Search"
+horizontal_alignment = 1
+vertical_alignment = 1
+
 [node name="CampButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=2004549040]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_right = 50.0
-offset_bottom = 50.0
+offset_left = 62.0
+offset_top = 70.0
+offset_right = 110.0
+offset_bottom = 118.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -578,10 +716,10 @@ icon = ExtResource("53")
 [node name="SaveButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=2080017543]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 270.0
-offset_top = 100.0
-offset_right = 320.0
-offset_bottom = 150.0
+offset_left = 212.0
+offset_top = 132.0
+offset_right = 260.0
+offset_bottom = 180.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -592,10 +730,10 @@ icon = ExtResource("55")
 [node name="TempleButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1121611087]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 180.0
-offset_top = 128.0
-offset_right = 230.0
-offset_bottom = 178.0
+offset_left = 62.0
+offset_top = 132.0
+offset_right = 110.0
+offset_bottom = 180.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -605,13 +743,12 @@ disabled = true
 icon = ExtResource("35_k5nci")
 
 [node name="ShopButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel"]
-visible = false
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 180.0
-offset_top = 128.0
-offset_right = 230.0
-offset_bottom = 178.0
+offset_left = 112.0
+offset_top = 132.0
+offset_right = 160.0
+offset_bottom = 180.0
 tooltip_text = "Enter shop"
 focus_mode = 0
 theme_override_styles/focus = SubResource("StyleBoxEmpty_74ttr")
@@ -627,10 +764,10 @@ vertical_icon_alignment = 1
 [node name="QSaveButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1463057139]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 270.189
-offset_top = 50.9481
-offset_right = 320.189
-offset_bottom = 100.948
+offset_left = 162.0
+offset_top = 132.0
+offset_right = 210.0
+offset_bottom = 180.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -641,10 +778,10 @@ icon = ExtResource("27_drj61")
 [node name="MinimapsButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=875245879]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 116.0
-offset_top = 128.0
-offset_right = 166.0
-offset_bottom = 178.0
+offset_left = 162.0
+offset_top = 70.0
+offset_right = 210.0
+offset_bottom = 118.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -655,10 +792,10 @@ icon = ExtResource("33_510ry")
 [node name="BestiaryButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=437779737]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 50.0
-offset_top = 150.0
-offset_right = 100.0
-offset_bottom = 200.0
+offset_left = 212.0
+offset_top = 70.0
+offset_right = 260.0
+offset_bottom = 118.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -669,10 +806,10 @@ icon = ExtResource("22_a5ehs")
 [node name="AbiListButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1627434620]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 50.0
-offset_top = 100.0
-offset_right = 100.0
-offset_bottom = 150.0
+offset_left = 212.0
+offset_top = 8.0
+offset_right = 260.0
+offset_bottom = 56.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -683,10 +820,10 @@ icon = ExtResource("26_silsh")
 [node name="MoneyButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=16429646]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 50.0
-offset_top = 50.0
-offset_right = 100.0
-offset_bottom = 100.0
+offset_left = 112.0
+offset_top = 8.0
+offset_right = 160.0
+offset_bottom = 56.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -697,9 +834,10 @@ icon = ExtResource("56")
 [node name="RestButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=2109165859]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 50.0
-offset_right = 100.0
-offset_bottom = 50.0
+offset_left = 112.0
+offset_top = 70.0
+offset_right = 160.0
+offset_bottom = 118.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -716,9 +854,10 @@ one_shot = true
 
 [node name="SpellButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1441741891]
 layout_mode = 0
-offset_top = 100.784
-offset_right = 50.0
-offset_bottom = 150.784
+offset_left = 162.0
+offset_top = 8.0
+offset_right = 210.0
+offset_bottom = 56.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -729,17 +868,17 @@ icon = ExtResource("81")
 
 [node name="GlobalEffectsRect" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=299636859 instance=ExtResource("38_2g7oy")]
 layout_mode = 0
-offset_left = 107.189
-offset_top = 7.94815
-offset_right = 180.189
-offset_bottom = 116.948
+offset_left = 374.0
+offset_top = 25.0
+offset_right = 447.0
+offset_bottom = 134.0
 
 [node name="ClassicTorchButton" parent="VBoxScreen/HBoxBot/BotRightPanel" instance=ExtResource("82_torch")]
 layout_mode = 0
-offset_left = 234.0
-offset_top = 8.0
-offset_right = 258.0
-offset_bottom = 78.0
+offset_left = 452.0
+offset_top = 25.0
+offset_right = 484.0
+offset_bottom = 103.0
 
 [node name="CombatBRPanel" parent="VBoxScreen/HBoxBot" unique_id=1331322809 instance=ExtResource("28_s8a54")]
 visible = false

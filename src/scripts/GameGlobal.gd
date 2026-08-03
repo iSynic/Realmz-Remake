@@ -1715,7 +1715,21 @@ func _check_classic_random_encounter() -> int:
 	return await check_classic_random_rectangles(position)
 
 
-func check_classic_random_rectangles(
+func trigger_classic_manual_encounter(context := {}) -> int:
+	if not is_classic_runtime_active() \
+			or is_classic_action_point_active() \
+			or StateMachine.is_combat_state() \
+			or map == null \
+			or map.owcharacter == null:
+		return ClassicRandomRectangleScript.Outcome.NONE
+	var position := Vector2i(
+		int(map.owcharacter.tile_position_x),
+		int(map.owcharacter.tile_position_y)
+	)
+	return await check_classic_manual_encounter_rectangles(position, context)
+
+
+func check_classic_manual_encounter_rectangles(
 	position: Vector2i,
 	context := {}
 ) -> int:
@@ -1724,8 +1738,113 @@ func check_classic_random_rectangles(
 			or StateMachine.is_combat_state() \
 			or map == null \
 			or not is_instance_valid(classic_runtime_host) \
-			or not classic_runtime_host.has_method("get_random_rectangle"):
+			or not classic_runtime_host.has_method("get_random_rectangle") \
+			or not classic_runtime_host.has_method("consume_random_rectangle_door"):
 		return ClassicRandomRectangleScript.Outcome.NONE
+	var selected_trigger_index := 0
+	var candidates := _classic_random_rectangle_candidates()
+	for rect_index: int in range(
+		ClassicRandomRectangleScript.MAX_RECTANGLES - 1,
+		-1,
+		-1
+	):
+		if not candidates.has(rect_index):
+			continue
+		var candidate: Dictionary = candidates[rect_index]
+		var area: Dictionary = candidate["area"]
+		var identity: Dictionary = candidate["identity"]
+		var rectangle_value: Variant = classic_runtime_host.call(
+			"get_random_rectangle",
+			str(identity["levelType"]),
+			int(identity["levelIndex"]),
+			rect_index
+		)
+		if not (rectangle_value is Dictionary):
+			continue
+		var rectangle: Dictionary = rectangle_value
+		if not ClassicRandomRectangleScript.contains(rectangle, area, position) \
+				or int(rectangle.get("percent", 0)) >= 0:
+			continue
+		for outcome: Dictionary in ClassicRandomRectangleScript.door_outcomes(
+			rectangle
+		):
+			var door_percent := int(outcome["percent"])
+			var door_sign := signi(door_percent)
+			var modified_door_percent := clampi(roundi(
+				apply_scenario_rule_modifier(
+					"encounter-chance",
+					float(absi(door_percent)),
+					{
+						"mode": "manual-random-door",
+						"levelType": str(identity["levelType"]),
+						"levelIndex": int(identity["levelIndex"]),
+						"rectangleIndex": rect_index,
+						"doorIndex": int(outcome["doorIndex"]),
+						"minimum": 0.0,
+						"maximum": 100.0,
+					}
+				)
+			), 0, 100)
+			door_percent = door_sign * modified_door_percent
+			if not ClassicRandomRectangleScript.door_roll_succeeds(
+				door_percent,
+				randi_range(1, 100)
+			):
+				continue
+			selected_trigger_index = int(outcome["triggerId"])
+			if door_percent <= 0:
+				continue
+			var consumed: Dictionary = classic_runtime_host.call(
+				"consume_random_rectangle_door",
+				str(identity["levelType"]),
+				int(identity["levelIndex"]),
+				rect_index,
+				int(outcome["doorIndex"])
+			)
+			if str(consumed.get("status", "")) == "error":
+				push_error(str(consumed.get(
+					"message",
+					"Classic manual-encounter state could not be saved"
+				)))
+				return ClassicRandomRectangleScript.Outcome.NONE
+			rectangle = consumed.get("rectangle", rectangle)
+			ClassicRandomRectangleScript.apply_rectangle(
+				area,
+				str(identity["levelType"]),
+				int(identity["levelIndex"]),
+				rectangle,
+				str(area.get("RR_Battle", {}).get("text", ""))
+			)
+			map.mapscriptareas[candidate["areaName"]] = area
+
+	var trigger_id := "Data ED3:macro:%d" % selected_trigger_index
+	if not bool(classic_runtime_host.call("has_trigger", trigger_id)):
+		if selected_trigger_index > 0:
+			push_error(
+				"Classic manual encounter references missing trigger %s" % trigger_id
+			)
+		return ClassicRandomRectangleScript.Outcome.NONE
+	var dispatch_context: Dictionary = context.duplicate(true) \
+		if context is Dictionary else {}
+	dispatch_context.merge({
+		"manualEncounter": true,
+		"seamless": true,
+		"mapPosition": position,
+	}, true)
+	var dispatch := await dispatch_classic_map_script(trigger_id, dispatch_context)
+	if not bool(dispatch.get("handled", false)):
+		return ClassicRandomRectangleScript.Outcome.NONE
+	var trigger_result: Variant = dispatch.get("result", {})
+	if trigger_result is Dictionary \
+			and str(trigger_result.get("status", "")) == "error":
+		push_error(str(trigger_result.get(
+			"message",
+			"Classic manual encounter stopped"
+		)))
+	return ClassicRandomRectangleScript.Outcome.TRIGGER_DISPATCHED
+
+
+func _classic_random_rectangle_candidates() -> Dictionary:
 	var candidates: Dictionary = {}
 	for area_name_value: Variant in map.mapscriptareas:
 		var area_name := str(area_name_value)
@@ -1745,6 +1864,21 @@ func check_classic_random_rectangles(
 			"areaName": area_name,
 			"identity": identity,
 		}
+	return candidates
+
+
+func check_classic_random_rectangles(
+	position: Vector2i,
+	context := {}
+) -> int:
+	if not is_classic_runtime_active() \
+			or is_classic_action_point_active() \
+			or StateMachine.is_combat_state() \
+			or map == null \
+			or not is_instance_valid(classic_runtime_host) \
+			or not classic_runtime_host.has_method("get_random_rectangle"):
+		return ClassicRandomRectangleScript.Outcome.NONE
+	var candidates := _classic_random_rectangle_candidates()
 
 	for rect_index: int in range(
 		ClassicRandomRectangleScript.MAX_RECTANGLES - 1,

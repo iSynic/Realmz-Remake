@@ -11,10 +11,12 @@ const FLAME_FRAMES: Array[Texture2D] = [
 	preload("res://scenes/UI/HUD/ClassicTorch/classic_torch_152.png"),
 	preload("res://scenes/UI/HUD/ClassicTorch/classic_torch_153.png"),
 ]
-const FUEL_MARKER: Texture2D = preload(
+const BODY_SEGMENT: Texture2D = preload(
 	"res://scenes/UI/HUD/ClassicTorch/classic_torch_154.png"
 )
 const FRAME_INTERVAL := 1.0 / 6.0
+const CONTENT_OFFSET := Vector2(4.0, 4.0)
+const CONTENT_SIZE := Vector2(24.0, 70.0)
 const FLAME_BASE_Y := 36
 const FUEL_BASE_Y := 60
 const FUEL_STEP := 7
@@ -27,7 +29,7 @@ var _frame_elapsed := 0.0
 
 
 func _process(delta: float) -> void:
-	if not visible or _light_condition <= 0:
+	if not visible or not has_torch_artwork() or _light_condition <= 0:
 		return
 	_frame_elapsed += delta
 	if _frame_elapsed < FRAME_INTERVAL:
@@ -63,10 +65,18 @@ func sync_status(
 		)
 	else:
 		tooltip_text = "No Torches in party inventory."
-	if _light_condition <= 0:
+	if not _has_torch or _light_condition <= 0:
 		_flame_stage = 0
 		_frame_elapsed = 0.0
 	queue_redraw()
+
+
+func flame_frame_count() -> int:
+	return FLAME_FRAMES.size()
+
+
+func has_torch_artwork() -> bool:
+	return _classic_active and _has_torch
 
 
 func fuel_segment_count() -> int:
@@ -79,16 +89,41 @@ func flame_y() -> int:
 	return clampi(FLAME_BASE_Y - int(_light_condition / 4), 0, FLAME_BASE_Y)
 
 
-func flame_frame_count() -> int:
-	return FLAME_FRAMES.size()
+func fuel_marker_position(segment_index: int) -> Vector2:
+	return CONTENT_OFFSET + Vector2(
+		8.0,
+		float(FUEL_BASE_Y - (segment_index + 1) * FUEL_STEP)
+	)
+
+
+func flame_position() -> Vector2:
+	return CONTENT_OFFSET + Vector2(4.0, float(flame_y()))
+
+
+func artwork_bounds() -> Rect2:
+	if not has_torch_artwork():
+		return Rect2()
+	var bounds := Rect2(
+		fuel_marker_position(0),
+		BODY_SEGMENT.get_size()
+	)
+	for segment_index: int in range(1, fuel_segment_count()):
+		bounds = bounds.merge(Rect2(
+			fuel_marker_position(segment_index),
+			BODY_SEGMENT.get_size()
+		))
+	if _light_condition > 0:
+		bounds = bounds.merge(Rect2(
+			flame_position(),
+			FLAME_FRAMES[_flame_stage].get_size()
+		))
+	return bounds
 
 
 func _draw() -> void:
-	if not _classic_active:
+	if not has_torch_artwork():
 		return
-	var tint := Color.WHITE if _has_torch else Color(1.0, 1.0, 1.0, 0.6)
-	for segment_index: int in fuel_segment_count():
-		var marker_y := FUEL_BASE_Y - (segment_index + 1) * FUEL_STEP
-		draw_texture(FUEL_MARKER, Vector2(8, marker_y), tint)
+	for segment_index: int in range(fuel_segment_count()):
+		draw_texture(BODY_SEGMENT, fuel_marker_position(segment_index))
 	if _light_condition > 0:
-		draw_texture(FLAME_FRAMES[_flame_stage], Vector2(4, flame_y()), tint)
+		draw_texture(FLAME_FRAMES[_flame_stage], flame_position())

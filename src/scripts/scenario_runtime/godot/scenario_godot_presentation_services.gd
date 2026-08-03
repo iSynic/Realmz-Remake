@@ -8,6 +8,7 @@ const SoundResolutionScript = preload(
 	"res://scripts/classic_runtime/classic_sound_resolution.gd"
 )
 const STOP_CHOICE_TOKEN := "STOP"
+const ACTOR_CHANGED_CHOICE_TOKEN := "__selected_character_changed__"
 
 signal scenario_debugger_resumed(action: String)
 
@@ -850,8 +851,22 @@ func _show_complex_encounter(payload: Dictionary) -> Dictionary:
 			"_show_choices",
 			text_rect,
 			choices,
-			choice_tokens
+			choice_tokens,
+			ACTOR_CHANGED_CHOICE_TOKEN
 		))
+		var latest_character: Object = service_owner.call(
+			"_selected_character"
+		)
+		character = service_owner.call(
+			"_living_rogue_character",
+			latest_character
+		)
+		if character == null:
+			return _error(
+				"Classic rogue encounter has no conscious party member"
+			)
+		if selected == ACTOR_CHANGED_CHOICE_TOKEN:
+			continue
 		if selected == STOP_CHOICE_TOKEN:
 			return {
 				"outcome": 0,

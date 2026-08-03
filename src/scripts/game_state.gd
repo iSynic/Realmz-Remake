@@ -1,6 +1,8 @@
 extends Node
 class_name GameStateMachine
 
+signal state_changed(previous_state_name: String, current_state_name: String)
+
 @export var initial_state : NodePath = NodePath()
 @onready var state:State = get_node(initial_state) : set = set_state#, get = _get_state
 @onready var _state_name : String = state.name
@@ -65,8 +67,11 @@ func transition_to(target_state_path : String, msg : Dictionary = {} ) -> void :
 
 
 func set_state(value : State) ->void :
+	var previous_state_name := _state_name
 	state = value
 	_state_name = state.name
+	if previous_state_name != _state_name:
+		state_changed.emit(previous_state_name, _state_name)
 
 
 # Called when the node enters the scene tree for the first time.

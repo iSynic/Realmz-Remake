@@ -30,25 +30,22 @@ func update_display() :
 	var awareness_active: bool = (
 		GameGlobal.global_effects["Awareness"]["Duration"] > 0
 	)
-	search_button.visible = classic_search_available
+	search_button.visible = classic_search_available and search_active
 	search_button.disabled = not classic_search_available
 	search_button.set_pressed_no_signal(
 		classic_search_available and search_active
 	)
-	eye_sprite.visible = classic_search_available or awareness_active
-	if classic_search_available:
-		if search_active:
-			if eye_sprite.animation != &"Searching" \
-					or not eye_sprite.is_playing():
-				eye_sprite.play(&"Searching")
-		else:
-			eye_sprite.animation = &"Searching"
-			eye_sprite.stop()
-			eye_sprite.frame = 0
-			eye_sprite.frame_progress = 0.0
+	eye_sprite.visible = search_active or awareness_active
+	if search_active:
+		if eye_sprite.animation != &"Searching" or not eye_sprite.is_playing():
+			eye_sprite.play(&"Searching")
 	elif awareness_active:
 		if eye_sprite.animation != &"Looking" or not eye_sprite.is_playing():
 			eye_sprite.play(&"Looking")
+	else:
+		eye_sprite.stop()
+		eye_sprite.frame = 0
+		eye_sprite.frame_progress = 0.0
 	orb_sprite.visible =  GameGlobal.global_effects["Scrying"]["Duration"] >0
 	shield_sprite.visible =  GameGlobal.global_effects["Shielded"]["Duration"] >0
 	sentry_sprite.visible =  GameGlobal.global_effects["Sentry"]["Duration"] >0

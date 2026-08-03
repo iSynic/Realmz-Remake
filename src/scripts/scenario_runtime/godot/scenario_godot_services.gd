@@ -3119,19 +3119,51 @@ func _refresh_party_panels(party: Array) -> void:
 		_refresh_character_panel(character_value)
 
 
-func _show_choices(text_rect: Object, choices: Array, choice_tokens: Array) -> Variant:
+func _show_choices(
+	text_rect: Object,
+	choices: Array,
+	choice_tokens: Array,
+	actor_change_token: String = ""
+) -> Variant:
 	# TextRect's legacy helper transitions to a removed `MultipleChoices` state.
 	# Drive its existing choice container directly until Remake has a native
 	# state-machine path for modal choices again.
 	var choices_container: Object = text_rect.choicesContainer
 	choices_container.show()
 	choices_container.display_multiple_choices(choices, choice_tokens)
+	var actor_change_source: Object = null
+	var actor_change_callback := Callable()
+	if not actor_change_token.is_empty():
+		var ui: Object = _autoload("UI")
+		if ui != null and ui.ow_hud != null \
+				and ui.ow_hud.has_signal(&"selected_character_changed"):
+			actor_change_source = ui.ow_hud
+			actor_change_callback = func(_character: Variant) -> void:
+				if is_instance_valid(choices_container) and choices_container.visible:
+					choices_container.call_deferred(
+						&"emit_signal",
+						&"choice_pressed",
+						actor_change_token
+					)
+			actor_change_source.connect(
+				&"selected_character_changed",
+				actor_change_callback
+			)
 	var main_loop := Engine.get_main_loop()
 	if main_loop is SceneTree:
 		await main_loop.process_frame
 	_layout_choice_menu(choices_container)
 	var selected: Variant = await choices_container.choice_pressed
-	choices_container.hide()
+	if is_instance_valid(actor_change_source) and actor_change_source.is_connected(
+		&"selected_character_changed",
+		actor_change_callback
+	):
+		actor_change_source.disconnect(
+			&"selected_character_changed",
+			actor_change_callback
+		)
+	if actor_change_token.is_empty() or str(selected) != actor_change_token:
+		choices_container.hide()
 	return selected
 
 

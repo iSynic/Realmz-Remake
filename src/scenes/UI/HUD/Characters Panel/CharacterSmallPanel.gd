@@ -8,6 +8,7 @@ var character = null#: GDScript = null
 var type : int = 0  #type :  0:map 1:loot 2:combat
 
 var paneltype : int = 0  #0=player character 1= NPC
+var actor_selection_mode := false
 
 @onready var nameLabel : Label = $CharnameLabel
 @onready var faceButton : Button = $PortraitButton
@@ -137,6 +138,24 @@ func toggle_SelectButton_Icon(s : bool) :
 		selectButton.set_button_icon(selectedOnIcon)
 	else :
 		selectButton.set_button_icon(selectedOffIcon)
+
+
+func set_actor_selection_mode(enabled: bool) -> void:
+	actor_selection_mode = enabled
+	selectButton.set_anchor(SIDE_LEFT, 0.0)
+	selectButton.set_anchor(SIDE_TOP, 0.0)
+	selectButton.set_anchor(SIDE_RIGHT, 1.0 if enabled else 0.0)
+	selectButton.set_anchor(SIDE_BOTTOM, 0.0)
+	selectButton.offset_left = -6.0
+	selectButton.offset_top = 5.0
+	selectButton.offset_right = -3.0 if enabled else 20.0
+	selectButton.offset_bottom = 55.0
+	selectButton.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	selectButton.tooltip_text = (
+		"Choose %s for this action" % character.name
+		if enabled and character != null
+		else ""
+	)
 		
 
 

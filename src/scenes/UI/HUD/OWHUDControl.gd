@@ -7,29 +7,39 @@ const ClassicItemBehaviorsScript = preload(
 
 const MIN_SUPPORTED_VIEWPORT := Vector2(1152.0, 648.0)
 const PARTY_RAIL_WIDTH := 320.0
+const ACTION_PANEL_WIDTH := 490.0
 const NARRATIVE_HEIGHT_RATIO := 0.28
 const NARRATIVE_MIN_HEIGHT := 200.0
 const NARRATIVE_MAX_HEIGHT := 216.0
-const ACTION_DOCK_REFERENCE_SIZE := Vector2(320.0, 200.0)
-const ACTION_BUTTON_STYLE_OVERRIDES := [
-	&"normal", &"hover", &"pressed", &"disabled", &"focus"
-]
+const ACTION_DOCK_REFERENCE_SIZE := Vector2(490.0, 200.0)
+const ACTION_BUTTON_STYLE_OVERRIDES := [&"focus"]
 const ACTION_BUTTON_LAYOUT := {
-	&"CampButton": Rect2(0.0, 0.0, 50.0, 50.0),
-	&"RestButton": Rect2(50.0, 0.0, 50.0, 50.0),
-	&"InventoryButton": Rect2(0.0, 50.0, 50.0, 50.0),
-	&"MoneyButton": Rect2(50.0, 50.0, 50.0, 50.0),
-	&"SpellButton": Rect2(0.0, 100.0, 50.0, 50.0),
-	&"AbiListButton": Rect2(50.0, 100.0, 50.0, 50.0),
-	&"EncounterButton": Rect2(0.0, 150.0, 50.0, 50.0),
-	&"BestiaryButton": Rect2(50.0, 150.0, 50.0, 50.0),
-	&"MinimapsButton": Rect2(116.0, 128.0, 50.0, 50.0),
-	&"TempleButton": Rect2(180.0, 128.0, 50.0, 50.0),
-	&"ShopButton": Rect2(180.0, 128.0, 50.0, 50.0),
-	&"CharSwapButton": Rect2(270.0, 0.0, 50.0, 50.0),
-	&"QSaveButton": Rect2(270.0, 50.0, 50.0, 50.0),
-	&"SaveButton": Rect2(270.0, 100.0, 50.0, 50.0),
-	&"SettingsButton": Rect2(270.0, 150.0, 50.0, 50.0),
+	# Familiar Realmz actions, arranged by purpose instead of scattered slots.
+	&"InventoryButton": Rect2(62.0, 8.0, 48.0, 48.0),
+	&"MoneyButton": Rect2(112.0, 8.0, 48.0, 48.0),
+	&"SpellButton": Rect2(162.0, 8.0, 48.0, 48.0),
+	&"AbiListButton": Rect2(212.0, 8.0, 48.0, 48.0),
+	&"CharSwapButton": Rect2(262.0, 8.0, 48.0, 48.0),
+	&"CampButton": Rect2(62.0, 70.0, 48.0, 48.0),
+	&"RestButton": Rect2(112.0, 70.0, 48.0, 48.0),
+	&"MinimapsButton": Rect2(162.0, 70.0, 48.0, 48.0),
+	&"BestiaryButton": Rect2(212.0, 70.0, 48.0, 48.0),
+	&"EncounterButton": Rect2(262.0, 70.0, 48.0, 48.0),
+	&"ClassicSearchActionButton": Rect2(312.0, 70.0, 48.0, 48.0),
+	&"TempleButton": Rect2(62.0, 132.0, 48.0, 48.0),
+	&"ShopButton": Rect2(112.0, 132.0, 48.0, 48.0),
+	&"QSaveButton": Rect2(162.0, 132.0, 48.0, 48.0),
+	&"SaveButton": Rect2(212.0, 132.0, 48.0, 48.0),
+	&"SettingsButton": Rect2(262.0, 132.0, 48.0, 48.0),
+}
+const ACTION_CONSOLE_LAYOUT := {
+	&"PartyLabel": Rect2(6.0, 20.0, 52.0, 24.0),
+	&"ExploreLabel": Rect2(6.0, 82.0, 52.0, 24.0),
+	&"SystemLabel": Rect2(6.0, 144.0, 52.0, 24.0),
+	&"StatusDivider": Rect2(368.0, 8.0, 2.0, 184.0),
+	&"StatusLabel": Rect2(374.0, 5.0, 112.0, 22.0),
+	&"GlobalEffectsRect": Rect2(374.0, 25.0, 73.0, 109.0),
+	&"ClassicTorchButton": Rect2(452.0, 25.0, 32.0, 78.0),
 }
 const ACTION_BUTTON_TOOLTIPS := {
 	&"CampButton": "Camp",
@@ -38,7 +48,8 @@ const ACTION_BUTTON_TOOLTIPS := {
 	&"MoneyButton": "Party money",
 	&"SpellButton": "Cast a spell",
 	&"AbiListButton": "Abilities",
-	&"EncounterButton": "Encounter actions",
+	&"EncounterButton": "Open an encounter",
+	&"ClassicSearchActionButton": "Toggle searching",
 	&"BestiaryButton": "Bestiary",
 	&"MinimapsButton": "Player map",
 	&"TempleButton": "Enter temple",
@@ -108,6 +119,9 @@ var selected_character = null
 @onready var templeButton    : Button = $VBoxScreen/HBoxBot/BotRightPanel/TempleButton
 @onready var shopButton      : Button = $VBoxScreen/HBoxBot/BotRightPanel/ShopButton
 @onready var classicSearchButton: Button = (
+	$VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton
+)
+@onready var classicSearchEffectButton: Button = (
 	$VBoxScreen/HBoxBot/BotRightPanel/GlobalEffectsRect/SearchButton
 )
 @onready var classicTorchButton: ClassicTorchButton = (
@@ -131,6 +145,7 @@ var selected_character = null
 	minimapRect,
 	classicPlayerMapRect,
 	pictureRect,
+	textRect.choicesContainer,
 	temple_rect,
 	abilitesmngtMenu,
 	spellcastMenu,
@@ -157,6 +172,7 @@ var _last_action_focus : Control
 
 signal done_picking_pc
 signal pc_picked
+signal selected_character_changed(character)
 #signal done_looting
 
 func initialize() : # takes an array of Characters GD class objects !
@@ -208,15 +224,12 @@ func _on_viewport_size_changed() :
 func _apply_responsive_shell(screensize : Vector2) -> void:
 	# The Realmz sections stay bounded while surplus resolution belongs to the map.
 	set_scale(Vector2.ONE)
-	var section_gap := 6
-	if screensize.x >= 1600.0:
-		section_gap = 8
-	if screensize.x >= 2560.0:
-		section_gap = 12
-	vboxScreen.add_theme_constant_override(&"separation", section_gap)
-	hboxTop.add_theme_constant_override(&"separation", section_gap)
-	vboxCharTime.add_theme_constant_override(&"separation", section_gap)
-	hboxBot.add_theme_constant_override(&"separation", section_gap)
+	# Realmz reads as one framed console. Grouping belongs inside the frame, not
+	# in open gutters between otherwise related regions.
+	vboxScreen.add_theme_constant_override(&"separation", 0)
+	hboxTop.add_theme_constant_override(&"separation", 0)
+	vboxCharTime.add_theme_constant_override(&"separation", 0)
+	hboxBot.add_theme_constant_override(&"separation", 0)
 
 	var narrative_height := clampf(
 		roundf(screensize.y * NARRATIVE_HEIGHT_RATIO),
@@ -225,15 +238,15 @@ func _apply_responsive_shell(screensize : Vector2) -> void:
 	)
 	vboxCharTime.custom_minimum_size.x = PARTY_RAIL_WIDTH
 	charactersrect.custom_minimum_size.x = PARTY_RAIL_WIDTH
-	timerect.custom_minimum_size = Vector2(PARTY_RAIL_WIDTH, 48.0)
+	timerect.custom_minimum_size = Vector2(PARTY_RAIL_WIDTH, 80.0)
 	textRect.custom_minimum_size.y = narrative_height
 	botrightpanel.custom_minimum_size = Vector2(
-		PARTY_RAIL_WIDTH, narrative_height
+		ACTION_PANEL_WIDTH, narrative_height
 	)
 	combatBRPanel.custom_minimum_size = Vector2(
-		PARTY_RAIL_WIDTH, narrative_height
+		ACTION_PANEL_WIDTH, narrative_height
 	)
-	_layout_action_dock(Vector2(PARTY_RAIL_WIDTH, narrative_height))
+	_layout_action_dock(Vector2(ACTION_PANEL_WIDTH, narrative_height))
 
 func _layout_action_dock(dock_size : Vector2) -> void:
 	var dock_scale := dock_size / ACTION_DOCK_REFERENCE_SIZE
@@ -255,6 +268,15 @@ func _layout_action_dock(dock_size : Vector2) -> void:
 		)
 		for style_name : StringName in ACTION_BUTTON_STYLE_OVERRIDES:
 			button.remove_theme_stylebox_override(style_name)
+	for control_name : StringName in ACTION_CONSOLE_LAYOUT:
+		var control := botrightpanel.get_node_or_null(
+			NodePath(String(control_name))
+		) as Control
+		if control == null:
+			continue
+		var reference_rect : Rect2 = ACTION_CONSOLE_LAYOUT[control_name]
+		control.position = reference_rect.position * dock_scale
+		control.size = reference_rect.size * dock_scale
 	_sync_action_dock_focus_with_overlays()
 
 func _sync_action_dock_focus_with_overlays() -> void:
@@ -283,6 +305,29 @@ func _sync_action_dock_focus_with_overlays() -> void:
 
 func _on_blocking_overlay_visibility_changed() -> void:
 	_sync_action_dock_focus_with_overlays()
+	_sync_party_actor_selection()
+
+
+func _on_game_state_changed(
+	_previous_state_name: String,
+	_current_state_name: String
+) -> void:
+	_sync_classic_torch_control()
+
+
+func _party_actor_selection_active() -> bool:
+	return (
+		treasureControl.visible
+		or encounterControl.visible
+		or textRect.choicesContainer.visible
+	)
+
+
+func _sync_party_actor_selection() -> void:
+	var enabled := _party_actor_selection_active()
+	for panel: Node in charsVContainer.get_children():
+		if panel.has_method("set_actor_selection_mode"):
+			panel.call("set_actor_selection_mode", enabled)
 
 func get_mofified_screensize() :
 	return ScreenUtils.get_logical_window_size(self).max(MIN_SUPPORTED_VIEWPORT)
@@ -327,6 +372,11 @@ func fillCharactersRect() :
 func _on_chara_panel_selected(cp : CharaSmallPanel) :
 	print("OWHUDControl _on_chara_panel_selected "+ cp.character.name+ ' is exmenu ? ', StateMachine.state == StateMachine.ex_menu_state)
 	print("     StateMachine.state : ", StateMachine.state.name)
+	if _party_actor_selection_active():
+		called_on_CharPanel_SelectButton_pressed(cp)
+		if StateMachine.state == StateMachine.ex_menu_state:
+			StateMachine.ex_menu_state.set_selected_chara(selected_character)
+		return
 	match StateMachine.state :
 		StateMachine.exploration_state :
 			#print("OWHUDControl _on_chara_panel_selected BOOP EXPLORATIONSTATE")
@@ -385,16 +435,23 @@ func _sync_shop_control() -> void:
 		not GameGlobal.currentShop.is_empty()
 		and GameGlobal.shops_dict.has(GameGlobal.currentShop)
 	)
-	shopButton.visible = shop_available
+	shopButton.visible = true
 	shopButton.disabled = not shop_available
-	# Classic uses one service control and gives an available shop precedence.
-	templeButton.visible = not shop_available
+	templeButton.visible = true
 
 
 func _sync_classic_search_control() -> void:
 	var available := is_instance_valid(GameGlobal.classic_campaign_session)
-	classicSearchButton.visible = available
+	classicSearchButton.visible = true
+	classicSearchButton.disabled = not available
 	classicSearchButton.set_pressed_no_signal(
+		available and GameGlobal.is_classic_party_condition_active(5)
+	)
+	classicSearchEffectButton.visible = (
+		available and GameGlobal.is_classic_party_condition_active(5)
+	)
+	classicSearchEffectButton.disabled = not available
+	classicSearchEffectButton.set_pressed_no_signal(
 		available and GameGlobal.is_classic_party_condition_active(5)
 	)
 
@@ -438,6 +495,7 @@ func _on_classic_torch_button_pressed() -> void:
 
 func _on_classic_search_button_toggled(enabled: bool) -> void:
 	if not is_instance_valid(GameGlobal.classic_campaign_session):
+		_sync_classic_search_control()
 		return
 	GameGlobal.set_classic_search_enabled(enabled)
 	updateGlobalEffectsDisplay()
@@ -476,9 +534,10 @@ func called_on_CharPanel_SelectButton_pressed(panel) :
 				return
 	# just selecting...
 	else :
-		if StateMachine.is_combat_state() :
+		if StateMachine.is_combat_state() and not _party_actor_selection_active():
 			print("OW HUD : can't select other character during combat !")
 			return
+		var selection_changed: bool = selected_character != panel.character
 		
 		for p in charsVContainer.get_children() :
 			if p==panel :
@@ -502,6 +561,8 @@ func called_on_CharPanel_SelectButton_pressed(panel) :
 				GameGlobal.play_sfx("target error.wav")
 		if GameGlobal.honest_mode :
 			honestStorageControl._on_character_selected(selected_character)
+		if selection_changed:
+			selected_character_changed.emit(selected_character)
 
 
 func request_pc_pick(n : int) :
@@ -529,7 +590,14 @@ func request_pc_pick(n : int) :
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	classicSearchButton.toggled.connect(_on_classic_search_button_toggled)
+	if not StateMachine.state_changed.is_connected(_on_game_state_changed):
+		StateMachine.state_changed.connect(_on_game_state_changed)
+	call_deferred(&"_sync_classic_torch_control")
+	for search_button : Button in [
+		classicSearchButton,
+		classicSearchEffectButton,
+	]:
+		search_button.toggled.connect(_on_classic_search_button_toggled)
 	for overlay : CanvasItem in _blocking_overlays:
 		if not overlay.visibility_changed.is_connected(
 			_on_blocking_overlay_visibility_changed
@@ -675,6 +743,9 @@ func _on_SettingsButton_pressed():
 
 func _on_EncounterButton_pressed():
 	print("OWHUD _on_EncounterButton_pressed, visible ? "+str(encounterControl.visible))
+	if GameGlobal.is_classic_runtime_active():
+		await GameGlobal.trigger_classic_manual_encounter()
+		return
 	if not encounterControl.visible :
 		#if not GameState.paused :
 			show_special_encounter()
@@ -890,6 +961,7 @@ func exit_battle_mode() :
 func set_selected_creature(c : Creature) : # for battle, any creature on field not just pc
 	#also check called_on_CharPanel_SelectButton_pressed
 	print("OWHUD set_selected_creature "+c.name)
+	var selection_changed: bool = selected_character != c
 	selected_character = c
 	if GameGlobal.player_characters.has(c) or GameGlobal.player_allies.has(c) : #select the right character
 		for p in charsVContainer.get_children() :
@@ -904,6 +976,8 @@ func set_selected_creature(c : Creature) : # for battle, any creature on field n
 		for p in charsVContainer.get_children() :
 			p.toggle_SelectButton_Icon(false)
 		spellcastButton.disabled = true
+	if selection_changed:
+		selected_character_changed.emit(selected_character)
 
 func _on_mouse_enter_combat_crea_button(creabutton : CombatCreaButton) :
 	var map = GameGlobal.map

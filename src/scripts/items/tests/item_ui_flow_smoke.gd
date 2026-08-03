@@ -15,6 +15,56 @@ var _saved_shops: Dictionary = {}
 var _saved_pool: Array = []
 
 
+class ManualEncounterHost:
+	extends Node
+
+	var active := false
+	var rectangle: Dictionary = {}
+	var dispatches: Array[Dictionary] = []
+	var consumed_doors: Array[int] = []
+
+	func get_random_rectangle(
+		_level_type: String,
+		_level_index: int,
+		_rect_index: int,
+	) -> Dictionary:
+		return rectangle.duplicate(true)
+
+	func consume_random_rectangle_door(
+		_level_type: String,
+		_level_index: int,
+		_rect_index: int,
+		door_index: int,
+	) -> Dictionary:
+		var percentages: Array = rectangle.get("randomDoorPercent", []).duplicate()
+		var previous_percent := int(percentages[door_index])
+		if previous_percent > 0:
+			percentages[door_index] = 0
+			rectangle["randomDoorPercent"] = percentages
+			consumed_doors.append(door_index)
+		return {
+			"status": "ok",
+			"consumed": previous_percent > 0,
+			"previousPercent": previous_percent,
+			"rectangle": rectangle.duplicate(true),
+		}
+
+	func has_trigger(trigger_id: String) -> bool:
+		return trigger_id in ["Data ED3:macro:42", "Data ED3:macro:43"]
+
+	func run_trigger(
+		trigger_id: String,
+		start_slot: int,
+		context: Dictionary,
+	) -> Dictionary:
+		dispatches.append({
+			"triggerId": trigger_id,
+			"startSlot": start_slot,
+			"context": context.duplicate(true),
+		})
+		return {"status": "ok", "reason": "action-point-ended"}
+
+
 func _ready() -> void:
 	call_deferred("_run_smoke")
 
@@ -35,6 +85,9 @@ func _run_smoke() -> void:
 	_test_loot_transfer_ui(resources)
 	_test_storage_transfer_ui(resources)
 	_test_encounter_item_selection_ui(resources)
+	await _test_party_actor_selection_ui()
+	await _test_classic_torch_and_search_ui(resources)
+	await _test_manual_encounter_dispatch()
 	_restore_globals()
 	_finish()
 
@@ -207,6 +260,250 @@ func _test_encounter_item_selection_ui(resources: CampaignResources) -> void:
 			and picker.picked_character == character,
 		"encounter selection returns exact item and owner",
 	)
+
+
+func _test_party_actor_selection_ui() -> void:
+	var first := _player("First Actor")
+	var second := _player("Second Actor")
+	GameGlobal.player_characters = [first, second]
+	var hud: OW_HUD = UI.ow_hud
+	hud.fillCharactersRect()
+	hud.set_selected_creature(first)
+	hud.set_charactersRect_type(1)
+	hud.treasureControl.show()
+	hud._sync_party_actor_selection()
+	var second_panel: CharaSmallPanel = hud.charsVContainer.get_child(1)
+	_expect(
+		second_panel.selectButton.anchor_right == 1.0,
+		"loot mode makes the complete party row a selection target",
+	)
+	second_panel._on_SelectButton_pressed()
+	_expect(
+		hud.selected_character == second,
+		"loot mode can change the character who receives an item",
+	)
+	hud.treasureControl.hide()
+	hud.textRect.choicesContainer.show()
+	hud._sync_party_actor_selection()
+	await get_tree().process_frame
+	var first_panel: CharaSmallPanel = hud.charsVContainer.get_child(0)
+	_expect(
+		first_panel.selectButton.anchor_right == 1.0,
+		"Classic encounter choices make the complete party row selectable",
+	)
+	var input_viewport := SubViewport.new()
+	input_viewport.size = Vector2i(320, 60)
+	add_child(input_viewport)
+	hud.charsVContainer.remove_child(first_panel)
+	input_viewport.add_child(first_panel)
+	first_panel.position = Vector2.ZERO
+	first_panel.size = Vector2(320.0, 60.0)
+	await get_tree().process_frame
+	await _click_control(first_panel.selectButton)
+	_expect(
+		hud.selected_character == first,
+		"a physical encounter-row click changes the character who performs an action",
+	)
+	input_viewport.remove_child(first_panel)
+	hud.charsVContainer.add_child(first_panel)
+	hud.charsVContainer.move_child(first_panel, 0)
+	input_viewport.queue_free()
+	hud.textRect.choicesContainer.hide()
+	hud._sync_party_actor_selection()
+	_expect(
+		first_panel.selectButton.anchor_right == 0.0,
+		"party selection returns to the compact arrow outside action contexts",
+	)
+	hud.set_charactersRect_type(0)
+
+
+func _click_control(control: Control) -> void:
+	var viewport := control.get_viewport()
+	var click_position := control.get_global_rect().get_center()
+	var motion := InputEventMouseMotion.new()
+	motion.position = click_position
+	motion.global_position = click_position
+	viewport.push_input(motion)
+	await get_tree().process_frame
+	for pressed: bool in [true, false]:
+		var event := InputEventMouseButton.new()
+		event.button_index = MOUSE_BUTTON_LEFT
+		event.pressed = pressed
+		event.position = click_position
+		event.global_position = click_position
+		viewport.push_input(event)
+		await get_tree().process_frame
+
+
+func _test_classic_torch_and_search_ui(resources: CampaignResources) -> void:
+	var torch: ClassicTorchButton = preload(
+		"res://scenes/UI/HUD/ClassicTorch/classic_torch_button.tscn"
+	).instantiate()
+	add_child(torch)
+	await get_tree().process_frame
+	torch.sync_status(true, 0, true, true)
+	_expect(
+		torch.size == Vector2(32.0, 78.0)
+			and torch.fuel_segment_count() == 2,
+		"the tall Torch button contains Realmz's two-segment unlit stump",
+	)
+	_expect(
+		torch.artwork_bounds() == Rect2(12.0, 50.0, 8.0, 22.0),
+		"the unlit Torch stump uses native-size source segments",
+	)
+	torch.sync_status(true, 119, true, true)
+	var full_lit_bounds := torch.artwork_bounds()
+	_expect(
+		torch.fuel_segment_count() == 4
+			and torch.flame_y() == 7
+			and full_lit_bounds == Rect2(8.0, 11.0, 16.0, 61.0),
+		"a fresh Torch fills the tall button with its flame and fuel column",
+	)
+	torch.sync_status(true, 1, true, true)
+	var burned_down_bounds := torch.artwork_bounds()
+	_expect(
+		torch.fuel_segment_count() == 1
+			and torch.flame_y() == ClassicTorchButton.FLAME_BASE_Y
+			and burned_down_bounds.position.y > full_lit_bounds.position.y
+			and burned_down_bounds.size.y < full_lit_bounds.size.y,
+		"the flame and fuel column burn downward with the Classic condition",
+	)
+	torch.sync_status(true, 0, false, false)
+	_expect(
+		torch.artwork_bounds() == Rect2(),
+		"the Torch image is absent when the party owns no Torch",
+	)
+	torch.queue_free()
+	UI.ow_hud._layout_action_dock(Vector2(490.0, 200.0))
+	_expect(
+		UI.ow_hud.classicTorchButton.size == Vector2(32.0, 78.0)
+			and not Rect2(
+				UI.ow_hud.classicTorchButton.position,
+				UI.ow_hud.classicTorchButton.size
+			).intersects(Rect2(
+				UI.ow_hud.globaleffectsRect.position,
+				UI.ow_hud.globaleffectsRect.size
+			)),
+		"the non-square Torch button fits beside Effects without overlap",
+	)
+
+	var saved_session: Object = GameGlobal.classic_campaign_session
+	var saved_conditions := GameGlobal.classic_party_conditions.duplicate(true)
+	var saved_effects := GameGlobal.global_effects.duplicate(true)
+	var saved_state: State = StateMachine.state
+	var dummy_session := Node.new()
+	add_child(dummy_session)
+	GameGlobal.classic_campaign_session = dummy_session
+	var torch_holder := _player("Torch Initialization")
+	var inventory_torch := resources.create_item_instance("Torch")
+	_expect(
+		torch_holder.add_inventory_item(inventory_torch),
+		"Torch initialization fixture owns a usable Torch",
+	)
+	GameGlobal.player_characters = [torch_holder]
+	_expect(
+		StateMachine.ensure_gameplay_states_loaded(),
+		"Torch initialization test has the exploration state graph",
+	)
+	StateMachine.set_state(StateMachine.exploration_state.get_node("ExAnim"))
+	_expect(
+		UI.ow_hud.classicTorchButton.disabled,
+		"the Torch is unavailable while an exploration movement is active",
+	)
+	StateMachine.set_state(StateMachine.exploration_state)
+	_expect(
+		not UI.ow_hud.classicTorchButton.disabled,
+		"returning to exploration enables the Torch without another UI click",
+	)
+	GameGlobal.set_classic_search_enabled(false)
+	GameGlobal.global_effects["Awareness"]["Duration"] = 0
+	UI.ow_hud.updateGlobalEffectsDisplay()
+	_expect(
+		not UI.ow_hud.classicSearchEffectButton.visible
+			and not UI.ow_hud.globaleffectsRect.eye_sprite.visible,
+		"Search contributes no effect-slot artwork while inactive",
+	)
+	GameGlobal.set_classic_search_enabled(true)
+	UI.ow_hud.updateGlobalEffectsDisplay()
+	_expect(
+		UI.ow_hud.classicSearchEffectButton.visible
+			and UI.ow_hud.globaleffectsRect.eye_sprite.visible,
+		"active Search displays its animated effect slot",
+	)
+	GameGlobal.classic_campaign_session = saved_session
+	GameGlobal.classic_party_conditions = saved_conditions
+	GameGlobal.global_effects = saved_effects
+	StateMachine.set_state(saved_state)
+	dummy_session.queue_free()
+
+
+func _test_manual_encounter_dispatch() -> void:
+	var saved_session: Object = GameGlobal.classic_campaign_session
+	var saved_host: Object = GameGlobal.classic_runtime_host
+	var saved_areas := GameGlobal.map.mapscriptareas.duplicate(true)
+	var host := ManualEncounterHost.new()
+	var dummy_session := Node.new()
+	add_child(host)
+	add_child(dummy_session)
+	GameGlobal.classic_campaign_session = dummy_session
+	GameGlobal.classic_runtime_host = host
+
+	host.rectangle = {
+		"rectIndex": 1,
+		"left": 4,
+		"top": 5,
+		"right": 8,
+		"bottom": 9,
+		"percent": -1,
+		"only": false,
+		"randomDoors": [42, 0, 0],
+		"randomDoorPercent": [-100, 0, 0],
+		"battleRange": [0, 0],
+	}
+	GameGlobal.map.mapscriptareas = {
+		"LRR0.1": GameGlobal.ClassicRandomRectangleScript.project_area(
+			"land",
+			0,
+			host.rectangle,
+			"",
+		),
+	}
+	var repeatable_outcome: int = await GameGlobal.check_classic_manual_encounter_rectangles(
+		Vector2i(6, 7)
+	)
+	_expect(
+		repeatable_outcome == GameGlobal.ClassicRandomRectangleScript.Outcome.TRIGGER_DISPATCHED
+			and host.dispatches[-1]["triggerId"] == "Data ED3:macro:42"
+			and bool(host.dispatches[-1]["context"].get("manualEncounter", false))
+			and bool(host.dispatches[-1]["context"].get("seamless", false)),
+		"Encounter dispatches the current manual rectangle through the Classic runtime",
+	)
+
+	host.rectangle["randomDoors"] = [43, 0, 0]
+	host.rectangle["randomDoorPercent"] = [100, 0, 0]
+	var one_shot_outcome: int = await GameGlobal.check_classic_manual_encounter_rectangles(
+		Vector2i(6, 7)
+	)
+	_expect(
+		one_shot_outcome == GameGlobal.ClassicRandomRectangleScript.Outcome.TRIGGER_DISPATCHED
+			and host.dispatches[-1]["triggerId"] == "Data ED3:macro:43"
+			and host.consumed_doors == [0]
+			and int(host.rectangle["randomDoorPercent"][0]) == 0,
+		"Encounter consumes a positive one-shot random-door result",
+	)
+	var consumed_outcome: int = await GameGlobal.check_classic_manual_encounter_rectangles(
+		Vector2i(6, 7)
+	)
+	_expect(
+		consumed_outcome == GameGlobal.ClassicRandomRectangleScript.Outcome.NONE,
+		"a consumed manual encounter does not dispatch again",
+	)
+
+	GameGlobal.map.mapscriptareas = saved_areas
+	GameGlobal.classic_runtime_host = saved_host
+	GameGlobal.classic_campaign_session = saved_session
+	host.queue_free()
+	dummy_session.queue_free()
 
 
 func _player(character_name: String) -> PlayerCharacter:

@@ -237,7 +237,10 @@ func _on_spell_button_pressed() -> void:
 	useitemRect.hide()
 	speakButton.get_child(0).hide()
 	var spells_menu : SpellsMenu = UI.ow_hud.spellcastMenu
-	spells_menu.initialize(GameGlobal.player_characters[0])
+	var caster: Creature = UI.ow_hud.selected_character
+	if caster == null:
+		caster = GameGlobal.player_characters[0]
+	spells_menu.initialize(caster)
 	spells_menu.show()
 	await spells_menu.hidden
 	#var spell_picked = await UI.ow_hud.spellcastMenu.spell_picked
