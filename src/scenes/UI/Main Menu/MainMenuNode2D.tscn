@@ -1,6 +1,7 @@
-[gd_scene load_steps=11 format=3 uid="uid://c3on0sw1e8ed5"]
+[gd_scene load_steps=15 format=3 uid="uid://c3on0sw1e8ed5"]
 
 [ext_resource type="Texture2D" uid="uid://bd7dienxyedsv" path="res://scenes/UI/Main Menu/Splash Screen.png" id="1"]
+[ext_resource type="SpriteFrames" path="res://scenes/UI/Main Menu/ClassicVolcanoFlame/classic_volcano_flame.tres" id="2_flame"]
 [ext_resource type="Theme" uid="uid://0pl8f657l17e" path="res://scenes/UI/Main Menu/mainmenu_theme.tres" id="1_4258f"]
 [ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="4_dy765"]
 [ext_resource type="Script" path="res://scenes/UI/Main Menu/QuitButton.gd" id="5"]
@@ -9,6 +10,9 @@
 [ext_resource type="PackedScene" uid="uid://dnrfjpqs4sges" path="res://scenes/UI/Main Menu/new_campaign_panel.tscn" id="6_1n66i"]
 [ext_resource type="PackedScene" uid="uid://7v3a8w4rknyq" path="res://scenes/UI/HUD/SaveLoad/save_load_rect.tscn" id="8_ppe4q"]
 [ext_resource type="Script" path="res://scenes/UI/Main Menu/MainMenu.gd" id="10_xeetu"]
+[ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="11_profile_stone"]
+[ext_resource type="Texture2D" path="res://shared_assets/UI/realmz_checkbox_unchecked.svg" id="12_checkbox_unchecked"]
+[ext_resource type="Texture2D" path="res://shared_assets/UI/realmz_checkbox_checked.svg" id="13_checkbox_checked"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_6o0si"]
 content_margin_left = 2.0
@@ -32,10 +36,10 @@ grow_horizontal = 2
 grow_vertical = 2
 theme = ExtResource("1_4258f")
 script = ExtResource("10_xeetu")
-newprofileVBox = NodePath("NewProfileVBox")
-honest_mode_label = NodePath("ProfileVBox/ProfileHBox/ProfButVBox/HonestLabel")
-profilebutton = NodePath("ProfileVBox/ProfileHBox/ProfButVBox/ProfileButton")
-profilespopup = NodePath("ProfileVBox/ProfileHBox/ProfButVBox/ProfileButton/ProfilePopupMenu")
+newprofileVBox = NodePath("NewProfilePanel/MarginContainer/NewProfileVBox")
+honest_mode_label = NodePath("TopBar/HonestLabel")
+profilebutton = NodePath("TopBar/ProfileButton")
+profilespopup = NodePath("TopBar/ProfileButton/ProfilePopupMenu")
 
 [node name="ColorRect" type="ColorRect" parent="."]
 layout_mode = 1
@@ -62,158 +66,198 @@ grow_vertical = 2
 texture = ExtResource("1")
 stretch_mode = 2
 
-[node name="ProfileVBox" type="VBoxContainer" parent="."]
-layout_mode = 0
-offset_right = 40.0
-offset_bottom = 40.0
+[node name="ClassicVolcanoFlame" type="AnimatedSprite2D" parent="TextureRect"]
+texture_filter = 1
+position = Vector2(462, 89)
+sprite_frames = ExtResource("2_flame")
+animation = &"classic_flame"
+autoplay = "classic_flame"
+centered = false
 
-[node name="ProfileHBox" type="HBoxContainer" parent="ProfileVBox"]
+[node name="TopBar" type="HBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 18.0
+offset_top = 18.0
+offset_right = -18.0
+offset_bottom = 58.0
+grow_horizontal = 2
+theme_override_constants/separation = 10
+
+[node name="ProfileLabel" type="Label" parent="TopBar"]
 layout_mode = 2
-
-[node name="ProfileLabel" type="Label" parent="ProfileVBox/ProfileHBox"]
-layout_mode = 2
-size_flags_horizontal = 4
-size_flags_vertical = 0
-text = "Profile :"
-
-[node name="ProfButVBox" type="VBoxContainer" parent="ProfileVBox/ProfileHBox"]
-layout_mode = 2
-
-[node name="ProfileButton" type="Button" parent="ProfileVBox/ProfileHBox/ProfButVBox"]
-custom_minimum_size = Vector2(128, 32)
-layout_mode = 2
-alignment = 0
-
-[node name="ProfilePopupMenu" type="PopupMenu" parent="ProfileVBox/ProfileHBox/ProfButVBox/ProfileButton"]
-
-[node name="HonestLabel" type="Label" parent="ProfileVBox/ProfileHBox/ProfButVBox"]
-layout_mode = 2
-theme_override_colors/font_color = Color(0, 1, 0, 1)
-theme_override_fonts/font = ExtResource("4_dy765")
-text = "Honest Mode !"
+text = "Profile"
 vertical_alignment = 1
 
-[node name="NewProfileVBox" type="VBoxContainer" parent="." node_paths=PackedStringArray("lineEdit", "honest_checkbox")]
+[node name="ProfileButton" type="Button" parent="TopBar"]
+custom_minimum_size = Vector2(190, 36)
 layout_mode = 2
-offset_left = 384.5
-offset_right = 500.5
-offset_bottom = 32.0
-grow_horizontal = 2
-script = ExtResource("5_h45uc")
-lineEdit = NodePath("NewProfileHBox/LineEdit")
-honest_checkbox = NodePath("HonestHBox/HonestCheckBox")
+alignment = 0
+tooltip_text = "Choose the active profile."
 
-[node name="NewProfileHBox" type="HBoxContainer" parent="NewProfileVBox"]
+[node name="ProfilePopupMenu" type="PopupMenu" parent="TopBar/ProfileButton"]
+
+[node name="HonestLabel" type="Label" parent="TopBar"]
+visible = false
 layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.15, 1)
+theme_override_fonts/font = ExtResource("4_dy765")
+text = "Honest Profile"
+tooltip_text = "This profile uses Honest-mode save, character, banking, and storage rules."
+vertical_alignment = 1
 
-[node name="NewProfileButton" type="Button" parent="NewProfileVBox/NewProfileHBox"]
+[node name="NewProfileToggleButton" type="Button" parent="TopBar"]
+custom_minimum_size = Vector2(112, 36)
 layout_mode = 2
 text = "New Profile"
 
-[node name="NewProfileLabel" type="Label" parent="NewProfileVBox/NewProfileHBox"]
+[node name="Spacer" type="Control" parent="TopBar"]
 layout_mode = 2
-text = "Enter Profile Name :"
+size_flags_horizontal = 3
 
-[node name="LineEdit" type="LineEdit" parent="NewProfileVBox/NewProfileHBox"]
-custom_minimum_size = Vector2(128, 32)
+[node name="HDButton" type="CheckButton" parent="TopBar"]
+custom_minimum_size = Vector2(124, 36)
 layout_mode = 2
+tooltip_text = "Switch between the standard and doubled window scale."
+text = "HD Mode"
+
+[node name="NewProfilePanel" type="NinePatchRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -270.0
+offset_top = 74.0
+offset_right = 270.0
+offset_bottom = 248.0
+grow_horizontal = 2
+texture = ExtResource("11_profile_stone")
+patch_margin_left = 10
+patch_margin_top = 10
+patch_margin_right = 10
+patch_margin_bottom = 10
+axis_stretch_horizontal = 1
+axis_stretch_vertical = 1
+
+[node name="MarginContainer" type="MarginContainer" parent="NewProfilePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 18.0
+offset_top = 14.0
+offset_right = -18.0
+offset_bottom = -14.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="NewProfileVBox" type="VBoxContainer" parent="NewProfilePanel/MarginContainer" node_paths=PackedStringArray("lineEdit", "honest_checkbox")]
+layout_mode = 2
+theme_override_constants/separation = 8
+script = ExtResource("5_h45uc")
+lineEdit = NodePath("NameRow/LineEdit")
+honest_checkbox = NodePath("HonestRow/HonestCheckBox")
+
+[node name="Heading" type="Label" parent="NewProfilePanel/MarginContainer/NewProfileVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("4_dy765")
+theme_override_font_sizes/font_size = 20
+text = "Create a Profile"
+
+[node name="NameRow" type="HBoxContainer" parent="NewProfilePanel/MarginContainer/NewProfileVBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="NameLabel" type="Label" parent="NewProfilePanel/MarginContainer/NewProfileVBox/NameRow"]
+custom_minimum_size = Vector2(122, 32)
+layout_mode = 2
+text = "Profile name"
+vertical_alignment = 1
+
+[node name="LineEdit" type="LineEdit" parent="NewProfilePanel/MarginContainer/NewProfileVBox/NameRow"]
+custom_minimum_size = Vector2(330, 32)
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_styles/focus = SubResource("StyleBoxFlat_6o0si")
 theme_override_styles/read_only = SubResource("StyleBoxFlat_6o0si")
 theme_override_styles/normal = SubResource("StyleBoxFlat_6o0si")
+placeholder_text = "Enter a unique profile name"
 caret_blink = true
 caret_blink_interval = 0.5
 
-[node name="HonestHBox" type="HBoxContainer" parent="NewProfileVBox"]
+[node name="HonestRow" type="HBoxContainer" parent="NewProfilePanel/MarginContainer/NewProfileVBox"]
 layout_mode = 2
+theme_override_constants/separation = 8
 
-[node name="Control" type="Control" parent="NewProfileVBox/HonestHBox"]
-custom_minimum_size = Vector2(91, 32)
+[node name="HonestCheckBox" type="CheckBox" parent="NewProfilePanel/MarginContainer/NewProfileVBox/HonestRow"]
 layout_mode = 2
+theme_override_icons/checked = ExtResource("13_checkbox_checked")
+theme_override_icons/unchecked = ExtResource("12_checkbox_unchecked")
+text = "Honest profile (locked after creation)"
 
-[node name="HonestInfoButton" type="Button" parent="NewProfileVBox/HonestHBox/Control"]
-layout_mode = 1
-anchors_preset = 6
-anchor_left = 1.0
-anchor_top = 0.5
-anchor_right = 1.0
-anchor_bottom = 0.5
-offset_left = -32.0
-offset_top = -16.0
-offset_bottom = 16.0
-grow_horizontal = 0
-grow_vertical = 2
+[node name="HonestInfoButton" type="Button" parent="NewProfilePanel/MarginContainer/NewProfileVBox/HonestRow"]
+custom_minimum_size = Vector2(32, 32)
+layout_mode = 2
 tooltip_text = "Allows only one save per campaign, and characters may only be used in one campaign at a time.
-However, Item Storage and Banking are profile-wide instead of limitied to a single campaign."
+However, Item Storage and Banking are profile-wide instead of limited to a single campaign."
 text = "?"
 
-[node name="HonestLabel" type="Label" parent="NewProfileVBox/HonestHBox"]
+[node name="ButtonRow" type="HBoxContainer" parent="NewProfilePanel/MarginContainer/NewProfileVBox"]
 layout_mode = 2
-text = "Honest mode ?"
+alignment = 2
+theme_override_constants/separation = 10
 
-[node name="HonestCheckBox" type="CheckBox" parent="NewProfileVBox/HonestHBox"]
-modulate = Color(3, 3, 3, 1)
+[node name="CancelButton" type="Button" parent="NewProfilePanel/MarginContainer/NewProfileVBox/ButtonRow"]
+custom_minimum_size = Vector2(96, 32)
 layout_mode = 2
+text = "Cancel"
 
-[node name="HDButton" type="CheckButton" parent="."]
-layout_mode = 0
-offset_left = 6.0
-offset_top = 104.0
-offset_right = 137.0
-offset_bottom = 129.0
-text = "HD mode !"
+[node name="CreateButton" type="Button" parent="NewProfilePanel/MarginContainer/NewProfileVBox/ButtonRow"]
+custom_minimum_size = Vector2(112, 32)
+layout_mode = 2
+text = "Create Profile"
 
-[node name="NewCharacterButton" type="Button" parent="."]
+[node name="BottomMenu" type="HBoxContainer" parent="."]
 layout_mode = 1
-anchors_preset = 2
+anchors_preset = 7
+anchor_left = 0.5
 anchor_top = 1.0
+anchor_right = 0.5
 anchor_bottom = 1.0
-offset_left = 241.0
-offset_top = -67.0
-offset_right = 365.0
-offset_bottom = -36.0
+offset_left = -402.0
+offset_top = -76.0
+offset_right = 402.0
+offset_bottom = -28.0
+grow_horizontal = 2
 grow_vertical = 0
-disabled = true
-text = "New Character"
+alignment = 1
+theme_override_constants/separation = 24
 
-[node name="LoadButton" type="Button" parent="."]
-layout_mode = 1
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 451.0
-offset_top = -67.0
-offset_right = 575.0
-offset_bottom = -36.0
-grow_vertical = 0
-disabled = true
-text = "Load Game"
-
-[node name="NewCampaignButton" type="Button" parent="."]
-layout_mode = 1
-anchors_preset = 2
-anchor_top = 1.0
-anchor_bottom = 1.0
-offset_left = 65.0
-offset_top = -70.0
-offset_right = 193.0
-offset_bottom = -39.0
-grow_vertical = 0
+[node name="NewCampaignButton" type="Button" parent="BottomMenu"]
+custom_minimum_size = Vector2(176, 40)
+layout_mode = 2
 disabled = true
 text = "Start Campaign"
 
-[node name="QuitButton" type="Button" parent="."]
-layout_mode = 1
-anchors_preset = 3
-anchor_left = 1.0
-anchor_top = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -143.0
-offset_top = -66.0
-offset_right = -57.0
-offset_bottom = -41.0
-grow_horizontal = 0
-grow_vertical = 0
+[node name="LoadButton" type="Button" parent="BottomMenu"]
+custom_minimum_size = Vector2(150, 40)
+layout_mode = 2
+disabled = true
+text = "Load Game"
+
+[node name="NewCharacterButton" type="Button" parent="BottomMenu"]
+custom_minimum_size = Vector2(150, 40)
+layout_mode = 2
+disabled = true
+text = "New Character"
+tooltip_text = "Create a character for the active profile."
+
+[node name="QuitButton" type="Button" parent="BottomMenu"]
+custom_minimum_size = Vector2(130, 40)
+layout_mode = 2
 text = "Quit Game"
 script = ExtResource("5")
 
@@ -240,10 +284,12 @@ popup_window = true
 [node name="SaveLoadRect" parent="LoadWindow" instance=ExtResource("8_ppe4q")]
 offset_right = 0.0
 
-[connection signal="pressed" from="ProfileVBox/ProfileHBox/ProfButVBox/ProfileButton" to="." method="_on_profile_button_pressed"]
-[connection signal="id_pressed" from="ProfileVBox/ProfileHBox/ProfButVBox/ProfileButton/ProfilePopupMenu" to="." method="_on_profile_popup_menu_id_pressed"]
-[connection signal="pressed" from="NewProfileVBox/NewProfileHBox/NewProfileButton" to="NewProfileVBox" method="_on_NPButton_pressed"]
-[connection signal="pressed" from="HDButton" to="." method="_on_hd_button_pressed"]
-[connection signal="pressed" from="NewCharacterButton" to="." method="_on_new_character_button_pressed"]
-[connection signal="pressed" from="LoadButton" to="." method="_on_load_button_pressed"]
-[connection signal="pressed" from="NewCampaignButton" to="." method="_on_new_campaign_button_pressed"]
+[connection signal="pressed" from="TopBar/ProfileButton" to="." method="_on_profile_button_pressed"]
+[connection signal="id_pressed" from="TopBar/ProfileButton/ProfilePopupMenu" to="." method="_on_profile_popup_menu_id_pressed"]
+[connection signal="pressed" from="TopBar/NewProfileToggleButton" to="." method="_on_new_profile_toggle_button_pressed"]
+[connection signal="pressed" from="TopBar/HDButton" to="." method="_on_hd_button_pressed"]
+[connection signal="pressed" from="NewProfilePanel/MarginContainer/NewProfileVBox/ButtonRow/CancelButton" to="." method="_on_new_profile_cancel_button_pressed"]
+[connection signal="pressed" from="NewProfilePanel/MarginContainer/NewProfileVBox/ButtonRow/CreateButton" to="NewProfilePanel/MarginContainer/NewProfileVBox" method="_on_NPButton_pressed"]
+[connection signal="pressed" from="BottomMenu/NewCampaignButton" to="." method="_on_new_campaign_button_pressed"]
+[connection signal="pressed" from="BottomMenu/LoadButton" to="." method="_on_load_button_pressed"]
+[connection signal="pressed" from="BottomMenu/NewCharacterButton" to="." method="_on_new_character_button_pressed"]

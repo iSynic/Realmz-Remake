@@ -40,6 +40,7 @@ func _on_NPButton_pressed()  -> void :
 		lineEdit.text = "Profile Created !"
 		my_menu.build_profiles_list()
 		my_menu.profilebutton.set_text(new_text)
+		my_menu.close_new_profile_editor()
 	else :
 		print("This directory already exists !")
 		lineEdit.text = "Profile already exists !"
