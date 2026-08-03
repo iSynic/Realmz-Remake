@@ -7,11 +7,13 @@ const ClassicItemBehaviorsScript = preload(
 
 const MIN_SUPPORTED_VIEWPORT := Vector2(1152.0, 648.0)
 const PARTY_RAIL_WIDTH := 320.0
-const ACTION_PANEL_WIDTH := 490.0
+const UTILITY_PANEL_WIDTH := 220.0
+const ACTION_PANEL_WIDTH := PARTY_RAIL_WIDTH
 const NARRATIVE_HEIGHT_RATIO := 0.28
 const NARRATIVE_MIN_HEIGHT := 200.0
 const NARRATIVE_MAX_HEIGHT := 216.0
-const ACTION_DOCK_REFERENCE_SIZE := Vector2(490.0, 200.0)
+const UTILITY_DOCK_REFERENCE_SIZE := Vector2(220.0, 200.0)
+const ACTION_DOCK_REFERENCE_SIZE := Vector2(320.0, 200.0)
 const ACTION_BUTTON_STYLE_OVERRIDES := [&"focus"]
 const ACTION_BUTTON_LAYOUT := {
 	# Familiar Realmz actions, arranged by purpose instead of scattered slots.
@@ -19,27 +21,33 @@ const ACTION_BUTTON_LAYOUT := {
 	&"MoneyButton": Rect2(112.0, 8.0, 48.0, 48.0),
 	&"SpellButton": Rect2(162.0, 8.0, 48.0, 48.0),
 	&"AbiListButton": Rect2(212.0, 8.0, 48.0, 48.0),
-	&"CharSwapButton": Rect2(262.0, 8.0, 48.0, 48.0),
 	&"CampButton": Rect2(62.0, 70.0, 48.0, 48.0),
 	&"RestButton": Rect2(112.0, 70.0, 48.0, 48.0),
 	&"MinimapsButton": Rect2(162.0, 70.0, 48.0, 48.0),
 	&"BestiaryButton": Rect2(212.0, 70.0, 48.0, 48.0),
 	&"EncounterButton": Rect2(262.0, 70.0, 48.0, 48.0),
-	&"ClassicSearchActionButton": Rect2(312.0, 70.0, 48.0, 48.0),
-	&"TempleButton": Rect2(62.0, 132.0, 48.0, 48.0),
-	&"ShopButton": Rect2(112.0, 132.0, 48.0, 48.0),
-	&"QSaveButton": Rect2(162.0, 132.0, 48.0, 48.0),
-	&"SaveButton": Rect2(212.0, 132.0, 48.0, 48.0),
-	&"SettingsButton": Rect2(262.0, 132.0, 48.0, 48.0),
+	&"ClassicSearchActionButton": Rect2(62.0, 132.0, 48.0, 48.0),
+	&"AreaSearchButton": Rect2(112.0, 132.0, 48.0, 48.0),
+	&"TempleButton": Rect2(162.0, 132.0, 48.0, 48.0),
+	&"ShopButton": Rect2(212.0, 132.0, 48.0, 48.0),
 }
 const ACTION_CONSOLE_LAYOUT := {
 	&"PartyLabel": Rect2(6.0, 20.0, 52.0, 24.0),
 	&"ExploreLabel": Rect2(6.0, 82.0, 52.0, 24.0),
-	&"SystemLabel": Rect2(6.0, 144.0, 52.0, 24.0),
-	&"StatusDivider": Rect2(368.0, 8.0, 2.0, 184.0),
-	&"StatusLabel": Rect2(374.0, 5.0, 112.0, 22.0),
-	&"GlobalEffectsRect": Rect2(374.0, 25.0, 73.0, 109.0),
-	&"ClassicTorchButton": Rect2(452.0, 25.0, 32.0, 78.0),
+	&"ContextLabel": Rect2(6.0, 144.0, 52.0, 24.0),
+}
+const UTILITY_BUTTON_LAYOUT := {
+	&"CharSwapButton": Rect2(9.0, 139.0, 48.0, 48.0),
+	&"QSaveButton": Rect2(59.0, 139.0, 48.0, 48.0),
+	&"SaveButton": Rect2(109.0, 139.0, 48.0, 48.0),
+	&"SettingsButton": Rect2(159.0, 139.0, 48.0, 48.0),
+}
+const UTILITY_CONSOLE_LAYOUT := {
+	&"StatusLabel": Rect2(35.0, 3.0, 109.0, 22.0),
+	&"GlobalEffectsRect": Rect2(35.0, 25.0, 109.0, 73.0),
+	&"ClassicTorchButton": Rect2(153.0, 25.0, 32.0, 78.0),
+	&"UtilityDivider": Rect2(6.0, 111.0, 208.0, 2.0),
+	&"SystemLabel": Rect2(6.0, 114.0, 208.0, 22.0),
 }
 const ACTION_BUTTON_TOOLTIPS := {
 	&"CampButton": "Camp",
@@ -50,6 +58,7 @@ const ACTION_BUTTON_TOOLTIPS := {
 	&"AbiListButton": "Abilities",
 	&"EncounterButton": "Open an encounter",
 	&"ClassicSearchActionButton": "Toggle searching",
+	&"AreaSearchButton": "Search nearby while held (A)",
 	&"BestiaryButton": "Bestiary",
 	&"MinimapsButton": "Player map",
 	&"TempleButton": "Enter temple",
@@ -93,6 +102,7 @@ var selected_character = null
 @onready var charscrollcont = $VBoxScreen/HBoxTop/VBoxCharTime/CharactersRect/CharScrollContainer
 @onready var timerect = $VBoxScreen/HBoxTop/VBoxCharTime/TimeRect
 @onready var botrightpanel = $VBoxScreen/HBoxBot/BotRightPanel
+@onready var botutilitypanel = $VBoxScreen/HBoxBot/BotUtilityPanel
 @onready var vboxScreen : VBoxContainer = $VBoxScreen
 @onready var hboxTop : HBoxContainer = $VBoxScreen/HBoxTop
 @onready var vboxCharTime : VBoxContainer = $VBoxScreen/HBoxTop/VBoxCharTime
@@ -100,7 +110,7 @@ var selected_character = null
 
 @onready var creatureRect = $VBoxScreen/HBoxBot/CreatureRect
 @onready var combatBRPanel = $VBoxScreen/HBoxBot/CombatBRPanel
-@onready var globaleffectsRect : GlobalEffectsRect = $VBoxScreen/HBoxBot/BotRightPanel/GlobalEffectsRect
+@onready var globaleffectsRect : GlobalEffectsRect = $VBoxScreen/HBoxBot/BotUtilityPanel/GlobalEffectsRect
 #onready var inventoryBoxCont = $"InventoryRect/InvScrollContainer/VBoxContainer"
 
 
@@ -121,11 +131,17 @@ var selected_character = null
 @onready var classicSearchButton: Button = (
 	$VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton
 )
+@onready var areaSearchButton: Button = (
+	$VBoxScreen/HBoxBot/BotRightPanel/AreaSearchButton
+)
+@onready var areaSearchTimer: Timer = (
+	$VBoxScreen/HBoxBot/BotRightPanel/AreaSearchButton/AreaSearchTimer
+)
 @onready var classicSearchEffectButton: Button = (
-	$VBoxScreen/HBoxBot/BotRightPanel/GlobalEffectsRect/SearchButton
+	$VBoxScreen/HBoxBot/BotUtilityPanel/GlobalEffectsRect/SearchButton
 )
 @onready var classicTorchButton: ClassicTorchButton = (
-	$VBoxScreen/HBoxBot/BotRightPanel/ClassicTorchButton
+	$VBoxScreen/HBoxBot/BotUtilityPanel/ClassicTorchButton
 )
 @onready var campButton: Button = $VBoxScreen/HBoxBot/BotRightPanel/CampButton
 @onready var restButton: Button = $VBoxScreen/HBoxBot/BotRightPanel/RestButton
@@ -169,6 +185,7 @@ var selected_several_characters : Array = []
 
 var party_swap_enabled : bool = false
 var _last_action_focus : Control
+var _area_search_held := false
 
 signal done_picking_pc
 signal pc_picked
@@ -240,6 +257,9 @@ func _apply_responsive_shell(screensize : Vector2) -> void:
 	charactersrect.custom_minimum_size.x = PARTY_RAIL_WIDTH
 	timerect.custom_minimum_size = Vector2(PARTY_RAIL_WIDTH, 80.0)
 	textRect.custom_minimum_size.y = narrative_height
+	botutilitypanel.custom_minimum_size = Vector2(
+		UTILITY_PANEL_WIDTH, narrative_height
+	)
 	botrightpanel.custom_minimum_size = Vector2(
 		ACTION_PANEL_WIDTH, narrative_height
 	)
@@ -250,16 +270,39 @@ func _apply_responsive_shell(screensize : Vector2) -> void:
 
 func _layout_action_dock(dock_size : Vector2) -> void:
 	var dock_scale := dock_size / ACTION_DOCK_REFERENCE_SIZE
-	for button_name : StringName in ACTION_BUTTON_LAYOUT:
-		var button := (
-			botrightpanel.get_node_or_null(NodePath(String(button_name))) as Button
-		)
+	_layout_console_panel(
+		botrightpanel,
+		ACTION_BUTTON_LAYOUT,
+		ACTION_CONSOLE_LAYOUT,
+		dock_scale
+	)
+	var utility_scale := Vector2(UTILITY_PANEL_WIDTH, dock_size.y) \
+		/ UTILITY_DOCK_REFERENCE_SIZE
+	_layout_console_panel(
+		botutilitypanel,
+		UTILITY_BUTTON_LAYOUT,
+		UTILITY_CONSOLE_LAYOUT,
+		utility_scale
+	)
+	_sync_action_dock_focus_with_overlays()
+
+
+func _layout_console_panel(
+	panel: Control,
+	button_layout: Dictionary,
+	control_layout: Dictionary,
+	panel_scale: Vector2
+) -> void:
+	for button_name : StringName in button_layout:
+		var button := panel.get_node_or_null(
+			NodePath(String(button_name))
+		) as Button
 		if button == null:
 			continue
-		var reference_rect : Rect2 = ACTION_BUTTON_LAYOUT[button_name]
+		var reference_rect : Rect2 = button_layout[button_name]
 		button.custom_minimum_size = Vector2.ZERO
-		button.position = reference_rect.position * dock_scale
-		button.size = reference_rect.size * dock_scale
+		button.position = reference_rect.position * panel_scale
+		button.size = reference_rect.size * panel_scale
 		button.expand_icon = true
 		button.focus_mode = Control.FOCUS_ALL
 		button.shortcut_in_tooltip = true
@@ -268,16 +311,15 @@ func _layout_action_dock(dock_size : Vector2) -> void:
 		)
 		for style_name : StringName in ACTION_BUTTON_STYLE_OVERRIDES:
 			button.remove_theme_stylebox_override(style_name)
-	for control_name : StringName in ACTION_CONSOLE_LAYOUT:
-		var control := botrightpanel.get_node_or_null(
+	for control_name : StringName in control_layout:
+		var control := panel.get_node_or_null(
 			NodePath(String(control_name))
 		) as Control
 		if control == null:
 			continue
-		var reference_rect : Rect2 = ACTION_CONSOLE_LAYOUT[control_name]
-		control.position = reference_rect.position * dock_scale
-		control.size = reference_rect.size * dock_scale
-	_sync_action_dock_focus_with_overlays()
+		var reference_rect : Rect2 = control_layout[control_name]
+		control.position = reference_rect.position * panel_scale
+		control.size = reference_rect.size * panel_scale
 
 func _sync_action_dock_focus_with_overlays() -> void:
 	var overlay_visible := false
@@ -290,15 +332,19 @@ func _sync_action_dock_focus_with_overlays() -> void:
 	if (
 		overlay_visible
 		and focus_owner != null
-		and botrightpanel.is_ancestor_of(focus_owner)
+		and (
+			botrightpanel.is_ancestor_of(focus_owner)
+			or botutilitypanel.is_ancestor_of(focus_owner)
+		)
 	):
 		_last_action_focus = focus_owner
 
-	for child in botrightpanel.get_children():
-		if child is BaseButton:
-			child.focus_mode = (
-				Control.FOCUS_NONE if overlay_visible else Control.FOCUS_ALL
-			)
+	for panel: Control in [botrightpanel, botutilitypanel]:
+		for child in panel.get_children():
+			if child is BaseButton:
+				child.focus_mode = (
+					Control.FOCUS_NONE if overlay_visible else Control.FOCUS_ALL
+				)
 
 	if not overlay_visible and is_instance_valid(_last_action_focus):
 		_last_action_focus.call_deferred(&"grab_focus")
@@ -306,6 +352,7 @@ func _sync_action_dock_focus_with_overlays() -> void:
 func _on_blocking_overlay_visibility_changed() -> void:
 	_sync_action_dock_focus_with_overlays()
 	_sync_party_actor_selection()
+	_sync_classic_search_control()
 
 
 func _on_game_state_changed(
@@ -313,6 +360,7 @@ func _on_game_state_changed(
 	_current_state_name: String
 ) -> void:
 	_sync_classic_torch_control()
+	_sync_classic_search_control()
 
 
 func _party_actor_selection_active() -> bool:
@@ -347,6 +395,7 @@ func hide_owhudcontrol() :
 func update_fatigue_bar() :
 	#print("ow_hud update_fatigue_bar : ", GameGlobal.fatigue ,", bar:", GameGlobal.fatigue * 128 / 172800, "/128" )
 	fatigueBar.value = GameGlobal.fatigue * 128 / GameGlobal.fatigue_limit()
+	_sync_classic_search_control()
 
 func fillCharactersRect() :
 	for child in charsVContainer.get_children() :
@@ -454,6 +503,80 @@ func _sync_classic_search_control() -> void:
 	classicSearchEffectButton.set_pressed_no_signal(
 		available and GameGlobal.is_classic_party_condition_active(5)
 	)
+	areaSearchButton.visible = true
+	areaSearchButton.disabled = not _can_area_search()
+	if areaSearchButton.disabled:
+		_stop_area_search()
+
+
+func _can_area_search() -> bool:
+	if (
+		not is_instance_valid(GameGlobal.classic_campaign_session)
+		or StateMachine._state_name != "Exploration"
+		or GameGlobal.camping
+		or GameGlobal.fatigue >= GameGlobal.fatigue_limit()
+	):
+		return false
+	for overlay: CanvasItem in _blocking_overlays:
+		if overlay.visible:
+			return false
+	return true
+
+
+func _on_area_search_button_down() -> void:
+	if not _can_area_search():
+		_sync_classic_search_control()
+		return
+	_area_search_held = true
+	GameGlobal.play_sfx("generation good.wav")
+	_perform_area_search_pass()
+
+
+func _on_area_search_button_up() -> void:
+	_stop_area_search()
+
+
+func _on_area_search_timer_timeout() -> void:
+	if not _area_search_held or not _can_area_search():
+		_stop_area_search()
+		_sync_classic_search_control()
+		return
+	_perform_area_search_pass()
+
+
+func _perform_area_search_pass() -> void:
+	var result: Dictionary = GameGlobal.perform_classic_area_search()
+	if str(result.get("status", "")) == "error":
+		push_warning(str(result.get("message", "Area Search failed")))
+	if _area_search_held and _can_area_search():
+		areaSearchTimer.start(maxf(GameGlobal.gamespeed, 0.05))
+	else:
+		_stop_area_search()
+
+
+func _stop_area_search() -> void:
+	_area_search_held = false
+	if areaSearchTimer != null:
+		areaSearchTimer.stop()
+	if areaSearchButton != null:
+		areaSearchButton.set_pressed_no_signal(false)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not (event is InputEventKey) or event.physical_keycode != KEY_A:
+		return
+	if event.pressed:
+		if not event.echo and _can_area_search():
+			_on_area_search_button_down()
+			get_viewport().set_input_as_handled()
+	elif _area_search_held:
+		_on_area_search_button_up()
+		get_viewport().set_input_as_handled()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_stop_area_search()
 
 
 func _sync_classic_torch_control() -> void:
@@ -653,7 +776,7 @@ func _on_InventoryButton_pressed():
 
 func set_party_swap_enabled(enabled : bool) :
 	party_swap_enabled = enabled
-	$VBoxScreen/HBoxBot/BotRightPanel/CharSwapButton.disabled = not enabled
+	$VBoxScreen/HBoxBot/BotUtilityPanel/CharSwapButton.disabled = not enabled
 
 func set_temple_availlable(enabled : bool) :
 	templeButton.disabled = !enabled
@@ -806,6 +929,7 @@ func update_classic_camping_permission() -> void:
 		if restButton.disabled:
 			restTimer.stop()
 			restTimer.set_paused(true)
+	_sync_classic_search_control()
 
 
 func suspend_classic_rest_for_action_point() -> void:

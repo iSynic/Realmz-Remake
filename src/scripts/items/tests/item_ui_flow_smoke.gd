@@ -65,6 +65,33 @@ class ManualEncounterHost:
 		return {"status": "ok", "reason": "action-point-ended"}
 
 
+class AreaSearchHost:
+	extends Node
+
+	var calls: Array[Dictionary] = []
+
+	func discover_map_secrets(
+		position: Vector2i,
+		force_detection := false
+	) -> Dictionary:
+		calls.append({
+			"position": position,
+			"forceDetection": force_detection,
+		})
+		return {
+			"status": "ok",
+			"handled": true,
+			"revealed": false,
+			"discoveries": [],
+		}
+
+
+class QuietCampaignGlobal:
+	extends RefCounted
+
+	var has_on_time_pass := false
+
+
 func _ready() -> void:
 	call_deferred("_run_smoke")
 
@@ -374,9 +401,10 @@ func _test_classic_torch_and_search_ui(resources: CampaignResources) -> void:
 		"the Torch image is absent when the party owns no Torch",
 	)
 	torch.queue_free()
-	UI.ow_hud._layout_action_dock(Vector2(490.0, 200.0))
+	UI.ow_hud._layout_action_dock(Vector2(320.0, 200.0))
 	_expect(
 		UI.ow_hud.classicTorchButton.size == Vector2(32.0, 78.0)
+			and UI.ow_hud.globaleffectsRect.size == Vector2(109.0, 73.0)
 			and not Rect2(
 				UI.ow_hud.classicTorchButton.position,
 				UI.ow_hud.classicTorchButton.size
@@ -384,16 +412,91 @@ func _test_classic_torch_and_search_ui(resources: CampaignResources) -> void:
 				UI.ow_hud.globaleffectsRect.position,
 				UI.ow_hud.globaleffectsRect.size
 			)),
-		"the non-square Torch button fits beside Effects without overlap",
+		"the non-square Torch button fits beside the wider Effects grid without overlap",
+	)
+	_expect(
+		UI.ow_hud.globaleffectsRect.eye_sprite.position == Vector2(74.0, 2.0)
+			and UI.ow_hud.globaleffectsRect.sentry_sprite.position == Vector2(74.0, 38.0),
+		"Effects use two native-height rows and three columns",
+	)
+	var system_buttons: Array[Button] = [
+		UI.ow_hud.get_node("VBoxScreen/HBoxBot/BotUtilityPanel/CharSwapButton"),
+		UI.ow_hud.get_node("VBoxScreen/HBoxBot/BotUtilityPanel/QSaveButton"),
+		UI.ow_hud.get_node("VBoxScreen/HBoxBot/BotUtilityPanel/SaveButton"),
+		UI.ow_hud.get_node("VBoxScreen/HBoxBot/BotUtilityPanel/SettingsButton"),
+	]
+	var system_row_layout_matches := true
+	for button: Button in system_buttons:
+		if button.position.y != 139.0 or button.size != Vector2(48.0, 48.0):
+			system_row_layout_matches = false
+			break
+	_expect(
+		system_row_layout_matches,
+		"Swap, Quick Save, Save, and Settings share one System row",
+	)
+	_expect(
+		UI.ow_hud.botrightpanel.custom_minimum_size.x == 320.0
+			and UI.ow_hud.charactersrect.custom_minimum_size.x == 320.0,
+		"the gameplay console aligns with the Classic party rail",
+	)
+	_expect(
+		UI.ow_hud.botutilitypanel.custom_minimum_size.x == 220.0
+			and UI.ow_hud.areaSearchButton.position == Vector2(112.0, 132.0),
+		"the separate utility console leaves a full Context row for Area Search",
+	)
+	_expect(
+		not UI.ow_hud.classicSearchButton.has_node("LabelBackdrop")
+			and not UI.ow_hud.get_node(
+				"VBoxScreen/HBoxBot/BotRightPanel/EncounterButton"
+			).has_node("LabelBackdrop"),
+		"Encounter and Search use the shared button face without black label overlays",
+	)
+	var encounter_button: Button = UI.ow_hud.get_node(
+		"VBoxScreen/HBoxBot/BotRightPanel/EncounterButton"
+	)
+	var action_buttons: Array[Button] = [
+		encounter_button,
+		UI.ow_hud.classicSearchButton,
+		UI.ow_hud.areaSearchButton,
+	]
+	var expected_action_textures := [
+		"/Button_EncounterAction.png",
+		"/Button_Search.png",
+		"/Button_AreaSearch.png",
+	]
+	var actions_use_native_button_art := true
+	for index in action_buttons.size():
+		var button := action_buttons[index]
+		actions_use_native_button_art = (
+			actions_use_native_button_art
+			and button.icon != null
+			and button.icon.get_size() == Vector2(50.0, 50.0)
+			and button.icon.resource_path.ends_with(expected_action_textures[index])
+			and not button.has_node("Label")
+		)
+	_expect(
+		actions_use_native_button_art,
+		"Encounter, Search, and Area Search use complete native-size Classic button art",
 	)
 
 	var saved_session: Object = GameGlobal.classic_campaign_session
+	var saved_host: Object = GameGlobal.classic_runtime_host
 	var saved_conditions := GameGlobal.classic_party_conditions.duplicate(true)
 	var saved_effects := GameGlobal.global_effects.duplicate(true)
 	var saved_state: State = StateMachine.state
+	var saved_time := GameGlobal.time
+	var saved_fatigue := GameGlobal.fatigue
+	var saved_camping := GameGlobal.camping
+	var saved_campaign_global: Variant = GameGlobal.campaign_global_script
 	var dummy_session := Node.new()
+	var area_search_host := AreaSearchHost.new()
 	add_child(dummy_session)
+	add_child(area_search_host)
 	GameGlobal.classic_campaign_session = dummy_session
+	GameGlobal.classic_runtime_host = area_search_host
+	GameGlobal.campaign_global_script = QuietCampaignGlobal.new()
+	GameGlobal.camping = false
+	GameGlobal.fatigue = 4.0
 	var torch_holder := _player("Torch Initialization")
 	var inventory_torch := resources.create_item_instance("Torch")
 	_expect(
@@ -430,11 +533,36 @@ func _test_classic_torch_and_search_ui(resources: CampaignResources) -> void:
 			and UI.ow_hud.globaleffectsRect.eye_sprite.visible,
 		"active Search displays its animated effect slot",
 	)
+	GameGlobal.set_classic_search_enabled(false)
+	UI.ow_hud.updateGlobalEffectsDisplay()
+	var area_search_start_time := GameGlobal.time
+	UI.ow_hud._on_area_search_button_down()
+	_expect(
+		area_search_host.calls.size() == 1
+			and bool(area_search_host.calls[0].get("forceDetection")),
+		"pressing Area Search forces one source-backed three-by-three check",
+	)
+	_expect(
+		GameGlobal.time > area_search_start_time
+			and not UI.ow_hud.areaSearchTimer.is_stopped(),
+		"holding Area Search advances Classic time and schedules another pass",
+	)
+	UI.ow_hud._on_area_search_button_up()
+	_expect(
+		UI.ow_hud.areaSearchTimer.is_stopped(),
+		"releasing Area Search immediately stops its repeated checks",
+	)
 	GameGlobal.classic_campaign_session = saved_session
+	GameGlobal.classic_runtime_host = saved_host
 	GameGlobal.classic_party_conditions = saved_conditions
 	GameGlobal.global_effects = saved_effects
+	GameGlobal.time = saved_time
+	GameGlobal.fatigue = saved_fatigue
+	GameGlobal.camping = saved_camping
+	GameGlobal.campaign_global_script = saved_campaign_global
 	StateMachine.set_state(saved_state)
 	dummy_session.queue_free()
+	area_search_host.queue_free()
 
 
 func _test_manual_encounter_dispatch() -> void:

@@ -1,8 +1,12 @@
-[gd_scene load_steps=60 format=3 uid="uid://b6pytyonlmi0h"]
+[gd_scene load_steps=61 format=3 uid="uid://b6pytyonlmi0h"]
 
 [ext_resource type="Texture2D" uid="uid://bfkmsfw7a16xf" path="res://scenes/UI/HUD/EffectsRect.png" id="1_7big5"]
 [ext_resource type="Texture2D" uid="uid://meib7vx3ar3" path="res://scenes/UI/HUD/EffectsAnimations.png" id="2_j0fo0"]
 [ext_resource type="Script" path="res://scenes/UI/HUD/GlobalEffectsRect/global_effects_rect.gd" id="2_vs2rj"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_effect_slot"]
+atlas = ExtResource("1_7big5")
+region = Rect2(0, 0, 37, 37)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_rklq0"]
 atlas = ExtResource("2_j0fo0")
@@ -428,15 +432,56 @@ animations = [{
 }]
 
 [node name="GlobalEffectsRect" type="TextureRect"]
-offset_left = 122.0
-offset_top = 15.0
-offset_right = 195.0
-offset_bottom = 124.0
-texture = ExtResource("1_7big5")
+custom_minimum_size = Vector2(109, 73)
+offset_right = 109.0
+offset_bottom = 73.0
 script = ExtResource("2_vs2rj")
 
+[node name="Slot00" type="TextureRect" parent="."]
+offset_right = 37.0
+offset_bottom = 37.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_effect_slot")
+
+[node name="Slot01" type="TextureRect" parent="."]
+offset_left = 36.0
+offset_right = 73.0
+offset_bottom = 37.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_effect_slot")
+
+[node name="Slot02" type="TextureRect" parent="."]
+offset_left = 72.0
+offset_right = 109.0
+offset_bottom = 37.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_effect_slot")
+
+[node name="Slot10" type="TextureRect" parent="."]
+offset_top = 36.0
+offset_right = 37.0
+offset_bottom = 73.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_effect_slot")
+
+[node name="Slot11" type="TextureRect" parent="."]
+offset_left = 36.0
+offset_top = 36.0
+offset_right = 73.0
+offset_bottom = 73.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_effect_slot")
+
+[node name="Slot12" type="TextureRect" parent="."]
+offset_left = 72.0
+offset_top = 36.0
+offset_right = 109.0
+offset_bottom = 73.0
+mouse_filter = 2
+texture = SubResource("AtlasTexture_effect_slot")
+
 [node name="WaterSprite2D" type="AnimatedSprite2D" parent="."]
-position = Vector2(1, 1)
+position = Vector2(2, 2)
 scale = Vector2(1, 0.97)
 sprite_frames = SubResource("SpriteFrames_4bgv0")
 animation = &"WaterBreath"
@@ -445,7 +490,7 @@ frame_progress = 0.479258
 centered = false
 
 [node name="FeatherSprite2D" type="AnimatedSprite2D" parent="."]
-position = Vector2(40, 1)
+position = Vector2(38, 2)
 scale = Vector2(1, 0.97)
 sprite_frames = SubResource("SpriteFrames_4bgv0")
 animation = &"FeatherFall"
@@ -454,7 +499,7 @@ frame_progress = 0.665573
 centered = false
 
 [node name="EyeSprite2D" type="AnimatedSprite2D" parent="."]
-position = Vector2(1, 39)
+position = Vector2(74, 2)
 scale = Vector2(1, 0.97)
 sprite_frames = SubResource("SpriteFrames_4bgv0")
 animation = &"Looking"
@@ -465,9 +510,9 @@ centered = false
 [node name="SearchButton" type="Button" parent="."]
 visible = false
 layout_mode = 0
-offset_right = 34.0
-offset_top = 38.0
-offset_bottom = 72.0
+offset_left = 72.0
+offset_right = 109.0
+offset_bottom = 37.0
 tooltip_text = "Toggle Classic searching"
 focus_mode = 0
 mouse_default_cursor_shape = 2
@@ -475,7 +520,7 @@ toggle_mode = true
 flat = true
 
 [node name="OrbSprite2D" type="AnimatedSprite2D" parent="."]
-position = Vector2(40, 39)
+position = Vector2(2, 38)
 scale = Vector2(1, 0.97)
 sprite_frames = SubResource("SpriteFrames_4bgv0")
 animation = &"Orb"
@@ -484,7 +529,7 @@ frame_progress = 0.0637828
 centered = false
 
 [node name="ShieldSprite2D" type="AnimatedSprite2D" parent="."]
-position = Vector2(1, 77)
+position = Vector2(38, 38)
 scale = Vector2(1, 0.97)
 sprite_frames = SubResource("SpriteFrames_4bgv0")
 animation = &"Shielded"
@@ -493,7 +538,7 @@ frame_progress = 0.0231422
 centered = false
 
 [node name="SentrySprite2D" type="AnimatedSprite2D" parent="."]
-position = Vector2(40, 77)
+position = Vector2(74, 38)
 scale = Vector2(1, 0.97)
 sprite_frames = SubResource("SpriteFrames_4bgv0")
 animation = &"Sentry"

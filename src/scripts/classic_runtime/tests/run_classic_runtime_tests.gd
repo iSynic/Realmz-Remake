@@ -16952,6 +16952,27 @@ func _test_classic_map_bridge() -> void:
 		-1,
 		"failed detection does not add a persistent tile override"
 	)
+	var forced_land_secret_state = StateScript.new()
+	forced_land_secret_state.set_location("land", 0, 0, 0)
+	game_global.currentmap_name = "map_0"
+	game_global.secret_detection_results = [false]
+	var forced_land_secret: Dictionary = bridge.discover_map_secrets(
+		forced_land_secret_state,
+		Vector2i.ZERO,
+		game_global,
+		resources,
+		true
+	)
+	_expect(
+		bool(forced_land_secret.get("revealed")),
+		"held Area Search forces the surrounding Classic secret check"
+	)
+	_expect_equal(
+		game_global.secret_detection_results,
+		[false],
+		"forced Area Search does not consume the party detection roll"
+	)
+	game_global.currentmap_name = "map_0"
 	game_global.secret_detection_results = [true]
 	var found_land_secret: Dictionary = bridge.discover_map_secrets(
 		land_secret_state,

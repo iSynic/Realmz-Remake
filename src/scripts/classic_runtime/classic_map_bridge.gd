@@ -408,7 +408,8 @@ func discover_map_secrets(
 	runtime_state: Object,
 	position: Vector2i,
 	game_global: Object,
-	resources: Object
+	resources: Object,
+	force_detection := false
 ) -> Dictionary:
 	if runtime_state == null:
 		return {"handled": false}
@@ -454,7 +455,10 @@ func discover_map_secrets(
 					field & DUNGEON_SECRET_DIRECTION_MASK != 0
 					and field & DUNGEON_REVEALED_SECRET_MASK == 0
 				)
-			if not hidden or not bool(game_global.call("roll_classic_secret_detection")):
+			if not hidden or (
+				not force_detection
+				and not bool(game_global.call("roll_classic_secret_detection"))
+			):
 				continue
 			var revealed_field := field - 1000 if field > 0 else field + 1000
 			if level_type == "dungeon":

@@ -1873,14 +1873,18 @@ func resolve_map_movement(from_position: Vector2i, to_position: Vector2i) -> Dic
 	}
 
 
-func discover_map_secrets(position: Vector2i) -> Dictionary:
+func discover_map_secrets(
+	position: Vector2i,
+	force_detection := false
+) -> Dictionary:
 	if command_adapter == null \
 			or not command_adapter.has_method("discover_classic_map_secrets"):
 		return {"handled": false}
 	var response: Variant = command_adapter.call(
 		"discover_classic_map_secrets",
 		runtime.runtime_state,
-		position
+		position,
+		force_detection
 	)
 	return response if response is Dictionary else {
 		"status": "error",

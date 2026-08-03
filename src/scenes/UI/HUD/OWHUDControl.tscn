@@ -45,7 +45,6 @@
 [ext_resource type="Texture2D" uid="uid://dug02rllokmjd" path="res://scenes/UI/HUD/Button_Settings.png" id="36"]
 [ext_resource type="PackedScene" uid="uid://b6pytyonlmi0h" path="res://scenes/UI/HUD/GlobalEffectsRect/global_effects_rect.tscn" id="38_2g7oy"]
 [ext_resource type="PackedScene" uid="uid://ckk0txf7ssl6a" path="res://scenes/UI/HUD/MoneyRect/money_rect.tscn" id="38_5dnvn"]
-[ext_resource type="Texture2D" uid="uid://gauvj4brjd6" path="res://scenes/UI/HUD/Button_Encounter.png" id="39"]
 [ext_resource type="PackedScene" uid="uid://b5341ljf605d7" path="res://scenes/UI/HUD/Inventory/inventory_rect.tscn" id="42_uqsid"]
 [ext_resource type="PackedScene" uid="uid://ux82qv1x7yu5" path="res://scenes/UI/HUD/LevelUp/level_up_rect.tscn" id="47_7a5ck"]
 [ext_resource type="PackedScene" uid="uid://diwmugxendkdn" path="res://scenes/UI/HUD/Settings/settings_rect.tscn" id="47_7r2s1"]
@@ -59,11 +58,9 @@
 [ext_resource type="PackedScene" path="res://scenes/UI/HUD/ClassicTorch/classic_torch_button.tscn" id="82_torch"]
 [ext_resource type="Texture2D" uid="uid://hgowxiea5c08" path="res://shared_assets/UI/buttonShopText.png" id="83_shop"]
 [ext_resource type="Theme" path="res://scenes/UI/HUD/Theme/realmz_hud_theme.tres" id="84_theme"]
-[ext_resource type="Texture2D" uid="uid://meib7vx3ar3" path="res://scenes/UI/HUD/EffectsAnimations.png" id="85_effects"]
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_search_icon"]
-atlas = ExtResource("85_effects")
-region = Rect2(0, 128, 32, 32)
+[ext_resource type="Texture2D" path="res://scenes/UI/HUD/Button_Search.png" id="85_search_button"]
+[ext_resource type="Texture2D" path="res://scenes/UI/HUD/Button_AreaSearch.png" id="86_area_search_button"]
+[ext_resource type="Texture2D" path="res://scenes/UI/HUD/Button_EncounterAction.png" id="87_encounter_action"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_kbh82"]
 
@@ -401,6 +398,13 @@ texture_progress = ExtResource("15_3lusa")
 layout_mode = 2
 theme_override_constants/separation = 0
 
+[node name="BotUtilityPanel" type="TextureRect" parent="VBoxScreen/HBoxBot"]
+custom_minimum_size = Vector2(220, 200)
+layout_mode = 2
+mouse_filter = 0
+texture = ExtResource("6")
+stretch_mode = 1
+
 [node name="TextRect" type="NinePatchRect" parent="VBoxScreen/HBoxBot" unique_id=1359688254 node_paths=PackedStringArray("choicesContainer")]
 custom_minimum_size = Vector2(32, 200)
 layout_mode = 2
@@ -494,7 +498,7 @@ visible = false
 layout_mode = 2
 
 [node name="BotRightPanel" type="TextureRect" parent="VBoxScreen/HBoxBot" unique_id=1580127324 node_paths=PackedStringArray("spellCastButton")]
-custom_minimum_size = Vector2(490, 200)
+custom_minimum_size = Vector2(320, 200)
 layout_mode = 2
 mouse_filter = 0
 texture = ExtResource("6")
@@ -528,7 +532,7 @@ theme_override_font_sizes/font_size = 13
 text = "Explore"
 vertical_alignment = 1
 
-[node name="SystemLabel" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+[node name="ContextLabel" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel"]
 layout_mode = 0
 offset_left = 6.0
 offset_top = 144.0
@@ -538,29 +542,43 @@ mouse_filter = 2
 theme_override_colors/font_color = Color(0.96, 0.83, 0.27, 1)
 theme_override_fonts/font = ExtResource("67_o5gys")
 theme_override_font_sizes/font_size = 13
-text = "System"
+text = "Context"
 vertical_alignment = 1
 
-[node name="StatusDivider" type="ColorRect" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+[node name="UtilityDivider" type="ColorRect" parent="VBoxScreen/HBoxBot/BotUtilityPanel"]
 layout_mode = 0
-offset_left = 368.0
-offset_top = 8.0
-offset_right = 370.0
-offset_bottom = 192.0
+offset_left = 6.0
+offset_top = 111.0
+offset_right = 214.0
+offset_bottom = 113.0
 mouse_filter = 2
 color = Color(0.57, 0.49, 0.3, 0.8)
 
-[node name="StatusLabel" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel"]
+[node name="StatusLabel" type="Label" parent="VBoxScreen/HBoxBot/BotUtilityPanel"]
 layout_mode = 0
-offset_left = 374.0
-offset_top = 5.0
-offset_right = 486.0
-offset_bottom = 27.0
+offset_left = 35.0
+offset_top = 3.0
+offset_right = 144.0
+offset_bottom = 25.0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.96, 0.83, 0.27, 1)
 theme_override_fonts/font = ExtResource("67_o5gys")
 theme_override_font_sizes/font_size = 13
 text = "Effects"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="SystemLabel" type="Label" parent="VBoxScreen/HBoxBot/BotUtilityPanel"]
+layout_mode = 0
+offset_left = 6.0
+offset_top = 114.0
+offset_right = 214.0
+offset_bottom = 136.0
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.96, 0.83, 0.27, 1)
+theme_override_fonts/font = ExtResource("67_o5gys")
+theme_override_font_sizes/font_size = 13
+text = "System"
 horizontal_alignment = 1
 vertical_alignment = 1
 
@@ -580,13 +598,13 @@ shortcut_in_tooltip = false
 icon = ExtResource("5")
 vertical_icon_alignment = 0
 
-[node name="CharSwapButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=280344644]
+[node name="CharSwapButton" type="Button" parent="VBoxScreen/HBoxBot/BotUtilityPanel" unique_id=280344644]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 262.0
-offset_top = 8.0
-offset_right = 310.0
-offset_bottom = 56.0
+offset_left = 9.0
+offset_top = 139.0
+offset_right = 57.0
+offset_bottom = 187.0
 focus_mode = 0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
@@ -597,13 +615,13 @@ disabled = true
 shortcut_in_tooltip = false
 icon = ExtResource("23")
 
-[node name="SettingsButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=597566954]
+[node name="SettingsButton" type="Button" parent="VBoxScreen/HBoxBot/BotUtilityPanel" unique_id=597566954]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 262.0
-offset_top = 132.0
-offset_right = 310.0
-offset_bottom = 180.0
+offset_left = 159.0
+offset_top = 139.0
+offset_right = 207.0
+offset_bottom = 187.0
 focus_mode = 0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
@@ -627,75 +645,37 @@ theme_override_styles/hover = ExtResource("13_dm23x")
 theme_override_styles/disabled = ExtResource("15_rs5dt")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_jwj8b")
 shortcut_in_tooltip = false
-icon = ExtResource("39")
-
-[node name="LabelBackdrop" type="ColorRect" parent="VBoxScreen/HBoxBot/BotRightPanel/EncounterButton"]
-layout_mode = 0
-offset_left = 2.0
-offset_top = 33.0
-offset_right = 46.0
-offset_bottom = 47.0
-mouse_filter = 2
-color = Color(0.07, 0.07, 0.06, 0.92)
-
-[node name="Label" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel/EncounterButton"]
-layout_mode = 0
-offset_left = 1.0
-offset_top = 31.0
-offset_right = 47.0
-offset_bottom = 47.0
-mouse_filter = 2
-theme_override_colors/font_color = Color(1, 0.960784, 0, 1)
-theme_override_fonts/font = ExtResource("67_o5gys")
-theme_override_font_sizes/font_size = 9
-text = "Encounter"
-horizontal_alignment = 1
-vertical_alignment = 1
+icon = ExtResource("87_encounter_action")
 
 [node name="ClassicSearchActionButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel"]
 layout_mode = 0
-offset_left = 312.0
-offset_top = 70.0
-offset_right = 360.0
-offset_bottom = 118.0
+offset_left = 62.0
+offset_top = 132.0
+offset_right = 110.0
+offset_bottom = 180.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
 theme_override_styles/disabled = ExtResource("15_rs5dt")
 disabled = true
 toggle_mode = true
+icon = ExtResource("85_search_button")
 
-[node name="Icon" type="TextureRect" parent="VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton"]
+[node name="AreaSearchButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel"]
 layout_mode = 0
-offset_left = 8.0
-offset_top = 2.0
-offset_right = 40.0
-offset_bottom = 34.0
-mouse_filter = 2
-texture = SubResource("AtlasTexture_search_icon")
+offset_left = 112.0
+offset_top = 132.0
+offset_right = 160.0
+offset_bottom = 180.0
+theme_override_styles/normal = ExtResource("12_c6hp3")
+theme_override_styles/pressed = ExtResource("14_pjtj6")
+theme_override_styles/hover = ExtResource("13_dm23x")
+theme_override_styles/disabled = ExtResource("15_rs5dt")
+disabled = true
+icon = ExtResource("86_area_search_button")
 
-[node name="LabelBackdrop" type="ColorRect" parent="VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton"]
-layout_mode = 0
-offset_left = 2.0
-offset_top = 33.0
-offset_right = 46.0
-offset_bottom = 47.0
-mouse_filter = 2
-color = Color(0.07, 0.07, 0.06, 0.92)
-
-[node name="Label" type="Label" parent="VBoxScreen/HBoxBot/BotRightPanel/ClassicSearchActionButton"]
-layout_mode = 0
-offset_left = 1.0
-offset_top = 31.0
-offset_right = 47.0
-offset_bottom = 47.0
-mouse_filter = 2
-theme_override_colors/font_color = Color(1, 0.960784, 0, 1)
-theme_override_fonts/font = ExtResource("67_o5gys")
-theme_override_font_sizes/font_size = 10
-text = "Search"
-horizontal_alignment = 1
-vertical_alignment = 1
+[node name="AreaSearchTimer" type="Timer" parent="VBoxScreen/HBoxBot/BotRightPanel/AreaSearchButton"]
+one_shot = true
 
 [node name="CampButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=2004549040]
 custom_minimum_size = Vector2(50, 50)
@@ -713,13 +693,13 @@ shortcut = SubResource("8")
 shortcut_in_tooltip = false
 icon = ExtResource("53")
 
-[node name="SaveButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=2080017543]
+[node name="SaveButton" type="Button" parent="VBoxScreen/HBoxBot/BotUtilityPanel" unique_id=2080017543]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 212.0
-offset_top = 132.0
-offset_right = 260.0
-offset_bottom = 180.0
+offset_left = 109.0
+offset_top = 139.0
+offset_right = 157.0
+offset_bottom = 187.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -730,9 +710,9 @@ icon = ExtResource("55")
 [node name="TempleButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1121611087]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 62.0
+offset_left = 162.0
 offset_top = 132.0
-offset_right = 110.0
+offset_right = 210.0
 offset_bottom = 180.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
@@ -745,9 +725,9 @@ icon = ExtResource("35_k5nci")
 [node name="ShopButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel"]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 112.0
+offset_left = 212.0
 offset_top = 132.0
-offset_right = 160.0
+offset_right = 260.0
 offset_bottom = 180.0
 tooltip_text = "Enter shop"
 focus_mode = 0
@@ -761,13 +741,13 @@ icon = ExtResource("83_shop")
 icon_alignment = 1
 vertical_icon_alignment = 1
 
-[node name="QSaveButton" type="Button" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=1463057139]
+[node name="QSaveButton" type="Button" parent="VBoxScreen/HBoxBot/BotUtilityPanel" unique_id=1463057139]
 custom_minimum_size = Vector2(50, 50)
 layout_mode = 0
-offset_left = 162.0
-offset_top = 132.0
-offset_right = 210.0
-offset_bottom = 180.0
+offset_left = 59.0
+offset_top = 139.0
+offset_right = 107.0
+offset_bottom = 187.0
 theme_override_styles/normal = ExtResource("12_c6hp3")
 theme_override_styles/pressed = ExtResource("14_pjtj6")
 theme_override_styles/hover = ExtResource("13_dm23x")
@@ -866,18 +846,18 @@ theme_override_styles/focus = SubResource("StyleBoxEmpty_j5tvc")
 shortcut = SubResource("12")
 icon = ExtResource("81")
 
-[node name="GlobalEffectsRect" parent="VBoxScreen/HBoxBot/BotRightPanel" unique_id=299636859 instance=ExtResource("38_2g7oy")]
+[node name="GlobalEffectsRect" parent="VBoxScreen/HBoxBot/BotUtilityPanel" unique_id=299636859 instance=ExtResource("38_2g7oy")]
 layout_mode = 0
-offset_left = 374.0
+offset_left = 35.0
 offset_top = 25.0
-offset_right = 447.0
-offset_bottom = 134.0
+offset_right = 144.0
+offset_bottom = 98.0
 
-[node name="ClassicTorchButton" parent="VBoxScreen/HBoxBot/BotRightPanel" instance=ExtResource("82_torch")]
+[node name="ClassicTorchButton" parent="VBoxScreen/HBoxBot/BotUtilityPanel" instance=ExtResource("82_torch")]
 layout_mode = 0
-offset_left = 452.0
+offset_left = 153.0
 offset_top = 25.0
-offset_right = 484.0
+offset_right = 185.0
 offset_bottom = 103.0
 
 [node name="CombatBRPanel" parent="VBoxScreen/HBoxBot" unique_id=1331322809 instance=ExtResource("28_s8a54")]
@@ -1010,14 +990,17 @@ popup_window = true
 [node name="AlliesRect" parent="AlliesWindow" unique_id=1279652320 instance=ExtResource("48_mnk6s")]
 
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/InventoryButton" to="." method="_on_InventoryButton_pressed"]
-[connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/CharSwapButton" to="." method="_on_CharSwapButton_pressed"]
-[connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/SettingsButton" to="." method="_on_SettingsButton_pressed"]
+[connection signal="pressed" from="VBoxScreen/HBoxBot/BotUtilityPanel/CharSwapButton" to="." method="_on_CharSwapButton_pressed"]
+[connection signal="pressed" from="VBoxScreen/HBoxBot/BotUtilityPanel/SettingsButton" to="." method="_on_SettingsButton_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/EncounterButton" to="." method="_on_EncounterButton_pressed"]
+[connection signal="button_down" from="VBoxScreen/HBoxBot/BotRightPanel/AreaSearchButton" to="." method="_on_area_search_button_down"]
+[connection signal="button_up" from="VBoxScreen/HBoxBot/BotRightPanel/AreaSearchButton" to="." method="_on_area_search_button_up"]
+[connection signal="timeout" from="VBoxScreen/HBoxBot/BotRightPanel/AreaSearchButton/AreaSearchTimer" to="." method="_on_area_search_timer_timeout"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/CampButton" to="." method="_on_CampButton_pressed"]
-[connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/SaveButton" to="." method="_on_save_button_pressed"]
+[connection signal="pressed" from="VBoxScreen/HBoxBot/BotUtilityPanel/SaveButton" to="." method="_on_save_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/TempleButton" to="." method="_on_temple_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/ShopButton" to="." method="_on_shop_button_pressed"]
-[connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/QSaveButton" to="." method="_on_q_save_button_pressed"]
+[connection signal="pressed" from="VBoxScreen/HBoxBot/BotUtilityPanel/QSaveButton" to="." method="_on_q_save_button_pressed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/MinimapsButton" to="." method="_on_minimaps_button_pressed"]
 [connection signal="closed" from="VBoxScreen/HBoxTop/MapArea/ClassicPlayerMapRect" to="." method="_on_classic_player_map_closed"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/BestiaryButton" to="." method="_on_bestiary_button_pressed"]
@@ -1028,6 +1011,6 @@ popup_window = true
 [connection signal="toggled" from="VBoxScreen/HBoxBot/BotRightPanel/RestButton" to="." method="_on_RestButton_toggled"]
 [connection signal="timeout" from="VBoxScreen/HBoxBot/BotRightPanel/RestButton/RestTimer" to="." method="_on_RestTimer_timeout"]
 [connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/SpellButton" to="." method="_on_SpellButton_pressed"]
-[connection signal="pressed" from="VBoxScreen/HBoxBot/BotRightPanel/ClassicTorchButton" to="." method="_on_classic_torch_button_pressed"]
+[connection signal="pressed" from="VBoxScreen/HBoxBot/BotUtilityPanel/ClassicTorchButton" to="." method="_on_classic_torch_button_pressed"]
 [connection signal="pressed" from="CharSwapRect/OKButton" to="CharSwapRect" method="_on_OKButton_pressed"]
 [connection signal="pressed" from="CharSwapRect/CancelButton" to="CharSwapRect" method="_on_CancelButton_pressed"]

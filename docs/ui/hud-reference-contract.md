@@ -20,9 +20,9 @@ The remake maps those concerns as follows:
 | Look and map | `VBoxScreen/HBoxTop/MapArea` | Expands in both directions and receives surplus screen space. |
 | Party and character state | `VBoxScreen/HBoxTop/VBoxCharTime/CharactersRect` | Stays in a bounded 320-pixel rail until the character card itself is redesigned. |
 | Time, position, light, and fatigue | `VBoxScreen/HBoxTop/VBoxCharTime/TimeRect` | Remains attached to the party rail and visible in exploration and combat. |
-| Narrative and event text | `VBoxScreen/HBoxBot/TextRect` | Persists across modes, wraps across the available width, and remains 200-216 pixels high. |
-| Exploration commands | `VBoxScreen/HBoxBot/BotRightPanel` | Forms one connected lower console with the narrative region; actions are grouped as Party, Explore, and System. |
-| Effects and torch | `BotRightPanel/GlobalEffectsRect` and `ClassicTorchButton` | Uses an `Effects` column plus a separate framed torch control inside the command console. |
+| Narrative and event text | `VBoxScreen/HBoxBot/TextRect` | Persists across modes, wraps across the flexible center width, and remains 200-216 pixels high. |
+| Exploration commands | `VBoxScreen/HBoxBot/BotRightPanel` | Matches the 320-pixel party rail above it; actions are grouped as Party, Explore, and Context. |
+| Effects, torch, and system controls | `VBoxScreen/HBoxBot/BotUtilityPanel` | Uses a matching lower-left console with a native-scale 3x2 Effects grid and tall torch above one System row. |
 | Encounter and combat context | `CreatureRect`, `CombatBRPanel`, `TurnOrderPanel`, and map overlays | Reuses the shell instead of replacing its geography. |
 
 ## Presentation facade
@@ -59,6 +59,7 @@ The pilot must keep every current action reachable:
 | Save or load | `_on_save_button_pressed` |
 | Settings | `_on_SettingsButton_pressed` |
 | Classic search | `ClassicSearchActionButton`; its effect-slot animation is visible only while the party is actively searching |
+| Classic area search | `AreaSearchButton`; holding the button or `A` forces repeated 3x3 checks, spending five Classic timeclicks per pass, and releasing it stops immediately |
 | Classic torch | `ClassicTorchButton`; its frame is always stable, an unlit torch appears for party-owned inventory, the flame animates only while lit, and the image is empty without a torch |
 
 The status contract includes party portraits and selection, fatigue, time,
@@ -70,17 +71,23 @@ context, targeting, and the existing combat action panel.
 
 - Supported mouse-and-keyboard viewports begin at 1152x648.
 - The HUD renders at 1:1 scale. It is never shrunk as one bitmap-like surface.
-- The party rail remains 320 pixels wide. The command console is 490 pixels
-  wide so its actions and status can be grouped without enlarging their hit
-  targets.
+- The party rail and gameplay command console remain aligned at 320 pixels.
+  A separate 220-pixel utility/status console anchors the lower-left while the
+  narrative region flexes between them.
 - The narrative and action band is `clamp(round(height * 0.28), 200, 216)`.
 - HUD regions meet at zero spacing so the stone frame reads as one Realmz
   console rather than detached dashboard panes.
 - Action controls retain their stone-and-gold Realmz frames, expose tooltips,
   accept keyboard focus, and remain at least 48x48 in the supported matrix.
-  Their three rows are Party (inventory, money, spells, abilities, order),
-  Explore (camp, rest, map, bestiary, encounter, search), and System (temple,
-  shop, quick save, save/load, settings).
+  The gameplay console rows are Party (inventory, money, spells, abilities),
+  Explore (camp, rest, map, bestiary, encounter), and Context (search, held
+  area search, temple, shop). Effects and the tall torch occupy the utility
+  console's upper tier; party order, quick save, save/load, and settings share
+  one System row beneath them.
+- Like the established HUD controls, Search, Area Search, and Encounter use
+  complete native 50x50 overlay textures. Their yellow captions are baked at
+  the pixel grid instead of drawn as outlined live labels; Area Search reserves
+  two lines within the same face rather than enlarging one button class.
 - Character selection uses the familiar side marker. The portrait and hidden
   selection hit area do not add animated or sweeping hover frames.
 - While loot or encounter choices are open, each visible party row becomes a
@@ -92,7 +99,8 @@ context, targeting, and the existing combat action panel.
 The first runtime matrix covered 1152x648, 1280x720, 1920x1080, 2560x1440,
 and 3440x1440. The grouped-console probe kept every direct action, group label,
 divider, effect display, and torch control inside the dock at each size. The
-world region grew while the command console stayed 490 pixels wide.
+world region grew while the right command console stayed aligned to the
+320-pixel party rail and the left utility console stayed 220 pixels wide.
 Remake-owned captures are kept in the separate UI reference
 workspace rather than this repository.
 

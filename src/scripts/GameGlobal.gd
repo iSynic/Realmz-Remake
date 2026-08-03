@@ -730,6 +730,44 @@ func apply_classic_search_time_cost() -> bool:
 	return true
 
 
+func perform_classic_area_search(position := Vector2i(-1, -1)) -> Dictionary:
+	if not is_classic_runtime_active():
+		return {
+			"status": "unavailable",
+			"handled": false,
+			"message": "Area Search is only available in a Classic campaign",
+		}
+	if fatigue >= ClassicRestScript.MAX_FATIGUE:
+		return {
+			"status": "exhausted",
+			"handled": true,
+			"revealed": false,
+			"message": "The party is too fatigued to search the area",
+		}
+	if position == Vector2i(-1, -1):
+		if map == null or map.owcharacter == null:
+			return {
+				"status": "unavailable",
+				"handled": false,
+				"message": "The party has no current map position",
+			}
+		position = Vector2i(
+			int(map.owcharacter.tile_position_x),
+			int(map.owcharacter.tile_position_y)
+		)
+
+	# buttonchoice.c's held Area Search calls checkforsecret(TRUE), which spends
+	# four timeclicks and guarantees the surrounding three-by-three check. The
+	# control loop then spends one additional timeclick before its next pass.
+	var base_scale := _current_classic_base_scale()
+	pass_time(classic_timeclick_pass_time_units(4, base_scale))
+	var result := discover_classic_map_secrets(position, true)
+	pass_time(classic_timeclick_pass_time_units(1, base_scale))
+	result["position"] = position
+	result["timeclicks"] = 5
+	return result
+
+
 func _current_classic_base_scale() -> int:
 	if map != null and map.owcharacter != null:
 		var x := int(map.owcharacter.tile_position_x)
@@ -1128,13 +1166,20 @@ func reveal_classic_dungeon_overhead(position: Vector2i) -> Dictionary:
 	}
 
 
-func discover_classic_map_secrets(position: Vector2i) -> Dictionary:
+func discover_classic_map_secrets(
+	position: Vector2i,
+	force_detection := false
+) -> Dictionary:
 	if (
 		not is_instance_valid(classic_runtime_host)
 		or not classic_runtime_host.has_method("discover_map_secrets")
 	):
 		return {"handled": false}
-	var result: Variant = classic_runtime_host.call("discover_map_secrets", position)
+	var result: Variant = classic_runtime_host.call(
+		"discover_map_secrets",
+		position,
+		force_detection
+	)
 	return result if result is Dictionary else {
 		"status": "error",
 		"handled": true,

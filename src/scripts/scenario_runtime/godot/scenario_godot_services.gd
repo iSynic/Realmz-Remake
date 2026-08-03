@@ -423,13 +423,15 @@ func resolve_classic_map_movement(
 
 func discover_classic_map_secrets(
 	runtime_state: Object,
-	position: Vector2i
+	position: Vector2i,
+	force_detection := false
 ) -> Dictionary:
 	return classic_map_bridge.discover_map_secrets(
 		runtime_state,
 		position,
 		_autoload("GameGlobal"),
-		_classic_campaign_resources()
+		_classic_campaign_resources(),
+		force_detection
 	)
 
 
