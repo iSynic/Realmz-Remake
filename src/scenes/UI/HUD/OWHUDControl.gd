@@ -197,6 +197,7 @@ func initialize() : # takes an array of Characters GD class objects !
 #	for c in ncharacters :
 #		print(c.charname)
 	charsVContainer.add_theme_constant_override ("separation",0)
+	_configure_party_scrollbar()
 #	inventoryBoxCont.add_theme_constant_override ("separation",0)
 #	characters = GameGlobal.player_characters
 	fillCharactersRect()
@@ -402,21 +403,63 @@ func fillCharactersRect() :
 		charsVContainer.remove_child(child)
 		child.queue_free()
 	for c  in GameGlobal.player_characters :
-		var charpanel = charsmallpanelTSCN.instantiate()
+		var charpanel: CharaSmallPanel = charsmallpanelTSCN.instantiate()
 		charsVContainer.add_child(charpanel)
 #		charpanel._set_global_position(Vector2(0,300*i) )
 		charpanel.set_character(c)
 		charpanel.update_display()
 		charpanel.chara_small_panel_selected.connect(self._on_chara_panel_selected.bind(charpanel))
-		
-	for c  in GameGlobal.player_allies :
-		var charpanel = charsmallpanelTSCN.instantiate()
-		charpanel.paneltype = 1  #marks as NPC
+	for c in GameGlobal.player_allies:
+		if not (c is Creature):
+			continue
+		var charpanel: CharaSmallPanel = charsmallpanelTSCN.instantiate()
+		charpanel.paneltype = 1
 		charsVContainer.add_child(charpanel)
-#		charpanel._set_global_position(Vector2(0,300*i) )
 		charpanel.set_character(c)
 		charpanel.update_display()
-		charpanel.chara_small_panel_selected.connect(self._on_chara_panel_selected.bind(charpanel))
+		charpanel.chara_small_panel_selected.connect(
+			self._on_chara_panel_selected.bind(charpanel)
+		)
+	var current_panel := _selected_party_panel()
+	if current_panel != null:
+		charscrollcont.call_deferred(&"ensure_control_visible", current_panel)
+
+
+func _selected_party_panel() -> Control:
+	for panel in charsVContainer.get_children():
+		if panel is CharaSmallPanel and panel.character == selected_character:
+			return panel
+	return charsVContainer.get_child(0) if charsVContainer.get_child_count() > 0 else null
+
+
+func _configure_party_scrollbar() -> void:
+	charscrollcont.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	charscrollcont.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	charscrollcont.scroll_vertical_custom_step = 60.0
+	var scrollbar: VScrollBar = charscrollcont.get_v_scroll_bar()
+	scrollbar.custom_minimum_size = Vector2(8.0, 0.0)
+	scrollbar.step = 60.0
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color(0.08, 0.08, 0.08, 0.62)
+	track.corner_radius_top_left = 3
+	track.corner_radius_top_right = 3
+	track.corner_radius_bottom_left = 3
+	track.corner_radius_bottom_right = 3
+	var grabber := StyleBoxFlat.new()
+	grabber.bg_color = Color(0.42, 0.42, 0.42, 0.9)
+	grabber.corner_radius_top_left = 3
+	grabber.corner_radius_top_right = 3
+	grabber.corner_radius_bottom_left = 3
+	grabber.corner_radius_bottom_right = 3
+	var grabber_hover: StyleBoxFlat = grabber.duplicate()
+	grabber_hover.bg_color = Color(0.58, 0.58, 0.58, 0.95)
+	var grabber_pressed: StyleBoxFlat = grabber.duplicate()
+	grabber_pressed.bg_color = Color(0.78, 0.72, 0.32, 1.0)
+	scrollbar.add_theme_stylebox_override(&"scroll", track)
+	scrollbar.add_theme_stylebox_override(&"scroll_focus", track)
+	scrollbar.add_theme_stylebox_override(&"grabber", grabber)
+	scrollbar.add_theme_stylebox_override(&"grabber_highlight", grabber_hover)
+	scrollbar.add_theme_stylebox_override(&"grabber_pressed", grabber_pressed)
 
 func _on_chara_panel_selected(cp : CharaSmallPanel) :
 	print("OWHUDControl _on_chara_panel_selected "+ cp.character.name+ ' is exmenu ? ', StateMachine.state == StateMachine.ex_menu_state)

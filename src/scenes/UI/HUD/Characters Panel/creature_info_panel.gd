@@ -28,6 +28,8 @@ func _ready() -> void :
 	if not show_outer_bg :
 		# Drop the redundant stone bg — parent already provides one.
 		texture = null
+	if description_header_label != null :
+		description_header_label.text = description_header
 
 
 # Per-instance customization. Char panel keeps the defaults (4-column stats,
@@ -55,8 +57,11 @@ func _ready() -> void :
 @export var abil_spacer : Control
 @export var abilities_header : Label
 @export var abilities_label : Label
+@export var description_header_label : Label
 @export var descr_label : Label
 @export var close_button : Button
+@export var description_header := "Lore"
+@export var show_current_resources := false
 
 const COLOR_LABEL : Color = Color(0.85, 0.85, 0.85, 1)
 const COLOR_VALUE : Color = Color(1, 1, 1, 1)
@@ -131,13 +136,26 @@ func populate(cdata) -> void :
 
 	var max_hp : int = int(stats.get("maxHP", 0))
 	var max_sp : int = int(stats.get("maxSP", 0))
-	hp_label.text = "HP %d" % max_hp
-	sp_label.text = "SP %d" % max_sp
+	var use_current_resources := (
+		show_current_resources
+		or bool(cdata.get("show_current_resources", false))
+	)
+	if use_current_resources :
+		var cur_hp : int = int(stats.get("curHP", max_hp))
+		var cur_sp : int = int(stats.get("curSP", max_sp))
+		hp_label.text = "HP %d/%d" % [cur_hp, max_hp]
+		sp_label.text = "SP %d/%d" % [cur_sp, max_sp]
+	else :
+		hp_label.text = "HP %d" % max_hp
+		sp_label.text = "SP %d" % max_sp
 
 	_rebuild_stats_grid(stats)
 	_rebuild_resists_grid(stats)
 	_populate_aux_panel(cdata, tags, tools)
 
+	description_header_label.text = str(
+		cdata.get("description_header", description_header)
+	)
 	descr_label.text = str(data.get("description", ""))
 
 

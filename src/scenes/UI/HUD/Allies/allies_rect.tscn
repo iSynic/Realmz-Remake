@@ -1,163 +1,176 @@
-[gd_scene load_steps=10 format=3 uid="uid://37bdl7c76fpb"]
+[gd_scene load_steps=9 format=3 uid="uid://37bdl7c76fpb"]
 
-[ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="1_ogmno"]
-[ext_resource type="Script" path="res://scenes/UI/HUD/Allies/allies_rect.gd" id="2_pi45d"]
-[ext_resource type="PackedScene" uid="uid://2w0rb8651ynm" path="res://scenes/UI/HUD/Allies/crea_v_box.tscn" id="3_4437a"]
-[ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="3_g2gb7"]
-[ext_resource type="StyleBox" uid="uid://bn77hwn55wtsk" path="res://shared_assets/UI/button_normal_styleboxtexture.tres" id="4_t6gqf"]
-[ext_resource type="PackedScene" uid="uid://colmfl37rp3kg" path="res://scenes/UI/HUD/Allies/summons_v_box.tscn" id="4_twyn4"]
-[ext_resource type="StyleBox" uid="uid://8eudfxoe8j40" path="res://shared_assets/UI/button_hover_styleboxtexture.tres" id="5_xllfx"]
-[ext_resource type="StyleBox" uid="uid://wrrfixqq8c4o" path="res://shared_assets/UI/button_pressed_styleboxtexture.tres" id="6_oxt08"]
-[ext_resource type="StyleBox" uid="uid://c5gq8lv8robgu" path="res://shared_assets/UI/button_disabled_styleboxtexture.tres" id="7_i86ev"]
+[ext_resource type="Texture2D" path="res://shared_assets/UI/StonePatternRect9.png" id="1_stone"]
+[ext_resource type="Script" path="res://scenes/UI/HUD/Allies/allies_rect.gd" id="2_script"]
+[ext_resource type="PackedScene" path="res://scenes/UI/HUD/Allies/allies_entry_row.tscn" id="3_entry"]
+[ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="4_font"]
+[ext_resource type="PackedScene" uid="uid://b2x4kchstat01" path="res://scenes/UI/HUD/Characters Panel/creature_info_panel.tscn" id="5_info"]
+[ext_resource type="StyleBox" path="res://shared_assets/UI/button_normal_styleboxtexture.tres" id="6_normal"]
+[ext_resource type="StyleBox" path="res://shared_assets/UI/button_hover_styleboxtexture.tres" id="7_hover"]
+[ext_resource type="StyleBox" path="res://shared_assets/UI/button_pressed_styleboxtexture.tres" id="8_pressed"]
 
-[node name="AlliesRect" type="NinePatchRect" node_paths=PackedStringArray("summonsvbox", "specialshbox", "okbutton", "oklabel")]
+[node name="AlliesRect" type="NinePatchRect" node_paths=PackedStringArray("entry_container", "empty_label", "ally_count_label", "info_panel", "retention_label", "done_button")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-size_flags_horizontal = 4
-texture = ExtResource("1_ogmno")
-patch_margin_left = 10
-patch_margin_top = 10
-patch_margin_right = 10
-patch_margin_bottom = 10
+texture = ExtResource("1_stone")
+patch_margin_left = 11
+patch_margin_top = 11
+patch_margin_right = 11
+patch_margin_bottom = 11
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
-script = ExtResource("2_pi45d")
-creavboxTSCN = ExtResource("3_4437a")
-summonsboxTSCN = ExtResource("4_twyn4")
-summonsvbox = NodePath("VBoxContainer/VScrollContainer/ScrollVBox/SummonsVBox")
-specialshbox = NodePath("VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox/ScrollContainer/SpecialScrollHBox")
-okbutton = NodePath("VBoxContainer/BotControl/OKButton")
-oklabel = NodePath("VBoxContainer/BotControl/OKButton/OKLabel")
-metadata/_edit_horizontal_guides_ = []
+script = ExtResource("2_script")
+entry_tscn = ExtResource("3_entry")
+entry_container = NodePath("OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox/ListScroll/EntryContainer")
+empty_label = NodePath("OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox/EmptyLabel")
+ally_count_label = NodePath("OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox/AllyCount")
+info_panel = NodePath("OuterMargin/MainVBox/Body/InfoScroll/InfoPanel")
+retention_label = NodePath("OuterMargin/MainVBox/Footer/RetentionLabel")
+done_button = NodePath("OuterMargin/MainVBox/Footer/DoneButton")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="."]
+[node name="OuterMargin" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 14.0
-offset_top = 10.0
-offset_right = -10.0
-offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 14
 
-[node name="Title" type="Label" parent="VBoxContainer"]
-custom_minimum_size = Vector2(0, 40)
+[node name="MainVBox" type="VBoxContainer" parent="OuterMargin"]
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 0, 0, 1)
-theme_override_fonts/font = ExtResource("3_g2gb7")
-theme_override_font_sizes/font_size = 32
-text = "Manage Allies"
+theme_override_constants/separation = 8
+
+[node name="Header" type="HBoxContainer" parent="OuterMargin/MainVBox"]
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+
+[node name="Title" type="Label" parent="OuterMargin/MainVBox/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.96, 0, 1)
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 28
+text = "Allies"
+vertical_alignment = 1
+
+[node name="Body" type="HBoxContainer" parent="OuterMargin/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 8
+
+[node name="ListRect" type="NinePatchRect" parent="OuterMargin/MainVBox/Body"]
+custom_minimum_size = Vector2(330, 0)
+layout_mode = 2
+texture = ExtResource("1_stone")
+patch_margin_left = 11
+patch_margin_top = 11
+patch_margin_right = 11
+patch_margin_bottom = 11
+axis_stretch_horizontal = 1
+axis_stretch_vertical = 1
+
+[node name="ListMargin" type="MarginContainer" parent="OuterMargin/MainVBox/Body/ListRect"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="ListVBox" type="VBoxContainer" parent="OuterMargin/MainVBox/Body/ListRect/ListMargin"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ListHeader" type="Label" parent="OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.96, 0, 1)
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 19
+text = "Party Allies"
+
+[node name="AllyCount" type="Label" parent="OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.72, 0.72, 1)
+theme_override_font_sizes/font_size = 12
+text = "0 companions"
+
+[node name="ListScroll" type="ScrollContainer" parent="OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
+
+[node name="EntryContainer" type="VBoxContainer" parent="OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox/ListScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 3
+
+[node name="EmptyLabel" type="Label" parent="OuterMargin/MainVBox/Body/ListRect/ListMargin/ListVBox"]
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(0.72, 0.72, 0.72, 1)
+theme_override_font_sizes/font_size = 14
+text = "No allies are currently traveling with the party."
 horizontal_alignment = 1
 vertical_alignment = 1
+autowrap_mode = 3
 
-[node name="VScrollContainer" type="ScrollContainer" parent="VBoxContainer"]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="ScrollVBox" type="VBoxContainer" parent="VBoxContainer/VScrollContainer"]
+[node name="InfoScroll" type="ScrollContainer" parent="OuterMargin/MainVBox/Body"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 1
+scroll_vertical_custom_step = 48.0
 
-[node name="SpecialVbox" type="VBoxContainer" parent="VBoxContainer/VScrollContainer/ScrollVBox"]
-custom_minimum_size = Vector2(0, 128)
+[node name="InfoPanel" parent="OuterMargin/MainVBox/Body/InfoScroll" instance=ExtResource("5_info")]
+custom_minimum_size = Vector2(0, 800)
 layout_mode = 2
+stats_columns = 2
+skip_zero_stats = true
+hidden_stat_keys = Array[String](["Weight_Limit", "SP_regen_base", "HP_regen_base"])
+show_outer_bg = false
+description_header = "Equipment & Classic Details"
+show_current_resources = true
 
-[node name="SpecialLabel" type="Label" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox"]
-custom_minimum_size = Vector2(0, 40)
+[node name="Footer" type="HBoxContainer" parent="OuterMargin/MainVBox"]
+custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 0.980392, 0, 1)
-theme_override_fonts/font = ExtResource("3_g2gb7")
-theme_override_font_sizes/font_size = 24
-text = "Special Characters :"
+theme_override_constants/separation = 12
+
+[node name="RetentionLabel" type="Label" parent="OuterMargin/MainVBox/Footer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.82, 0.82, 0.82, 1)
+theme_override_font_sizes/font_size = 13
+text = "Select an ally to inspect it. Permanent summons marked Keep continue with the party."
 vertical_alignment = 1
+autowrap_mode = 3
 
-[node name="SpecialHBox" type="HBoxContainer" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox"]
-custom_minimum_size = Vector2(0, 80)
+[node name="DoneButton" type="Button" parent="OuterMargin/MainVBox/Footer"]
+custom_minimum_size = Vector2(112, 36)
 layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.96, 0, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 0.35, 1)
+theme_override_fonts/font = ExtResource("4_font")
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = ExtResource("6_normal")
+theme_override_styles/hover = ExtResource("7_hover")
+theme_override_styles/pressed = ExtResource("8_pressed")
+text = "Done"
 
-[node name="statsVBox" type="VBoxContainer" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox"]
-layout_mode = 2
-theme_override_constants/separation = 0
-
-[node name="Control" type="Control" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox/statsVBox"]
-custom_minimum_size = Vector2(40, 80)
-layout_mode = 2
-
-[node name="NameLabel" type="Label" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox/statsVBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 12
-text = "Name :"
-horizontal_alignment = 2
-
-[node name="HPLabel" type="Label" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox/statsVBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 12
-text = "HP :"
-horizontal_alignment = 2
-
-[node name="SPLabel" type="Label" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox/statsVBox"]
-layout_mode = 2
-theme_override_font_sizes/font_size = 12
-text = "SP ect :"
-horizontal_alignment = 2
-
-[node name="ScrollContainer" type="ScrollContainer" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="SpecialScrollHBox" type="HBoxContainer" parent="VBoxContainer/VScrollContainer/ScrollVBox/SpecialVbox/SpecialHBox/ScrollContainer"]
-layout_mode = 2
-
-[node name="SummonsVBox" type="VBoxContainer" parent="VBoxContainer/VScrollContainer/ScrollVBox"]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="BotControl" type="Control" parent="VBoxContainer"]
-custom_minimum_size = Vector2(0, 40)
-layout_mode = 2
-
-[node name="OKButton" type="Button" parent="VBoxContainer/BotControl"]
-layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -40.0
-offset_top = -17.0
-offset_right = 40.0
-offset_bottom = 17.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_colors/font_disabled_color = Color(0.501961, 0.501961, 0.376471, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 0, 1)
-theme_override_colors/font_pressed_color = Color(0.8, 0.784314, 0, 1)
-theme_override_colors/font_color = Color(1, 0.980392, 0, 1)
-theme_override_fonts/font = ExtResource("3_g2gb7")
-theme_override_font_sizes/font_size = 24
-theme_override_styles/disabled = ExtResource("7_i86ev")
-theme_override_styles/hover = ExtResource("5_xllfx")
-theme_override_styles/pressed = ExtResource("6_oxt08")
-theme_override_styles/normal = ExtResource("4_t6gqf")
-text = "OK"
-
-[node name="OKLabel" type="Label" parent="VBoxContainer/BotControl/OKButton"]
-visible = false
-layout_mode = 0
-offset_left = 85.0
-offset_top = 5.0
-offset_right = 341.0
-offset_bottom = 31.0
-theme_override_colors/font_color = Color(1, 0.0196078, 0, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
-theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-theme_override_constants/outline_size = 1
-text = "Samuel cannot keep so many summoned creatures !"
-
-[connection signal="pressed" from="VBoxContainer/BotControl/OKButton" to="." method="_on_ok_button_pressed"]
+[connection signal="pressed" from="OuterMargin/MainVBox/Footer/DoneButton" to="." method="_on_done_button_pressed"]

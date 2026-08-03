@@ -10,6 +10,7 @@ const DefaultPortrait = preload(
 var failures: Array[String] = []
 var assertions := 0
 var _saved_players: Array = []
+var _saved_allies: Array = []
 var _saved_shop_name := ""
 var _saved_shops: Dictionary = {}
 var _saved_pool: Array = []
@@ -104,6 +105,7 @@ func _run_smoke() -> void:
 		"shared catalog loads for item UI flow smoke",
 	)
 	_saved_players = GameGlobal.player_characters.duplicate()
+	_saved_allies = GameGlobal.player_allies.duplicate()
 	_saved_shop_name = GameGlobal.currentShop
 	_saved_shops = GameGlobal.shops_dict
 	_saved_pool = GameGlobal.money_pool.duplicate()
@@ -113,6 +115,7 @@ func _run_smoke() -> void:
 	_test_storage_transfer_ui(resources)
 	_test_encounter_item_selection_ui(resources)
 	await _test_party_actor_selection_ui()
+	await _test_allies_ui()
 	await _test_classic_torch_and_search_ui(resources)
 	await _test_manual_encounter_dispatch()
 	_restore_globals()
@@ -360,6 +363,140 @@ func _click_control(control: Control) -> void:
 		event.global_position = click_position
 		viewport.push_input(event)
 		await get_tree().process_frame
+
+
+func _test_allies_ui() -> void:
+	var ally := Creature.new()
+	ally.name = "Vodalian"
+	ally.level = 11
+	ally.is_npc_ally = true
+	ally.textureR = DefaultPortrait
+	ally.stats["curHP"] = 21
+	ally.stats["maxHP"] = 21
+	ally.stats["curSP"] = 90
+	ally.stats["maxSP"] = 90
+	ally.stats["MaxMovement"] = 12
+	ally.set_meta("classic_armor", 25)
+	ally.set_meta("classic_magic_resistance", 8)
+	var traveling_allies: Array = [ally]
+	for index in range(5):
+		var companion := Creature.new()
+		companion.name = "Companion %d" % (index + 1)
+		companion.is_npc_ally = true
+		companion.textureR = DefaultPortrait
+		companion.stats["curHP"] = 10
+		companion.stats["maxHP"] = 10
+		traveling_allies.append(companion)
+	GameGlobal.player_allies = traveling_allies
+	var hud: OW_HUD = UI.ow_hud
+	hud.fillCharactersRect()
+	await get_tree().process_frame
+	_expect_equal(
+		hud.charsVContainer.get_child_count(),
+		GameGlobal.player_characters.size() + traveling_allies.size(),
+		"allies appear after player characters in the party rail",
+	)
+	var ally_panel: CharaSmallPanel = hud.charsVContainer.get_child(
+		GameGlobal.player_characters.size()
+	)
+	_expect(
+		ally_panel.paneltype == 1 and ally_panel.character == ally,
+		"the first ally retains its live creature identity in the party rail",
+	)
+	var party_scrollbar: VScrollBar = hud.charscrollcont.get_v_scroll_bar()
+	_expect(
+		hud.charscrollcont.vertical_scroll_mode \
+			== ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+			and party_scrollbar.visible,
+		"the party rail provides a persistent visible scrollbar",
+	)
+	_expect(
+		party_scrollbar.max_value > party_scrollbar.page,
+		"the party scrollbar owns overflow when characters and allies exceed the rail",
+	)
+	var portrait_viewport := SubViewport.new()
+	portrait_viewport.size = Vector2i(320, 60)
+	add_child(portrait_viewport)
+	var ally_panel_index := ally_panel.get_index()
+	hud.charsVContainer.remove_child(ally_panel)
+	portrait_viewport.add_child(ally_panel)
+	ally_panel.position = Vector2.ZERO
+	ally_panel.size = Vector2(320.0, 60.0)
+	await get_tree().process_frame
+	await _click_control(ally_panel.faceButton)
+	_expect_equal(
+		hud.characterStatRect.name_label.text,
+		"Vodalian",
+		"clicking an ally portrait opens that ally's details from the party rail",
+	)
+	_expect_equal(
+		hud.characterStatRect.description_header_label.text,
+		"Equipment & Classic Details",
+		"the party-rail ally view identifies its Classic detail section",
+	)
+	_expect(
+		not hud.characterStatRect.descr_label.text.contains("NOTES"),
+		"ally details do not expose an unsupported free-floating notes section",
+	)
+	hud.characterStatRect.hide()
+	portrait_viewport.remove_child(ally_panel)
+	hud.charsVContainer.add_child(ally_panel)
+	hud.charsVContainer.move_child(ally_panel, ally_panel_index)
+	portrait_viewport.queue_free()
+
+	var input_viewport := SubViewport.new()
+	input_viewport.size = Vector2i(1152, 648)
+	add_child(input_viewport)
+	var allies_screen: AlliesRect = preload(
+		"res://scenes/UI/HUD/Allies/allies_rect.tscn"
+	).instantiate()
+	input_viewport.add_child(allies_screen)
+	await get_tree().process_frame
+	allies_screen.fill([ally])
+	await get_tree().process_frame
+	_expect_equal(
+		allies_screen.entry_container.get_child_count(),
+		1,
+		"the Allies menu renders each live companion as a roster entry",
+	)
+	_expect_equal(
+		allies_screen.info_panel.name_label.text,
+		"Vodalian",
+		"selecting an ally populates the shared detail panel",
+	)
+	var detail_scroll: ScrollContainer = allies_screen.get_node(
+		"OuterMargin/MainVBox/Body/InfoScroll"
+	)
+	var detail_scrollbar: VScrollBar = detail_scroll.get_v_scroll_bar()
+	_expect(
+		detail_scrollbar.max_value > detail_scrollbar.page,
+		"the compact Allies window scrolls its complete detail panel instead of collapsing it",
+	)
+	_expect(
+		not allies_screen.info_panel.close_button.visible,
+		"the embedded detail panel does not add a second overlapping close action",
+	)
+	var row = allies_screen.entry_container.get_child(0)
+	await _click_control(row.retain_button)
+	_expect(
+		not row.is_retained(),
+		"a physical click can remove an ally from the retained party",
+	)
+	await _click_control(row.retain_button)
+	_expect(
+		row.is_retained(),
+		"a second physical click restores the ally retention choice",
+	)
+	input_viewport.remove_child(allies_screen)
+	allies_screen.queue_free()
+	input_viewport.queue_free()
+	GameGlobal.player_allies = []
+	hud.fillCharactersRect()
+	_expect_equal(
+		hud.charsVContainer.get_child_count(),
+		GameGlobal.player_characters.size(),
+		"removing allies removes their party-rail entries without a separate HUD action",
+	)
 
 
 func _test_classic_torch_and_search_ui(resources: CampaignResources) -> void:
@@ -650,6 +787,7 @@ func _player(character_name: String) -> PlayerCharacter:
 
 func _restore_globals() -> void:
 	GameGlobal.player_characters = _saved_players
+	GameGlobal.player_allies = _saved_allies
 	GameGlobal.currentShop = _saved_shop_name
 	GameGlobal.shops_dict = _saved_shops
 	GameGlobal.money_pool = _saved_pool

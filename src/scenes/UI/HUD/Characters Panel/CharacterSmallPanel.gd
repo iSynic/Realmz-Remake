@@ -70,6 +70,7 @@ func set_character(chara : Creature) -> void :
 		faceButton.icon = chara.portrait
 	else :
 		faceButton.icon = chara.textureR
+		faceButton.tooltip_text = "View ally details: %s" % chara.name
 	bandead_sprite.frame = chara.life_status
 
 func set_type(t : int, showdropmenu : bool = true) :
@@ -281,6 +282,10 @@ func show_spell_effect(effect_texture_frame) :
 
 
 func _on_portrait_button_pressed():
+	if character.is_npc_ally or character.is_summoned:
+		var ally_data: Dictionary = UI.ow_hud.alliesCtrl.creature_info(character)
+		_show_character_info(ally_data)
+		return
 	var cdata : Dictionary = {"data": {}, "stats":{},"tools":{"spells" : []}}
 	cdata["data"]["name"] = character.name
 	cdata["data"]["level"] = character.level
@@ -347,6 +352,10 @@ func _on_portrait_button_pressed():
 
 	for s in character.stats :
 		cdata["stats"][s] = character.get_stat(s)
+	_show_character_info(cdata)
+
+
+func _show_character_info(cdata: Dictionary) -> void:
 	# Mutually exclusive with the bestiary — never overlap.
 	if UI.ow_hud.bestiaryRect.visible :
 		UI.ow_hud.bestiaryRect.hide()

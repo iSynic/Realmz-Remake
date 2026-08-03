@@ -7,7 +7,7 @@
 [ext_resource type="StyleBox" path="res://shared_assets/UI/button_hover_styleboxtexture.tres" id="5_btn_h"]
 [ext_resource type="StyleBox" path="res://shared_assets/UI/button_pressed_styleboxtexture.tres" id="6_btn_p"]
 
-[node name="CreatureInfoPanel" type="NinePatchRect" node_paths=PackedStringArray("portrait_texrect", "name_label", "subtitle_label", "hp_label", "sp_label", "stats_grid", "resists_grid", "tags_header", "tags_label", "special_grid", "abil_spacer", "abilities_header", "abilities_label", "descr_label", "close_button")]
+[node name="CreatureInfoPanel" type="NinePatchRect" node_paths=PackedStringArray("portrait_texrect", "name_label", "subtitle_label", "hp_label", "sp_label", "stats_grid", "resists_grid", "tags_header", "tags_label", "special_grid", "abil_spacer", "abilities_header", "abilities_label", "description_header_label", "descr_label", "close_button")]
 size_flags_horizontal = 3
 size_flags_vertical = 3
 texture = ExtResource("1_stone")
@@ -31,6 +31,7 @@ special_grid = NodePath("OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/T
 abil_spacer = NodePath("OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox/AbilSpacer")
 abilities_header = NodePath("OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox/AbilitiesHeader")
 abilities_label = NodePath("OuterMargin/InfoVBox/BottomRow/TagsAbilPanel/TAMargin/TAVBox/AbilitiesValue")
+description_header_label = NodePath("OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin/LoreVBox/LoreHeader")
 descr_label = NodePath("OuterMargin/InfoVBox/BottomRow/LorePanel/LoreMargin/LoreVBox/DescrLabel")
 close_button = NodePath("OuterMargin/InfoVBox/HeaderRow/CloseButton")
 
