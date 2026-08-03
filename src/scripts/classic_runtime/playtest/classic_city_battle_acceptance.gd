@@ -24,6 +24,12 @@ const DRAGON_MONSTER_ID := 39
 const DRAGON_TRIGGER_POSITION := Vector2i(29, 24)
 const DRAGON_INTRO_MESSAGE := "You emerge into the musty confines of a large cavern"
 const DRAGON_BATTLE_MESSAGE := "You stand toe-to-toe with a blue dragon"
+const RANDOM_AP_TRIGGER_ID := "Data DD:0:62"
+const RANDOM_AP_RECTANGLE_ID := 2
+const RANDOM_AP_POSITION := Vector2i(73, 13)
+const RANDOM_AP_MESSAGE := "As you travel deeper into the cavern"
+const RANDOM_AP_BATTLE_ACTION_ID := 264
+const RANDOM_AP_RESOLVED_BATTLE_ID := 171
 const GUARD_TRIGGER_ID := "Data DD:0:0"
 const GUARD_POSITION := Vector2i(9, 17)
 const GUARD_INTRO_MESSAGE := "You enter the guard house outside the main gate"
@@ -88,6 +94,9 @@ var interactive_overworld := false
 var presentation_only := false
 var winter_smoke := false
 var dragon_smoke := false
+var random_ap_smoke := false
+var random_ap_movement_finished := false
+var random_ap_movement_can_walk := false
 var acceptance_phase := ""
 var profile_root := ""
 var smoke_capture_directory := ""
@@ -113,6 +122,8 @@ func _start_playtest() -> void:
 			winter_smoke = true
 		elif argument == "--dragon-smoke":
 			dragon_smoke = true
+		elif argument == "--random-ap-smoke":
+			random_ap_smoke = true
 		elif argument == "--save-phase":
 			acceptance_phase = "save"
 			launch_through_ui = true
@@ -132,6 +143,8 @@ func _start_playtest() -> void:
 		_finish_smoke()
 		return
 	campaign_directory = campaign_directory.replace("\\", "/").trim_suffix("/")
+	if random_ap_smoke:
+		native_campaign = "City of Bywater (Classic)"
 	if not acceptance_phase.is_empty():
 		if not _prepare_acceptance_profile():
 			_finish_smoke()
@@ -165,6 +178,10 @@ func _start_playtest() -> void:
 		"the fresh City bundle enters native map_0 at its authored start"
 	)
 	if not smoke_failures.is_empty():
+		_finish_smoke()
+		return
+	if random_ap_smoke:
+		await _verify_random_battle_ap_continuation()
 		_finish_smoke()
 		return
 	if not await _verify_settings_and_map_music():
@@ -1140,6 +1157,185 @@ func _verify_winter_timed_encounter() -> void:
 	)
 	if winter_message_presented:
 		UI.ow_hud.textRect.disablerButton.pressed.emit()
+
+
+func _verify_random_battle_ap_continuation() -> void:
+	var area_value: Variant = NodeAccess.__Map().mapscriptareas.get("LRR0.2")
+	var rectangle := host.get_random_rectangle(
+		"land",
+		0,
+		RANDOM_AP_RECTANGLE_ID
+	)
+	if not (area_value is Dictionary) or rectangle.is_empty():
+		_fail("00_random_ap_fixture", "City land rectangle LRR0.2 is unavailable")
+		return
+	var area: Dictionary = area_value
+	var battle_value: Variant = area.get("RR_Battle")
+	if not (battle_value is Dictionary):
+		_fail("00_random_ap_fixture", "City land rectangle LRR0.2 has no battle")
+		return
+	var random_battle: Dictionary = battle_value
+	var battle_text := str(random_battle.get("text", ""))
+
+	# First force one of the rectangle's X-AP outcomes. Replace that X-AP only
+	# in runtime state with a Keep Codes action so the focused case completes
+	# without presenting the unrelated authored burial-mound encounter.
+	host.runtime.runtime_state.set_action_point_override(
+		"Data ED3:macro:28",
+		{
+			"id": "Data ED3:macro:28",
+			"active": true,
+			"callable": true,
+			"actions": [{
+				"kind": "classic",
+				"code": 24,
+				"rawCode": 24,
+				"id": 0,
+				"slot": 7,
+			}],
+		}
+	)
+	var door_rectangle := rectangle.duplicate(true)
+	door_rectangle["percent"] = 10000
+	door_rectangle["randomDoors"] = [28, 0, 0]
+	door_rectangle["randomDoorPercent"] = [100, 0, 0]
+	host.runtime.runtime_state.set_random_rectangle(
+		"land",
+		0,
+		RANDOM_AP_RECTANGLE_ID,
+		door_rectangle
+	)
+	GameGlobal.ClassicRandomRectangleScript.apply_rectangle(
+		area,
+		"land",
+		0,
+		door_rectangle,
+		battle_text
+	)
+	_move_to_position(RANDOM_AP_POSITION)
+	random_ap_movement_finished = false
+	random_ap_movement_can_walk = false
+	call_deferred("_run_random_ap_movement")
+	for _frame: int in 600:
+		if random_ap_movement_finished:
+			break
+		await get_tree().process_frame
+	_verify_stage(
+		"00_random_door_preempts_ap",
+		random_ap_movement_finished
+			and not random_ap_movement_can_walk
+			and not (
+				UI.ow_hud.textRect.visible
+				and UI.ow_hud.textRect.textLabel.get_parsed_text().begins_with(
+					RANDOM_AP_MESSAGE
+				)
+			)
+			and not StateMachine.is_combat_state(),
+		(
+			"a dispatched random X-AP stops the overlapping old-tile AP "
+			+ "(finished=%s, canWalk=%s, text=%s, state=%s)"
+		) % [
+			str(random_ap_movement_finished),
+			str(random_ap_movement_can_walk),
+			UI.ow_hud.textRect.textLabel.get_parsed_text(),
+			StateMachine._state_name,
+		]
+	)
+	if not smoke_failures.is_empty():
+		return
+
+	# Then force the orc battle while retaining the real rectangle and AP.
+	# A one-battle range makes the smoke deterministic; only test-local runtime
+	# state is changed, and the installed campaign remains untouched.
+	var battle_rectangle := rectangle.duplicate(true)
+	battle_rectangle["percent"] = 10000
+	battle_rectangle["randomDoors"] = [27, 28, 29]
+	battle_rectangle["randomDoorPercent"] = [0, 0, 0]
+	battle_rectangle["battleRange"] = [14, 14]
+	battle_rectangle["option"] = -1
+	host.runtime.runtime_state.set_random_rectangle(
+		"land",
+		0,
+		RANDOM_AP_RECTANGLE_ID,
+		battle_rectangle
+	)
+	GameGlobal.ClassicRandomRectangleScript.apply_rectangle(
+		area,
+		"land",
+		0,
+		battle_rectangle,
+		battle_text
+	)
+	random_ap_movement_finished = false
+	random_ap_movement_can_walk = false
+	_move_to_position(RANDOM_AP_POSITION)
+	call_deferred("_run_random_ap_movement")
+
+	var random_battle_entered := false
+	for _frame: int in 600:
+		if StateMachine.is_combat_state():
+			var battle_id := int(StateMachine.combat_state.cur_battle_data.get(
+				"classicBattleId",
+				-1
+			))
+			if battle_id >= 14 and battle_id <= 20:
+				random_battle_entered = true
+				break
+		await get_tree().process_frame
+	if not random_battle_entered:
+		_fail("00_random_ap_battle", "forced LRR0.2 orc battle did not begin")
+		return
+
+	call_deferred("_request_victory")
+	if not await _wait_for_treasure():
+		_fail("00_random_ap_battle", "the forced orc victory did not open rewards")
+		return
+	UI.ow_hud.treasureControl.find_child("ButtonDone").pressed.emit()
+
+	var ap_message_presented := false
+	for _frame: int in 600:
+		if UI.ow_hud.textRect.visible \
+				and UI.ow_hud.textRect.textLabel.get_parsed_text().begins_with(
+					RANDOM_AP_MESSAGE
+				):
+			ap_message_presented = true
+			break
+		await get_tree().process_frame
+	if ap_message_presented:
+		UI.ow_hud.textRect.disablerButton.pressed.emit()
+
+	var ap_battle_entered := false
+	for _frame: int in 600:
+		if StateMachine.is_combat_state() \
+				and int(StateMachine.combat_state.cur_battle_data.get(
+					"classicBattleId",
+					-1
+				)) == RANDOM_AP_RESOLVED_BATTLE_ID:
+			ap_battle_entered = true
+			break
+		await get_tree().process_frame
+	_verify_stage(
+		"00_random_ap_continuation",
+		ap_message_presented
+			and ap_battle_entered
+			and Vector2i(GameGlobal.pos_when_battle_started) == RANDOM_AP_POSITION
+			and not random_ap_movement_finished,
+		(
+			"the LRR0.2 battle resumes %s on the same movement; "
+			+ "its Battle action %d resolves to native Battle %d"
+		) % [
+			RANDOM_AP_TRIGGER_ID,
+			RANDOM_AP_BATTLE_ACTION_ID,
+			RANDOM_AP_RESOLVED_BATTLE_ID,
+		]
+	)
+
+
+func _run_random_ap_movement() -> void:
+	random_ap_movement_can_walk = await StateMachine.check_map_script(
+		RANDOM_AP_POSITION
+	)
+	random_ap_movement_finished = true
 
 
 func _verify_dragon_battle() -> void:

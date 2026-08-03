@@ -340,9 +340,12 @@ func check_map_script(position, context := {}) ->bool :
 	var canwalk = true
 #	print("GameState check_map_scripts : ")
 	GameGlobal.apply_classic_search_time_cost()
-	if await GameGlobal.check_classic_random_rectangles(
+	var random_rectangle_outcome: int = await GameGlobal.check_classic_random_rectangles(
 		Vector2i(position),
 		context
+	)
+	if not GameGlobal.ClassicRandomRectangleScript.continues_tile_processing(
+		random_rectangle_outcome
 	):
 		return false
 	

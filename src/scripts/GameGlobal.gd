@@ -1702,12 +1702,12 @@ func advance_classic_camp_movement_exit() -> void:
 	await _check_classic_random_encounter()
 
 
-func _check_classic_random_encounter() -> bool:
+func _check_classic_random_encounter() -> int:
 	if not is_classic_runtime_active() \
 			or StateMachine.is_combat_state() \
 			or map == null \
 			or map.owcharacter == null:
-		return false
+		return ClassicRandomRectangleScript.Outcome.NONE
 	var position := Vector2i(
 		int(map.owcharacter.tile_position_x),
 		int(map.owcharacter.tile_position_y)
@@ -1718,14 +1718,14 @@ func _check_classic_random_encounter() -> bool:
 func check_classic_random_rectangles(
 	position: Vector2i,
 	context := {}
-) -> bool:
+) -> int:
 	if not is_classic_runtime_active() \
 			or is_classic_action_point_active() \
 			or StateMachine.is_combat_state() \
 			or map == null \
 			or not is_instance_valid(classic_runtime_host) \
 			or not classic_runtime_host.has_method("get_random_rectangle"):
-		return false
+		return ClassicRandomRectangleScript.Outcome.NONE
 	var candidates: Dictionary = {}
 	for area_name_value: Variant in map.mapscriptareas:
 		var area_name := str(area_name_value)
@@ -1829,7 +1829,7 @@ func check_classic_random_rectangles(
 							"message",
 							"Classic random-door state could not be saved"
 						)))
-						return false
+						return ClassicRandomRectangleScript.Outcome.NONE
 					rectangle = consumed.get("rectangle", rectangle)
 					ClassicRandomRectangleScript.apply_rectangle(
 						area,
@@ -1856,7 +1856,7 @@ func check_classic_random_rectangles(
 						"Classic random rectangle references missing trigger %s"
 						% trigger_id
 					)
-					return false
+					return ClassicRandomRectangleScript.Outcome.NONE
 				var trigger_result: Variant = dispatch.get("result", {})
 				if trigger_result is Dictionary \
 						and str(trigger_result.get("status", "")) == "error":
@@ -1864,15 +1864,15 @@ func check_classic_random_rectangles(
 						"message",
 						"Classic random-rectangle trigger stopped"
 					)))
-				return true
+				return ClassicRandomRectangleScript.Outcome.TRIGGER_DISPATCHED
 
 			if random_battles_allowed() \
 					and ClassicRandomRectangleScript.has_battle(rectangle, area):
 				await ScriptHelperFuncsClass.do_RR_battle(area["RR_Battle"])
-				return true
+				return ClassicRandomRectangleScript.Outcome.BATTLE_COMPLETED
 		if ClassicRandomRectangleScript.is_only(rectangle, area):
 			break
-	return false
+	return ClassicRandomRectangleScript.Outcome.NONE
 
 
 func _consume_classic_rest_ration() -> bool:

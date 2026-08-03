@@ -5,6 +5,16 @@ const METADATA_KEY := "classicRandomRectangle"
 const MAX_RECTANGLES := 20
 const MAX_RANDOM_DOORS := 3
 
+enum Outcome {
+	NONE,
+	BATTLE_COMPLETED,
+	TRIGGER_DISPATCHED,
+}
+
+
+static func continues_tile_processing(outcome: int) -> bool:
+	return outcome != Outcome.TRIGGER_DISPATCHED
+
 
 static func identity(area_name: String, area: Dictionary) -> Dictionary:
 	var metadata: Variant = area.get(METADATA_KEY)

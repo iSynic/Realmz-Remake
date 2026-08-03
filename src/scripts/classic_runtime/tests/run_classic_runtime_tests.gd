@@ -17832,6 +17832,24 @@ func _test_classic_light_contract() -> void:
 
 
 func _test_classic_random_rectangle_contract() -> void:
+	_expect(
+		ClassicRandomRectangleScript.continues_tile_processing(
+			ClassicRandomRectangleScript.Outcome.NONE
+		),
+		"a tile with no random event continues to its action point"
+	)
+	_expect(
+		ClassicRandomRectangleScript.continues_tile_processing(
+			ClassicRandomRectangleScript.Outcome.BATTLE_COMPLETED
+		),
+		"a completed random battle continues to an overlapping action point"
+	)
+	_expect(
+		not ClassicRandomRectangleScript.continues_tile_processing(
+			ClassicRandomRectangleScript.Outcome.TRIGGER_DISPATCHED
+		),
+		"a random X-AP transition stops the old tile's action point"
+	)
 	var rectangle := {
 		"battleRange": [9, 13],
 		"bottom": 18,
