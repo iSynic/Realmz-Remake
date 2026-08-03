@@ -640,6 +640,11 @@
 	"price": 1000,
 	"type": "Leather Armor",
 	"img_ptr": "ITEM_Leather_Armor",
+	"classicIconId": 59,
+	"classicRecord": {
+	  "iconId": 59,
+	  "cursedItemId": 213
+	},
 	"sound": "cloth armor.wav",
 	"slots": [
 	  "Body"
@@ -2117,7 +2122,12 @@
 	"weight": 50,
 	"price": 100,
 	"type": "Light Helmet",
-	"img_ptr": "ITEM_Helm_Of_Kranack",
+	"img_ptr": "ITEM_Helm_pain",
+	"classicIconId": 3,
+	"classicRecord": {
+	  "iconId": 3,
+	  "cursedItemId": 148
+	},
 	"sound": "metal armor.wav",
 	"slots": [
 	  "Head"
@@ -8760,6 +8770,11 @@
 	"price": 150,
 	"type": "Chainmail Armor",
 	"img_ptr": "ITEM_Chain_Armor",
+	"classicIconId": 63,
+	"classicRecord": {
+	  "iconId": 63,
+	  "cursedItemId": 0
+	},
 	"sound": "metal armor.wav",
 	"slots": [
 	  "Body"
@@ -10791,7 +10806,12 @@
 	"weight": 150,
 	"price": 1000,
 	"type": "Chainmail Armor",
-	"img_ptr": "ITEM_Chain_Armor",
+	"img_ptr": "ITEM_Chain_Armor_3",
+	"classicIconId": 74,
+	"classicRecord": {
+	  "iconId": 74,
+	  "cursedItemId": 0
+	},
 	"sound": "metal armor.wav",
 	"slots": [
 	  "Body"

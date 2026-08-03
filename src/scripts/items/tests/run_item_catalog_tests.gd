@@ -39,6 +39,71 @@ func _test_checked_catalogs() -> void:
 		"shared item book passes validated loading: %s" % str(catalog.last_errors),
 	)
 	_expect_equal(catalog.definition_count(), 525, "all shared definitions load")
+	var stock_fidelity_expectations := {
+		"Leather of Darkness -2": {
+			"iconId": 59,
+			"cursedItemId": 213,
+			"imageKey": "ITEM_Leather_Armor",
+			"atlas": Vector2i(16, 1),
+		},
+		"Chain Armor": {
+			"iconId": 63,
+			"cursedItemId": 0,
+			"imageKey": "ITEM_Chain_Armor",
+			"atlas": Vector2i(20, 1),
+		},
+		"Chain Armor +3": {
+			"iconId": 74,
+			"cursedItemId": 0,
+			"imageKey": "ITEM_Chain_Armor_3",
+			"atlas": Vector2i(1, 2),
+		},
+		"Helm of Pain -1": {
+			"iconId": 3,
+			"cursedItemId": 148,
+			"imageKey": "ITEM_Helm_pain",
+			"atlas": Vector2i(2, 0),
+		},
+	}
+	for item_name: String in stock_fidelity_expectations:
+		var expected: Dictionary = stock_fidelity_expectations[item_name]
+		var definition = catalog.get_definition(
+			catalog.resolve_catalog_key("shared", "", item_name)
+		)
+		_expect(definition != null, "shared %s definition resolves" % item_name)
+		if definition == null:
+			continue
+		var classic_record: Dictionary = definition.classic_record()
+		var extra_data: Dictionary = definition.gameplay_value("extraData", {})
+		_expect_equal(
+			extra_data.get("classicIconId"),
+			expected["iconId"],
+			"%s retains its source icon ID" % item_name,
+		)
+		_expect_equal(
+			classic_record.get("iconId"),
+			expected["iconId"],
+			"%s Classic record retains its icon ID" % item_name,
+		)
+		_expect_equal(
+			classic_record.get("cursedItemId"),
+			expected["cursedItemId"],
+			"%s Classic record retains its curse linkage" % item_name,
+		)
+		_expect_equal(
+			definition.image_key,
+			expected["imageKey"],
+			"%s uses its source-matched stock image" % item_name,
+		)
+		var image_entry: Dictionary = shared_images.get(definition.image_key, {})
+		_expect_equal(
+			Vector2i(
+				int(image_entry.get("0_ref_x", -1)),
+				int(image_entry.get("0_ref_y", -1)),
+			),
+			expected["atlas"],
+			"%s stock image uses the expected atlas cell" % item_name,
+		)
 	_expect_equal(
 		catalog.resolve_catalog_key("shared", "", "Dagger"),
 		"shared:Dagger",

@@ -233,7 +233,7 @@ static func remove_equipped_cursed_items(character: Object) -> Dictionary:
 	var unequipped := 0
 	for item_value: Variant in _character_inventory_items(character):
 		if not _item_is_equipped(item_value) \
-				or not _item_is_cursed(character, item_value):
+				or not is_item_cursed(character, item_value):
 			continue
 		# Passing false is Remake's equivalent of Classic's force flag: it skips
 		# an item's normal unequip veto while retaining equipment bookkeeping.
@@ -536,7 +536,7 @@ static func _item_matches(
 	)
 
 
-static func _item_is_cursed(character: Object, item: Variant) -> bool:
+static func is_item_cursed(character: Object, item: Variant) -> bool:
 	var definition := _item_definition(character, item)
 	if definition != null:
 		var classic_record := definition.classic_record()

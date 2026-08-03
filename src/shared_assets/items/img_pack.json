@@ -616,7 +616,7 @@
    
       "ITEM_Chain_Armor" : 
    {
-      "0_ref_x" : 1,
+      "0_ref_x" : 20,
       "0_ref_y" : 1,
       "size" : "32x32"
    },

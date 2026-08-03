@@ -18,6 +18,9 @@ const CLASSIC_MONSTER_ATTACK_SEQUENCE_SCRIPT = preload(
 const CLASSIC_MONSTER_GENERATION_SCRIPT = preload(
 	"res://scripts/classic_runtime/classic_monster_generation.gd"
 )
+const CLASSIC_INVENTORY_RULES_SCRIPT = preload(
+	"res://scripts/classic_runtime/classic_inventory_rules.gd"
+)
 
 # Declare member variables here. Examples:
 var name : String = 'Base Creature'
@@ -1856,9 +1859,12 @@ func unequip_item(item, check_script = true) -> bool :
 	if definition == null:
 		return false
 	var item_slots := definition.slots()
-	var can_unequip : bool = true
+	var can_unequip := not (
+		check_script
+		and CLASSIC_INVENTORY_RULES_SCRIPT.is_item_cursed(self, instance)
+	)
 	var resources = NodeAccess.__Resources()
-	if check_script and resources != null \
+	if can_unequip and check_script and resources != null \
 			and resources.item_has_hook(instance, "unequip"):
 		var hook_result: Dictionary = resources.run_item_hook(
 			instance,

@@ -6715,6 +6715,32 @@ func _test_classic_item_materializer() -> void:
 		"complete",
 		"fully mapped fixture item is launchable"
 	)
+	var cursed_record: Dictionary = bundle.documents[
+		"content"
+	]["scenarioItems"][0].duplicate(true)
+	cursed_record["itemId"] = 912
+	cursed_record["cursedItemId"] = 213
+	var cursed_item: Dictionary = materializer._native_item(
+		cursed_record,
+		[{
+			"itemId": 912,
+			"identifiedName": "Cursed fixture",
+			"unidentifiedName": "Unknown fixture",
+			"description": "A focused curse-linkage fixture.",
+		}]
+	)
+	_expect_equal(
+		cursed_item.get("classicRecord", {}).get("cursedItemId"),
+		213,
+		"native item preserves its Classic curse linkage"
+	)
+	_expect(
+		not cursed_item.get(
+			"classicMaterialization",
+			{},
+		).get("unsupportedFields", []).has("cursedItemId"),
+		"implemented curse linkage no longer blocks item materialization",
+	)
 	_expect_equal(
 		item.get("img_ptr"),
 		"ITEM_classic_campaign_cicn_30000",

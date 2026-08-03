@@ -19,7 +19,6 @@ const ITEM_IMAGE_INSET := 1
 # These fields affect item behavior but do not yet have verified native equivalents.
 # Keeping the record is lossless; treating it as launchable would not be.
 const UNSUPPORTED_EFFECT_FIELDS := [
-	"cursedItemId",
 	"lu",
 	"special1",
 	"special2",

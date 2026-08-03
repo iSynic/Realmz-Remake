@@ -38,6 +38,7 @@ func _run_smoke() -> void:
 	_test_charge_weight_and_consumption()
 	_test_equipment_stats_and_traits()
 	_test_scripted_item_hook_integration()
+	_test_classic_stock_curse_metadata()
 	_test_classic_legacy_inventory_boundary()
 	_test_classic_equipment_capture()
 	_test_classic_catalog_item_flows(resources)
@@ -281,6 +282,46 @@ func _test_scripted_item_hook_integration() -> void:
 	_expect(
 		hook_user.unequip_item(scripted_instance, false),
 		"explicit compatibility force-unequip bypasses the scripted veto",
+	)
+
+
+func _test_classic_stock_curse_metadata() -> void:
+	var curse_user := _creature("Classic Curse User")
+	var leather := GameGlobal.generate_item("Leather of Darkness -2")
+	var helm := GameGlobal.generate_item("Helm of Pain -1")
+	_expect(curse_user.add_inventory_item(leather), "Classic cursed leather is carried")
+	_expect(curse_user.add_inventory_item(helm), "Classic cursed helm is carried")
+	var leather_instance := curse_user.get_item_instance(leather)
+	var helm_instance := curse_user.get_item_instance(helm)
+	_expect(curse_user.equip_item(leather_instance), "Classic cursed leather equips")
+	_expect(curse_user.equip_item(helm_instance), "Classic cursed helm equips")
+	_expect(
+		not curse_user.unequip_item(leather_instance),
+		"Leather of Darkness rejects normal removal",
+	)
+	_expect(
+		not curse_user.unequip_item(helm_instance),
+		"Helm of Pain rejects normal removal",
+	)
+	var removal := ClassicInventoryRulesScript.remove_equipped_cursed_items(curse_user)
+	_expect_equal(
+		removal.get("unequipped"),
+		2,
+		"forced curse removal unequips both Classic cursed stock items",
+	)
+	_expect(
+		not leather_instance.equipped and not helm_instance.equipped,
+		"forced curse removal clears both stock equipment states",
+	)
+
+	var chain_user := _creature("Classic Chain User")
+	var chain := GameGlobal.generate_item("Chain Armor +3")
+	_expect(chain_user.add_inventory_item(chain), "Chain Armor +3 is carried")
+	var chain_instance := chain_user.get_item_instance(chain)
+	_expect(chain_user.equip_item(chain_instance), "Chain Armor +3 equips")
+	_expect(
+		chain_user.unequip_item(chain_instance),
+		"Chain Armor +3 remains normally removable",
 	)
 
 
