@@ -1,15 +1,11 @@
-[gd_scene load_steps=9 format=3 uid="uid://ci4cf1yx31p2n"]
+[gd_scene load_steps=6 format=3 uid="uid://ci4cf1yx31p2n"]
 
 [ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="1_fcejw"]
 [ext_resource type="Script" path="res://scenes/UI/Main Menu/NewCharacterPanel.gd" id="2_nga7k"]
 [ext_resource type="PackedScene" uid="uid://bov2d346tediq" path="res://scenes/UI/Main Menu/CharacterStatsRect/CharacterStatsRect.tscn" id="5_pga5p"]
 [ext_resource type="PackedScene" uid="uid://biqyyjm2makqt" path="res://scenes/UI/HUD/AbilitiesManagement/abilities_mngt_rect.tscn" id="6_oel76"]
 [ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="7_heading"]
-[ext_resource type="StyleBox" path="res://shared_assets/UI/button_normal_styleboxtexture.tres" id="8_level_normal"]
-[ext_resource type="StyleBox" path="res://shared_assets/UI/button_hover_styleboxtexture.tres" id="9_level_hover"]
-[ext_resource type="StyleBox" path="res://shared_assets/UI/button_pressed_styleboxtexture.tres" id="10_level_pressed"]
-
-[node name="NewCharacterPanel" type="NinePatchRect" node_paths=PackedStringArray("cancelButton", "okButton", "lineEdit", "portraitContainer", "iconContainer", "portraitScroll", "iconScroll", "classitemlist", "raceitemlist", "characterstatrect", "levelMenuButton", "classicContextLabel", "genderOptionButton", "abilities_rect", "portraitRect", "iconRect")]
+[node name="NewCharacterPanel" type="NinePatchRect" node_paths=PackedStringArray("cancelButton", "okButton", "lineEdit", "portraitContainer", "iconContainer", "portraitScroll", "iconScroll", "classitemlist", "raceitemlist", "characterstatrect", "levelInput", "classicContextLabel", "genderOptionButton", "abilities_rect", "portraitRect", "iconRect")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -33,7 +29,7 @@ iconScroll = NodePath("BigVBox/ContentRow/StageWorkspace/AppearanceStage/Appeara
 classitemlist = NodePath("BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox/ClassItemList")
 raceitemlist = NodePath("BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/RaceVBox/RaceItemList")
 characterstatrect = NodePath("BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox/CharacterStatsRect")
-levelMenuButton = NodePath("BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow/LevelMenuButton")
+levelInput = NodePath("BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow/LevelInput")
 classicContextLabel = NodePath("BigVBox/ClassicContextLabel")
 genderOptionButton = NodePath("BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/GenderRow/GenderOptionButton")
 abilities_rect = NodePath("BigVBox/ContentRow/StageWorkspace/SpellsStage")
@@ -237,7 +233,7 @@ text = "Identity"
 
 [node name="Introduction" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
 layout_mode = 2
-text = "Begin with the character's name and starting experience."
+text = "Choose a name, starting level, and gender."
 autowrap_mode = 2
 
 [node name="IdentitySeparator" type="HSeparator" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
@@ -272,26 +268,22 @@ layout_mode = 2
 text = "Starting Level"
 vertical_alignment = 1
 
-[node name="LevelMenuButton" type="MenuButton" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow"]
-custom_minimum_size = Vector2(92, 36)
+[node name="LevelInput" type="LineEdit" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow"]
+custom_minimum_size = Vector2(112, 36)
 layout_mode = 2
-tooltip_text = "Choose the character's starting level."
-flat = false
-theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
-theme_override_colors/font_hover_color = Color(1, 1, 0.55, 1)
-theme_override_colors/font_pressed_color = Color(1, 1, 0.75, 1)
-theme_override_styles/normal = ExtResource("8_level_normal")
-theme_override_styles/hover = ExtResource("9_level_hover")
-theme_override_styles/pressed = ExtResource("10_level_pressed")
-theme_override_styles/focus = ExtResource("9_level_hover")
+tooltip_text = "Type a starting level from 1 to 1000."
 text = "1"
 alignment = 1
+max_length = 4
+select_all_on_focus = true
+caret_blink = true
+caret_blink_interval = 0.5
 
 [node name="LevelHelp" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.72, 0.72, 0.72, 1)
-text = "Campaign rules may adjust the resulting character."
+text = "Enter any level from 1 to 1000."
 vertical_alignment = 1
 autowrap_mode = 2
 
@@ -469,9 +461,9 @@ follow_focus = true
 [node name="PortraitContainer" type="GridContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/PortraitScrollContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 8
-columns = 9
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 12
 
 [node name="IconScrollContainer" type="ScrollContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl"]
 visible = false
@@ -486,9 +478,9 @@ follow_focus = true
 [node name="IconContainer" type="GridContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/IconScrollContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 8
-columns = 9
+theme_override_constants/h_separation = 6
+theme_override_constants/v_separation = 6
+columns = 12
 
 [node name="ReviewStage" type="MarginContainer" parent="BigVBox/ContentRow/StageWorkspace"]
 visible = false
@@ -517,7 +509,7 @@ text = "Review Statistics"
 [node name="ReviewHelp" type="Label" parent="BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.78, 0.78, 0.78, 1)
-text = "Statistics are generated from the selected class, race, and starting level."
+text = "Review the character before choosing spells."
 autowrap_mode = 2
 
 [node name="CharacterStatsRect" parent="BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox" instance=ExtResource("5_pga5p")]

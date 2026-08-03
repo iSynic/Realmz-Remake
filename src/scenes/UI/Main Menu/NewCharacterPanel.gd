@@ -20,6 +20,12 @@ const ClassicStandardCharacterRulesScript = preload(
 const ClassicItemMaterializerScript = preload(
 	"res://scripts/classic_runtime/classic_item_materializer.gd"
 )
+const MIN_STARTING_LEVEL := 1
+const MAX_STARTING_LEVEL := 1000
+const APPEARANCE_WIDE_COLUMNS := 12
+const APPEARANCE_COMPACT_COLUMNS := 6
+const APPEARANCE_COLUMN_GAP := 6
+const APPEARANCE_BUTTON_SIZE := Vector2(56, 56)
 
 # Declare member variables here. Examples:
 # var a = 2
@@ -34,7 +40,7 @@ const ClassicItemMaterializerScript = preload(
 @export var classitemlist : ItemList #= $"ClassItemList"
 @export var raceitemlist : ItemList #= $"RaceItemList"
 @export var characterstatrect : NewCharStatsRect #= $"CharacterStatsRect"
-@export var levelMenuButton : MenuButton #= $"LevelMenuButton"
+@export var levelInput : LineEdit
 @export var classicContextLabel : Label
 @export var genderOptionButton : OptionButton
 
@@ -47,7 +53,7 @@ var iconsTextures : Array = []
 
 var classesgd : Array = []
 var racesgd : Array = []
-var newchar_level = 1
+var newchar_level: int = 1
 #var onlyportrait : Texture2D = preload("res://Main Menu/onlyportrait.png")
 
 var new_char_name = ""
@@ -68,6 +74,7 @@ var classic_gender := 1
 var return_to_campaign_panel: Control
 var classic_creation_active := false
 var character_rules_bundle: Dictionary = {}
+var _normalizing_level_input := false
 
 @export var portraitRect : TextureRect# = $"PortraitRect"
 @export var iconRect : TextureRect# = $"IconRect"
@@ -138,6 +145,8 @@ func _ready():
 	backButton.pressed.connect(_on_back_button_pressed)
 	portraitTabButton.pressed.connect(_show_appearance_browser.bind(true))
 	iconTabButton.pressed.connect(_show_appearance_browser.bind(false))
+	portraitScroll.resized.connect(_update_appearance_columns)
+	iconScroll.resized.connect(_update_appearance_columns)
 	for stage_index: int in range(stageButtons.size()):
 		stageButtons[stage_index].pressed.connect(
 			_on_stage_button_pressed.bind(stage_index)
@@ -147,15 +156,13 @@ func _ready():
 	fillIconsPortraitsChoices()
 	loadClassesRaces()
 	fillClassesRacesMenus()
-	fillLevelMenuButton([1, 3, 5, 7, 9, 11, 13, 15, 17, 20, 25, 30])
+	levelInput.text_changed.connect(_on_level_text_changed)
+	levelInput.text_submitted.connect(_commit_level_input)
+	levelInput.focus_exited.connect(_commit_level_input)
 	abilities_rect.set_creation_mode(true)
 	genderOptionButton.item_selected.connect(_on_gender_selected)
 	genderOptionButton.visible = true
 	genderOptionButton.get_parent().visible = true
-	classicContextLabel.text = (
-		"Creating with the source-backed standard Realmz race and class tables."
-	)
-	classicContextLabel.visible = true
 	_update_mode_copy()
 	_show_appearance_browser(true)
 	_show_stage(CreationStage.IDENTITY, false)
@@ -223,6 +230,8 @@ func _show_stage(stage_index: int, focus_stage: bool = true) -> void:
 		stageButtons[index].button_pressed = index == current_stage
 	stageLabel.text = "Step %d of %d" % [current_stage + 1, stageContainers.size()]
 	_refresh_creation_ui()
+	if current_stage == CreationStage.APPEARANCE:
+		_update_appearance_columns.call_deferred()
 	if focus_stage:
 		_focus_current_stage.call_deferred()
 
@@ -292,7 +301,7 @@ func _refresh_creation_ui() -> void:
 			okButton.text = "Continue"
 			okButton.disabled = not name_is_valid
 			statusLabel.text = (
-				"Choose a name, starting level, and gender when the campaign requires it."
+				"Choose a starting level and gender, then continue."
 				if name_is_valid
 				else _name_validation_message()
 			)
@@ -356,30 +365,24 @@ func _update_mode_copy() -> void:
 	callingHeadingLabel.text = (
 		"Choose a Caste and Race" if is_classic else "Choose a Class and Race"
 	)
-	reviewHelpLabel.text = (
-		"Classic statistics are generated from the active scenario and selected starting level."
-		if is_classic
-		else (
-			"Statistics are calculated from the standard Realmz race, class, gender, "
-			+ "and starting-level rules. Review is read-only; only spell selection "
-			+ "remains a deliberate creation choice."
-		)
-	)
-	classicContextLabel.text = _rules_context_text()
+	reviewHelpLabel.text = "Review the character before choosing spells."
+	_refresh_rules_context_label()
 
 
 func _rules_context_text() -> String:
 	if classic_install != null:
-		return (
-			"Creating for %s — scenario overrides are merged with the standard Realmz tables."
-			% str(
-				classic_install.bundle.manifest.get(
-					"name",
-					classic_campaign_name
-				)
+		return "Campaign: %s" % str(
+			classic_install.bundle.manifest.get(
+				"name",
+				classic_campaign_name
 			)
 		)
-	return "Creating with the source-backed standard Realmz race and class tables."
+	return ""
+
+
+func _refresh_rules_context_label() -> void:
+	classicContextLabel.text = _rules_context_text()
+	classicContextLabel.visible = not classicContextLabel.text.is_empty()
 
 
 func _show_appearance_browser(show_portraits: bool) -> void:
@@ -415,11 +418,6 @@ func configure_classic_campaign(
 			"message": ClassicStandardCharacterRulesScript.last_error(),
 		}
 	return_to_campaign_panel = campaign_panel
-	classicContextLabel.text = (
-		"Creating for %s — scenario race and caste rules apply."
-		% str(install.bundle.manifest.get("name", campaign_name))
-	)
-	classicContextLabel.visible = true
 	genderOptionButton.visible = true
 	genderOptionButton.get_parent().visible = true
 	classic_gender = 1
@@ -443,10 +441,6 @@ func clear_classic_campaign_context() -> void:
 	classic_gender = 1
 	classic_creation_active = false
 	character_rules_bundle = ClassicStandardCharacterRulesScript.effective_bundle()
-	classicContextLabel.text = (
-		"Creating with the source-backed standard Realmz race and class tables."
-	)
-	classicContextLabel.visible = true
 	genderOptionButton.visible = true
 	genderOptionButton.get_parent().visible = true
 	return_to_campaign_panel = null
@@ -506,12 +500,13 @@ func try_create_character() :
 	var classic_status := str(classic_result.get("status", ""))
 	if classic_status == "ok":
 		classic_creation_active = true
-		classicContextLabel.text = _rules_context_text()
+		_refresh_rules_context_label()
 	else:
 		classicContextLabel.text = str(classic_result.get(
 			"message",
 			"The selected Realmz race and class cannot create a character."
 		))
+		classicContextLabel.visible = true
 		new_character = null
 		classic_creation_active = false
 		okButton.disabled = true
@@ -526,15 +521,34 @@ func try_create_character() :
 	characterstatrect.display_data(new_character)
 	_refresh_creation_ui()
 
-func fillLevelMenuButton(levels : Array) :
-	var popup : PopupMenu = levelMenuButton.get_popup()
-	for l in levels :
-		popup.add_item(str(l), l)
-	popup.connect("id_pressed",Callable(self,"_on_level_picked"))
+func _on_level_text_changed(value: String) -> void:
+	if _normalizing_level_input:
+		return
+	var digits := ""
+	for character in value:
+		if character >= "0" and character <= "9":
+			digits += character
+	if digits == value:
+		return
+	var previous_caret := levelInput.caret_column
+	_normalizing_level_input = true
+	levelInput.text = digits
+	levelInput.caret_column = mini(previous_caret, digits.length())
+	_normalizing_level_input = false
 
-func _on_level_picked(ID):
-	newchar_level = ID
-	levelMenuButton.set_text(str(ID))
+
+func _commit_level_input(_submitted_text: String = "") -> void:
+	var requested_level: int = newchar_level
+	if levelInput.text.is_valid_int():
+		requested_level = int(levelInput.text)
+	newchar_level = clampi(
+		requested_level,
+		MIN_STARTING_LEVEL,
+		MAX_STARTING_LEVEL
+	)
+	_normalizing_level_input = true
+	levelInput.text = str(newchar_level)
+	_normalizing_level_input = false
 	characterstatrect.set_character_level(newchar_level)
 	if new_character :
 		try_create_character()
@@ -543,6 +557,7 @@ func _on_level_picked(ID):
 
 
 func fillIconsPortraitsChoices():
+	_update_appearance_columns()
 	var portraitspath = Paths.datafolderpath+"Character Portraits/"
 	var portraitfilenames : Array = Utils.FileHandler.list_files_in_directory(portraitspath)
 #	print("NewCharacter portraitfilenames : ",portraitfilenames )
@@ -560,24 +575,47 @@ func fillIconsPortraitsChoices():
 
 	for p in range(portraitsTextures.size()) :
 		var b = Button.new()
-		b.custom_minimum_size = Vector2(64, 64)
+		b.custom_minimum_size = APPEARANCE_BUTTON_SIZE
 		b.toggle_mode = true
 		b.button_group = portraitButtonGroup
 		b.icon = portraitsTextures[p]
+		b.expand_icon = true
+		b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		b.tooltip_text = "Portrait %d" % (p + 1)
 		b.connect("pressed",Callable(self,"_on_portrait_button_pressed").bind(p))
 		portraitContainer.add_child(b)
 		portraitButtons.append(b)
 	for i in range(iconsTextures.size()) :
 		var b = Button.new()
-		b.custom_minimum_size = Vector2(64, 64)
+		b.custom_minimum_size = APPEARANCE_BUTTON_SIZE
 		b.toggle_mode = true
 		b.button_group = iconButtonGroup
 		b.icon = iconsTextures[i]
+		b.expand_icon = true
+		b.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		b.tooltip_text = "Combat icon %d" % (i + 1)
 		b.connect("pressed",Callable(self,"_on_icon_button_pressed").bind(i))
 		iconContainer.add_child(b)
 		iconButtons.append(b)
+
+
+func _update_appearance_columns() -> void:
+	var available_width := maxf(portraitScroll.size.x, iconScroll.size.x)
+	var columns := _appearance_columns_for_width(available_width)
+	portraitContainer.columns = columns
+	iconContainer.columns = columns
+
+
+func _appearance_columns_for_width(available_width: float) -> int:
+	var wide_grid_width := (
+		APPEARANCE_BUTTON_SIZE.x * APPEARANCE_WIDE_COLUMNS
+		+ APPEARANCE_COLUMN_GAP * (APPEARANCE_WIDE_COLUMNS - 1)
+	)
+	return (
+		APPEARANCE_WIDE_COLUMNS
+		if available_width >= wide_grid_width
+		else APPEARANCE_COMPACT_COLUMNS
+	)
 
 
 func loadClassesRaces() :
@@ -700,22 +738,18 @@ func _classic_identity_options(
 				""
 			)
 		) if native_definition != null else ""
-		var rules_description := (
-			"Uses this scenario's effective Classic rules."
-			if classic_install != null
-			else "Uses the standard Realmz rules."
-		)
+		if native_description.to_lower().begins_with("description will come soon"):
+			native_description = ""
 		options.append({
 			"id": identity_id,
 			"name": display_name,
 			"nativeDefinition": native_definition,
 			"allowed": allowed,
+			"description": native_description,
 			"tooltip": (
 				"Not allowed by this scenario."
 				if not allowed
-				else (
-					"%s\n%s" % [native_description, rules_description]
-				).strip_edges()
+				else native_description
 			),
 		})
 	return options
@@ -792,10 +826,7 @@ func _on_race_select(i : int) :
 func _class_description(index: int) -> String:
 	if index >= 0 and index < classic_caste_options.size():
 		var option: Dictionary = classic_caste_options[index]
-		return "%s\n%s" % [
-			str(option.get("name", "")),
-			str(option.get("tooltip", "")),
-		]
+		return str(option.get("description", ""))
 	if index >= 0 and index < classesgd.size():
 		return str(classesgd[index].classrace_definition)
 	return "Select a class to view its description."
@@ -804,10 +835,7 @@ func _class_description(index: int) -> String:
 func _race_description(index: int) -> String:
 	if index >= 0 and index < classic_race_options.size():
 		var option: Dictionary = classic_race_options[index]
-		return "%s\n%s" % [
-			str(option.get("name", "")),
-			str(option.get("tooltip", "")),
-		]
+		return str(option.get("description", ""))
 	if index >= 0 and index < racesgd.size():
 		return str(racesgd[index].classrace_definition)
 	return "Select a race to view its description."
@@ -914,6 +942,7 @@ func _finish_character_creation() -> void:
 				"message",
 				"Classic starting resources could not be applied."
 			))
+			classicContextLabel.visible = true
 			okButton.disabled = true
 			return
 	new_character.stats["curHP"] = new_character.get_stat("maxHP")
@@ -994,7 +1023,9 @@ func fill() -> void :
 	newchar_level = 1
 	classic_gender = 1
 	genderOptionButton.select(0)
-	levelMenuButton.set_text('1')
+	_normalizing_level_input = true
+	levelInput.text = "1"
+	_normalizing_level_input = false
 	characterstatrect.clear()
 	characterstatrect.display_portrait(default_portrait)
 	classDescriptionLabel.text = "Select a class to view its description."
