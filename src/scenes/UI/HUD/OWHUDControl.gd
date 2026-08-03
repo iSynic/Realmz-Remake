@@ -5,6 +5,50 @@ const ClassicItemBehaviorsScript = preload(
 	"res://scripts/classic_runtime/classic_item_behaviors.gd"
 )
 
+const MIN_SUPPORTED_VIEWPORT := Vector2(1152.0, 648.0)
+const PARTY_RAIL_WIDTH := 320.0
+const NARRATIVE_HEIGHT_RATIO := 0.28
+const NARRATIVE_MIN_HEIGHT := 200.0
+const NARRATIVE_MAX_HEIGHT := 216.0
+const ACTION_DOCK_REFERENCE_SIZE := Vector2(320.0, 200.0)
+const ACTION_BUTTON_STYLE_OVERRIDES := [
+	&"normal", &"hover", &"pressed", &"disabled", &"focus"
+]
+const ACTION_BUTTON_LAYOUT := {
+	&"CampButton": Rect2(0.0, 0.0, 50.0, 50.0),
+	&"RestButton": Rect2(50.0, 0.0, 50.0, 50.0),
+	&"InventoryButton": Rect2(0.0, 50.0, 50.0, 50.0),
+	&"MoneyButton": Rect2(50.0, 50.0, 50.0, 50.0),
+	&"SpellButton": Rect2(0.0, 100.0, 50.0, 50.0),
+	&"AbiListButton": Rect2(50.0, 100.0, 50.0, 50.0),
+	&"EncounterButton": Rect2(0.0, 150.0, 50.0, 50.0),
+	&"BestiaryButton": Rect2(50.0, 150.0, 50.0, 50.0),
+	&"MinimapsButton": Rect2(116.0, 128.0, 50.0, 50.0),
+	&"TempleButton": Rect2(180.0, 128.0, 50.0, 50.0),
+	&"ShopButton": Rect2(180.0, 128.0, 50.0, 50.0),
+	&"CharSwapButton": Rect2(270.0, 0.0, 50.0, 50.0),
+	&"QSaveButton": Rect2(270.0, 50.0, 50.0, 50.0),
+	&"SaveButton": Rect2(270.0, 100.0, 50.0, 50.0),
+	&"SettingsButton": Rect2(270.0, 150.0, 50.0, 50.0),
+}
+const ACTION_BUTTON_TOOLTIPS := {
+	&"CampButton": "Camp",
+	&"RestButton": "Rest",
+	&"InventoryButton": "Inventory",
+	&"MoneyButton": "Party money",
+	&"SpellButton": "Cast a spell",
+	&"AbiListButton": "Abilities",
+	&"EncounterButton": "Encounter actions",
+	&"BestiaryButton": "Bestiary",
+	&"MinimapsButton": "Player map",
+	&"TempleButton": "Enter temple",
+	&"ShopButton": "Enter shop",
+	&"CharSwapButton": "Change party order",
+	&"QSaveButton": "Quick save",
+	&"SaveButton": "Save or load game",
+	&"SettingsButton": "Settings",
+}
+
 var charsmallpanelTSCN : PackedScene = preload("res://scenes/UI/HUD/Characters Panel/CharacterSmallPanel.tscn")
 
 #var characters : Array =  []
@@ -38,6 +82,10 @@ var selected_character = null
 @onready var charscrollcont = $VBoxScreen/HBoxTop/VBoxCharTime/CharactersRect/CharScrollContainer
 @onready var timerect = $VBoxScreen/HBoxTop/VBoxCharTime/TimeRect
 @onready var botrightpanel = $VBoxScreen/HBoxBot/BotRightPanel
+@onready var vboxScreen : VBoxContainer = $VBoxScreen
+@onready var hboxTop : HBoxContainer = $VBoxScreen/HBoxTop
+@onready var vboxCharTime : VBoxContainer = $VBoxScreen/HBoxTop/VBoxCharTime
+@onready var hboxBot : HBoxContainer = $VBoxScreen/HBoxBot
 
 @onready var creatureRect = $VBoxScreen/HBoxBot/CreatureRect
 @onready var combatBRPanel = $VBoxScreen/HBoxBot/CombatBRPanel
@@ -76,6 +124,24 @@ var selected_character = null
 @onready var alliesWindow : Window = $AlliesWindow
 @onready var alliesCtrl : AlliesRect = $AlliesWindow/AlliesRect
 @onready var saveloadCtrl : SaveLoadCtrl = $SaveLoadRect
+@onready var _blocking_overlays := [
+	inventoryRect,
+	bestiaryRect,
+	characterStatRect,
+	minimapRect,
+	classicPlayerMapRect,
+	pictureRect,
+	temple_rect,
+	abilitesmngtMenu,
+	spellcastMenu,
+	charSwapRect,
+	treasureControl,
+	settingsControl,
+	encounterControl,
+	moneyControl,
+	saveloadCtrl,
+	honestStorageControl,
+]
 
 
 var timebetweenrests : float = 0.05  #in seconds
@@ -87,6 +153,7 @@ var selecting_several_characters_count : int = 0
 var selected_several_characters : Array = []
 
 var party_swap_enabled : bool = false
+var _last_action_focus : Control
 
 signal done_picking_pc
 signal pc_picked
@@ -121,34 +188,15 @@ func initialize() : # takes an array of Characters GD class objects !
 	MusicStreamPlayer.play_music_map()
 
 func _on_viewport_size_changed() :
-#	if self.visible :
-
-	var screensize : Vector2 = ScreenUtils.get_logical_window_size(self)
-	var newscalex = min(1.0, screensize.x/800)
-	var newscaley = min(1.0, screensize.y/400)
-#	set_scale(Vector2(newscalex,newscaley))
-	print("OWHUD screenshize", screensize)
-#	screensize.x = (1/newscalex)*screensize.x
-#	screensize.y = (1/newscaley)*screensize.y
-	if screensize.x<800 :
-		screensize.x = 800
-	if screensize.y<400 :
-		screensize.y = 400
-	set_scale(Vector2(newscalex, newscaley))
+	var screensize := ScreenUtils.get_logical_window_size(self).max(
+		MIN_SUPPORTED_VIEWPORT
+	)
+	_apply_responsive_shell(screensize)
 	
 	levelupWindow.size = screensize-Vector2(360,200)
 	alliesWindow.size = screensize
-#	botrightpanel._set_position(Vector2(screensize.x-320, screensize.y-200))
-	#timerect._set_position(Vector2(screensize.x-320, screensize.y-200-40))
-	#charactersrect._set_position(Vector2(screensize.x-320,0))
-	#charactersrect._set_size(Vector2(320, screensize.y-200-40))
-#	charsVContainer._set_size(Vector2(320, screensize.y-200-40))
-	charscrollcont._set_size(Vector2(320, screensize.y-200-40))
 	inventoryRect.on_viewport_size_changed(screensize)
-	#textRect.on_viewport_size_changed(screensize)
 	encounterControl.on_viewport_size_changed(screensize)
-	
-	#botrightpanel._set_position(Vector2(screensize.x-320,screensize.y-200))
 
 	treasureControl.on_viewport_size_changed(screensize)
 	charSwapRect.on_viewport_size_changed(screensize)
@@ -157,19 +205,87 @@ func _on_viewport_size_changed() :
 
 	spellcastMenu.on_viewport_size_changed(screensize)
 
+func _apply_responsive_shell(screensize : Vector2) -> void:
+	# The Realmz sections stay bounded while surplus resolution belongs to the map.
+	set_scale(Vector2.ONE)
+	var section_gap := 6
+	if screensize.x >= 1600.0:
+		section_gap = 8
+	if screensize.x >= 2560.0:
+		section_gap = 12
+	vboxScreen.add_theme_constant_override(&"separation", section_gap)
+	hboxTop.add_theme_constant_override(&"separation", section_gap)
+	vboxCharTime.add_theme_constant_override(&"separation", section_gap)
+	hboxBot.add_theme_constant_override(&"separation", section_gap)
+
+	var narrative_height := clampf(
+		roundf(screensize.y * NARRATIVE_HEIGHT_RATIO),
+		NARRATIVE_MIN_HEIGHT,
+		NARRATIVE_MAX_HEIGHT
+	)
+	vboxCharTime.custom_minimum_size.x = PARTY_RAIL_WIDTH
+	charactersrect.custom_minimum_size.x = PARTY_RAIL_WIDTH
+	timerect.custom_minimum_size = Vector2(PARTY_RAIL_WIDTH, 48.0)
+	textRect.custom_minimum_size.y = narrative_height
+	botrightpanel.custom_minimum_size = Vector2(
+		PARTY_RAIL_WIDTH, narrative_height
+	)
+	combatBRPanel.custom_minimum_size = Vector2(
+		PARTY_RAIL_WIDTH, narrative_height
+	)
+	_layout_action_dock(Vector2(PARTY_RAIL_WIDTH, narrative_height))
+
+func _layout_action_dock(dock_size : Vector2) -> void:
+	var dock_scale := dock_size / ACTION_DOCK_REFERENCE_SIZE
+	for button_name : StringName in ACTION_BUTTON_LAYOUT:
+		var button := (
+			botrightpanel.get_node_or_null(NodePath(String(button_name))) as Button
+		)
+		if button == null:
+			continue
+		var reference_rect : Rect2 = ACTION_BUTTON_LAYOUT[button_name]
+		button.custom_minimum_size = Vector2.ZERO
+		button.position = reference_rect.position * dock_scale
+		button.size = reference_rect.size * dock_scale
+		button.expand_icon = true
+		button.focus_mode = Control.FOCUS_ALL
+		button.shortcut_in_tooltip = true
+		button.tooltip_text = ACTION_BUTTON_TOOLTIPS.get(
+			button_name, button.tooltip_text
+		)
+		for style_name : StringName in ACTION_BUTTON_STYLE_OVERRIDES:
+			button.remove_theme_stylebox_override(style_name)
+	_sync_action_dock_focus_with_overlays()
+
+func _sync_action_dock_focus_with_overlays() -> void:
+	var overlay_visible := false
+	for overlay : CanvasItem in _blocking_overlays:
+		if overlay.visible:
+			overlay_visible = true
+			break
+
+	var focus_owner := get_viewport().gui_get_focus_owner()
+	if (
+		overlay_visible
+		and focus_owner != null
+		and botrightpanel.is_ancestor_of(focus_owner)
+	):
+		_last_action_focus = focus_owner
+
+	for child in botrightpanel.get_children():
+		if child is BaseButton:
+			child.focus_mode = (
+				Control.FOCUS_NONE if overlay_visible else Control.FOCUS_ALL
+			)
+
+	if not overlay_visible and is_instance_valid(_last_action_focus):
+		_last_action_focus.call_deferred(&"grab_focus")
+
+func _on_blocking_overlay_visibility_changed() -> void:
+	_sync_action_dock_focus_with_overlays()
+
 func get_mofified_screensize() :
-	var screensize : Vector2 = ScreenUtils.get_logical_window_size(self)
-	#var newscalex = min(1.0, screensize.x/800)
-	#var newscaley = min(1.0, screensize.y/400)
-#	set_scale(Vector2(newscalex,newscaley))
-#	print(screensize)
-#	screensize.x = (1/newscalex)*screensize.x
-#	screensize.y = (1/newscaley)*screensize.y
-	if screensize.x<800 :
-		screensize.x = 800
-	if screensize.y<400 :
-		screensize.y = 400
-	return screensize
+	return ScreenUtils.get_logical_window_size(self).max(MIN_SUPPORTED_VIEWPORT)
 
 func show_owhudcontrol() :
 	print("show_owhudcontrol")
@@ -414,6 +530,15 @@ func request_pc_pick(n : int) :
 # Called when the node enters the scene tree for the first time.
 func _ready():
 	classicSearchButton.toggled.connect(_on_classic_search_button_toggled)
+	for overlay : CanvasItem in _blocking_overlays:
+		if not overlay.visibility_changed.is_connected(
+			_on_blocking_overlay_visibility_changed
+		):
+			overlay.visibility_changed.connect(
+				_on_blocking_overlay_visibility_changed
+			)
+	if get_parent() != UI:
+		call_deferred(&"_on_viewport_size_changed")
 #	var i : int = 0
 
 #		print(c.charname)
@@ -541,6 +666,9 @@ func _on_SettingsButton_pressed():
 	#	return
 	#GameState.set_paused(true)
 	settingsControl.show()
+	var done_button := settingsControl.get_node_or_null("ButtonDone") as Button
+	if done_button != null:
+		done_button.call_deferred(&"grab_focus")
 	MusicStreamPlayer.play_music_type("Create")
 
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=82 format=3 uid="uid://bcm4yk3e2uv7"]
+[gd_scene load_steps=83 format=3 uid="uid://bcm4yk3e2uv7"]
 
 [ext_resource type="PackedScene" uid="uid://y2mh6jttjyop" path="res://scenes/UI/HUD/Multiple Choices/ChoicesButton.tscn" id="1"]
 [ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="2"]
@@ -58,6 +58,7 @@
 [ext_resource type="Texture2D" uid="uid://djcm65t4wb1nt" path="res://scenes/UI/HUD/Button_Spells.png" id="81"]
 [ext_resource type="PackedScene" path="res://scenes/UI/HUD/ClassicTorch/classic_torch_button.tscn" id="82_torch"]
 [ext_resource type="Texture2D" uid="uid://hgowxiea5c08" path="res://shared_assets/UI/buttonShopText.png" id="83_shop"]
+[ext_resource type="Theme" path="res://scenes/UI/HUD/Theme/realmz_hud_theme.tres" id="84_theme"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_kbh82"]
 
@@ -116,6 +117,7 @@ grow_vertical = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 mouse_filter = 2
+theme = ExtResource("84_theme")
 script = ExtResource("30")
 
 [node name="VBoxScreen" type="VBoxContainer" parent="." unique_id=45682596]
@@ -126,13 +128,13 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-theme_override_constants/separation = 0
+theme_override_constants/separation = 6
 
 [node name="HBoxTop" type="HBoxContainer" parent="VBoxScreen" unique_id=1927436939]
 layout_mode = 2
 size_flags_vertical = 3
 mouse_filter = 2
-theme_override_constants/separation = 0
+theme_override_constants/separation = 6
 
 [node name="MapArea" type="Control" parent="VBoxScreen/HBoxTop" unique_id=264081784]
 layout_mode = 2
@@ -215,7 +217,7 @@ grow_vertical = 2
 
 [node name="VBoxCharTime" type="VBoxContainer" parent="VBoxScreen/HBoxTop" unique_id=525991618]
 layout_mode = 2
-theme_override_constants/separation = 0
+theme_override_constants/separation = 6
 
 [node name="CharactersRect" type="TextureRect" parent="VBoxScreen/HBoxTop/VBoxCharTime" unique_id=954997641]
 custom_minimum_size = Vector2(320, 32)
@@ -393,7 +395,7 @@ texture_progress = ExtResource("15_3lusa")
 
 [node name="HBoxBot" type="HBoxContainer" parent="VBoxScreen" unique_id=1755434344]
 layout_mode = 2
-theme_override_constants/separation = 0
+theme_override_constants/separation = 6
 
 [node name="TextRect" type="NinePatchRect" parent="VBoxScreen/HBoxBot" unique_id=1359688254 node_paths=PackedStringArray("choicesContainer")]
 custom_minimum_size = Vector2(32, 200)
