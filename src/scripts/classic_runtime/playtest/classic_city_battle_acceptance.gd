@@ -184,6 +184,10 @@ func _start_playtest() -> void:
 		await _verify_random_battle_ap_continuation()
 		_finish_smoke()
 		return
+	if dragon_smoke:
+		await _verify_dragon_battle()
+		_finish_smoke()
+		return
 	if not await _verify_settings_and_map_music():
 		_finish_smoke()
 		return
@@ -194,10 +198,6 @@ func _start_playtest() -> void:
 		return
 	if winter_smoke:
 		await _verify_winter_timed_encounter()
-		_finish_smoke()
-		return
-	if dragon_smoke:
-		await _verify_dragon_battle()
 		_finish_smoke()
 		return
 	if not await _present_city_splash():
@@ -1412,7 +1412,77 @@ func _verify_dragon_battle() -> void:
 	)
 	if not entered_combat or not smoke_failures.is_empty():
 		return
+	await _verify_combat_inventory_music(character)
+	if not smoke_failures.is_empty():
+		return
 	await _verify_dragon_auto_melee(character)
+
+
+func _verify_combat_inventory_music(character: PlayerCharacter) -> void:
+	var player_turn_ready := false
+	for _frame: int in 1200:
+		if StateMachine._state_name == "CbDecideAction":
+			var active_button: CombatCreaButton = (
+				StateMachine.cb_decide_state.current_active_creabutton
+			)
+			if is_instance_valid(active_button) \
+					and active_button.creature == character:
+				player_turn_ready = true
+				break
+		await get_tree().process_frame
+	if not player_turn_ready:
+		_fail("00_combat_inventory_music", "the player combat turn did not become ready")
+		return
+
+	var original_path := str(MusicStreamPlayer.currently_playing.get("path", ""))
+	var original_stream: Variant = MusicStreamPlayer.stream
+	var original_playing: bool = MusicStreamPlayer.playing
+	var original_position: float = MusicStreamPlayer.get_playback_position()
+	UI.ow_hud._on_InventoryButton_pressed()
+	var inventory_opened := false
+	for _frame: int in 600:
+		if StateMachine._state_name == "CbMenus" \
+				and UI.ow_hud.inventoryRect.visible:
+			inventory_opened = true
+			break
+		await get_tree().process_frame
+	if not inventory_opened:
+		_fail("00_combat_inventory_music", "combat inventory did not open")
+		return
+
+	var open_path := str(MusicStreamPlayer.currently_playing.get("path", ""))
+	var open_stream: Variant = MusicStreamPlayer.stream
+	var open_playing: bool = MusicStreamPlayer.playing
+	var open_position: float = MusicStreamPlayer.get_playback_position()
+	UI.ow_hud._on_InventoryButton_pressed()
+	var inventory_closed := false
+	for _frame: int in 600:
+		if StateMachine._state_name == "CbDecideAction" \
+				and not UI.ow_hud.inventoryRect.visible:
+			inventory_closed = true
+			break
+		await get_tree().process_frame
+	var close_path := str(MusicStreamPlayer.currently_playing.get("path", ""))
+	var close_stream: Variant = MusicStreamPlayer.stream
+	var close_playing: bool = MusicStreamPlayer.playing
+	var close_position: float = MusicStreamPlayer.get_playback_position()
+	_verify_stage(
+		"00_combat_inventory_music",
+		inventory_closed
+			and GameGlobal.map.mapmusictype == "Battle"
+			and not original_path.is_empty()
+			and original_stream != null
+			and original_playing
+			and open_path == original_path
+			and open_stream == original_stream
+			and open_playing
+			and open_position >= original_position
+			and close_path == original_path
+			and close_stream == original_stream
+			and close_playing
+			and close_position >= open_position,
+		"combat inventory preserves battle path, stream identity, and uninterrupted playback",
+	)
 
 
 func _verify_dragon_auto_melee(character: PlayerCharacter) -> void:

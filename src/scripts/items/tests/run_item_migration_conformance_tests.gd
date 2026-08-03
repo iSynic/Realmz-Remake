@@ -115,6 +115,22 @@ func _test_source_boundaries() -> void:
 				source.contains(token),
 				"%s exposes stable item API token %s" % [path, token],
 			)
+	var combat_menu_source := FileAccess.get_file_as_string(
+		"res://scripts/states/CbMenusState.gd"
+	)
+	_expect(
+		not combat_menu_source.contains('play_music_type("Items")')
+			and not combat_menu_source.contains("play_music_map()"),
+		"combat inventory leaves the active battle music untouched",
+	)
+	var exploration_menu_source := FileAccess.get_file_as_string(
+		"res://scripts/states/ExMenusState.gd"
+	)
+	_expect(
+		exploration_menu_source.contains('play_music_type("Items")')
+			and exploration_menu_source.contains("play_music_map()"),
+		"exploration inventory retains its Items and map music transitions",
+	)
 
 
 func _test_definition_and_instance_invariants() -> void:

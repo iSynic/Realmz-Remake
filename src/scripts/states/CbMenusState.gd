@@ -40,7 +40,6 @@ func enter(_msg : Dictionary = {} ) ->void :
 			UI.ow_hud.botrightpanel.disable_all_except('InventoryButton', _msg["selected_character"])
 			UI.ow_hud.botrightpanel.show()
 			UI.ow_hud.inventoryRect.when_Items_Button_pressed()
-			MusicStreamPlayer.play_music_type("Items")
 		"SpellsMenu" :
 			cur_menu_name = menu_name
 			UI.ow_hud.spellcastMenu.initialize(_msg["selected_character"])
@@ -66,7 +65,6 @@ func exit() :
 		print("CBMenusState Exiting Inventory, enable BRpael  buttons")
 		UI.ow_hud.combatBRPanel.enable_all(UI.ow_hud.selected_character)
 		GameGlobal.map.show()
-		MusicStreamPlayer.play_music_map()
 		#UI.ow_hud.botrightpanel.enable_all(selected_character)
 		UI.ow_hud.textRect.set_text('', false)
 	if cur_menu_name == "SpellsMenu" :
