@@ -529,6 +529,8 @@ var mapping : Dictionary = {
 798: "Ball Lightning",
 799: "Fog of Doom",
 805: "Torch",
+877: "Iron Rations",
+883: "Wine",
 
 
 }

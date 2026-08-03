@@ -18,6 +18,17 @@ const COLOR_GOLD : Color = Color(1, 0.78, 0.27, 1)
 @export var infoStatsLabel : Label
 @export var doneButton : Button
 
+@onready var menuVBox : VBoxContainer = $MenuVBox
+@onready var infoRect : NinePatchRect = $MenuVBox/InfoRect
+@onready var headerHBox : HBoxContainer = $MenuVBox/HeaderHBox
+@onready var bodyHBox : HBoxContainer = $MenuVBox/BodyHBox
+@onready var levelsHeader : Label = (
+	$MenuVBox/BodyHBox/LevelsHBox/LevelsRect/LevelsContainer/LevelsHeader
+)
+@onready var costsHeader : Label = (
+	$MenuVBox/BodyHBox/LevelsHBox/CostsRect/CostsContainer/CostsHeader
+)
+
 signal on_closed
 
 var character : PlayerCharacter
@@ -33,13 +44,53 @@ var extra_abs : Array = []
 
 var char_sp : int = 0
 var level : int = 1
+var embedded_creation_mode := false
+var _default_background: Texture2D
 
 # Filled by _build_level_buttons_and_costs(). Index 0 = level 1, etc.
 var _cost_labels : Array = []
 
 
 func _ready() -> void :
+	_default_background = texture
 	_build_level_buttons_and_costs()
+
+
+func set_creation_mode(enabled: bool) -> void:
+	embedded_creation_mode = enabled
+	doneButton.visible = not enabled
+	texture = null if enabled else _default_background
+	clip_contents = enabled
+	_set_embedded_density(enabled)
+	if character != null:
+		refresh_character_heading()
+		_refresh_embedded_content_visibility()
+
+
+func _set_embedded_density(enabled: bool) -> void:
+	var inset := 4.0 if enabled else 14.0
+	menuVBox.offset_left = inset
+	menuVBox.offset_top = inset
+	menuVBox.offset_right = -inset
+	menuVBox.offset_bottom = -inset
+	menuVBox.add_theme_constant_override("separation", 4 if enabled else 8)
+	infoRect.custom_minimum_size.y = 72.0 if enabled else 96.0
+	headerHBox.custom_minimum_size.y = 42.0 if enabled else 48.0
+	portraitRect.custom_minimum_size = (
+		Vector2(42, 42) if enabled else Vector2(48, 48)
+	)
+	pointsLabel.add_theme_font_size_override("font_size", 16 if enabled else 18)
+	levelsHeader.custom_minimum_size.y = 20.0 if enabled else 24.0
+	costsHeader.custom_minimum_size.y = 20.0 if enabled else 24.0
+	for child: Node in lvbuttonCntnr.get_children():
+		if child is Button:
+			child.custom_minimum_size.y = 26.0 if enabled else 32.0
+	for cost_label: Label in _cost_labels:
+		cost_label.custom_minimum_size.y = 26.0 if enabled else 32.0
+		cost_label.add_theme_font_size_override(
+			"font_size",
+			14 if enabled else 16
+		)
 
 
 # Generate the Level 1..7 buttons + matching cost cells. Done in code so the
@@ -105,7 +156,7 @@ func set_displayed_character(
 	character = pc
 	character.prepare_ability_selection()
 	charspells = character.spells
-	nameLabel.text = pc.name
+	refresh_character_heading()
 	char_sp = pc.get_ability_selection_points()
 	portraitRect.texture = pc.portrait
 
@@ -113,7 +164,18 @@ func set_displayed_character(
 	_refresh_points_label()
 	_refresh_cost_column()
 	_clear_info_panel()
+	_refresh_embedded_content_visibility()
 	_on_s_level_button_pressed(1)
+
+
+func refresh_character_heading() -> void:
+	if character == null:
+		return
+	nameLabel.text = (
+		"Choose Spells — %s" % character.name
+		if embedded_creation_mode
+		else character.name
+	)
 
 
 # Group spells by level: known first (in their stored order), then
@@ -181,7 +243,9 @@ func _on_s_level_button_pressed(index : int) -> void :
 
 	_clear_vbox(spellListCntnr)
 	if charspells.size() < index :
-		GameGlobal.play_sfx("target error.wav")
+		if not embedded_creation_mode:
+			GameGlobal.play_sfx("target error.wav")
+		_clear_info_panel()
 		return
 
 	for entry in spells_by_level[index] :
@@ -272,8 +336,37 @@ func _target_label(sp) -> String :
 
 
 func _clear_info_panel() -> void :
-	infoNameLabel.text = "Select a spell to view details"
-	infoStatsLabel.text = ""
+	if character != null and not has_spell_choices():
+		infoNameLabel.text = "No spell selection available"
+		infoStatsLabel.text = (
+			"This character has no spells to choose during creation."
+		)
+	else:
+		infoNameLabel.text = "Select a spell to view details"
+		infoStatsLabel.text = ""
+
+
+func _refresh_embedded_content_visibility() -> void:
+	var show_selector := not embedded_creation_mode or has_spell_choices()
+	headerHBox.visible = show_selector
+	pointsLabel.visible = show_selector
+	bodyHBox.visible = show_selector
+
+
+func has_spell_choices() -> bool:
+	for spell_level: int in range(1, 8):
+		if not spells_by_level[spell_level].is_empty():
+			return true
+	return false
+
+
+func focus_first_control() -> void:
+	if not bodyHBox.visible:
+		return
+	for child: Node in lvbuttonCntnr.get_children():
+		if child is Button and child.is_visible_in_tree() and not child.disabled:
+			child.grab_focus()
+			return
 
 
 # --- header ---
@@ -285,7 +378,13 @@ func _refresh_points_label() -> void :
 # --- done ---
 
 func _on_done_button_pressed() -> void :
-	# Persist the player's choices back onto the character.
+	apply_selection()
+	emit_signal("on_closed")
+	hide()
+
+
+func apply_selection() -> void:
+	# Persist the player's spell choices back onto the character.
 	var maxlevel : int = charspells.size()
 	for lvl in range(1, maxlevel + 1) :
 		charspells[lvl - 1].clear()
@@ -293,5 +392,3 @@ func _on_done_button_pressed() -> void :
 			if entry["known"] :
 				character.add_spell_drom_dict(entry["dict"], lvl)
 	character.set_ability_selection_points(char_sp)
-	emit_signal("on_closed")
-	hide()

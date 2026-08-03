@@ -122,6 +122,9 @@ const TestPartyFactoryScript = preload(
 const CharacterRulesScript = preload(
 	"res://scripts/classic_runtime/classic_character_rules.gd"
 )
+const StandardCharacterRulesScript = preload(
+	"res://scripts/classic_runtime/classic_standard_character_rules.gd"
+)
 const CampaignPackageInstallerScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_package_installer.gd"
 )
@@ -240,6 +243,17 @@ class EnchanterLearningRule:
 
 	static func can_learn_spell(_character: Object, spell: Object) -> int:
 		return 1 if spell.school_levels.has("Enchanter") else 10
+
+
+class NativeSpellSelectionCharacter:
+	extends RefCounted
+	var classgd: GDScript
+	var level := 1
+	var stats := {"Intellect": 15, "Wisdom": 15}
+	var spells: Array = [[], [], [], [], [], [], []]
+
+	func get_stat(stat_name: String) -> int:
+		return int(stats.get(stat_name, 0))
 
 
 class GuardHouseAdapter:
@@ -656,6 +670,8 @@ class CampaignRuleCharacter:
 	extends RefCounted
 	var name := "Override Walker"
 	var level := 1
+	var exp_tnl := 0
+	var classic_prestige_penalty := 0
 	var classic_race_id := 20
 	var classic_caste_id := 21
 	var classic_rule_profile: Dictionary = {}
@@ -674,6 +690,8 @@ class CampaignRuleCharacter:
 	var classic_magic_resistance_initialized := false
 	var classic_hand_to_hand := 0
 	var classic_hand_to_hand_initialized := false
+	var classic_two_hand := 0
+	var classic_two_hand_initialized := false
 	var classic_spellcaster_type := 0
 	var classic_spellcaster_type_initialized := false
 	var classic_first_spell_memory_byte := 0
@@ -746,6 +764,13 @@ class CampaignRuleCharacter:
 
 	func _init(saved_data: Dictionary = {}) -> void:
 		level = int(saved_data.get("level", level))
+		exp_tnl = int(saved_data.get("exp_tnl", exp_tnl))
+		classic_prestige_penalty = int(
+			saved_data.get(
+				"classicPrestigePenalty",
+				classic_prestige_penalty
+			)
+		)
 		classic_race_id = int(saved_data.get("classicRaceId", classic_race_id))
 		classic_caste_id = int(saved_data.get("classicCasteId", classic_caste_id))
 		var saved_profile: Variant = saved_data.get("classicRuleProfile", {})
@@ -757,6 +782,8 @@ class CampaignRuleCharacter:
 			)
 		if saved_data.has("classicHandToHand"):
 			set_classic_hand_to_hand(int(saved_data["classicHandToHand"]))
+		if saved_data.has("classicTwoHand"):
+			set_classic_two_hand(int(saved_data["classicTwoHand"]))
 		if saved_data.has("classicSpellcasterType"):
 			set_classic_spellcaster_type(
 				int(saved_data["classicSpellcasterType"])
@@ -849,6 +876,13 @@ class CampaignRuleCharacter:
 
 	func has_classic_hand_to_hand() -> bool:
 		return classic_hand_to_hand_initialized
+
+	func set_classic_two_hand(value: int) -> void:
+		classic_two_hand = clampi(value, 0, 100)
+		classic_two_hand_initialized = true
+
+	func has_classic_two_hand() -> bool:
+		return classic_two_hand_initialized
 
 	func set_classic_spellcaster_type(value: int) -> void:
 		classic_spellcaster_type = value
@@ -1032,6 +1066,8 @@ class CampaignRuleCharacter:
 				base_stats[stat_name] = values[stat_name]
 		if values.has("classicHandToHand"):
 			set_classic_hand_to_hand(int(values["classicHandToHand"]))
+		if values.has("classicTwoHand"):
+			set_classic_two_hand(int(values["classicTwoHand"]))
 		recalculate_stats()
 		native_stats["curHP"] = native_stats["maxHP"]
 
@@ -1137,6 +1173,16 @@ class CampaignRuleCharacter:
 			native_value
 		)
 
+	func get_inventory_weight() -> int:
+		var carried_weight := int(money[0]) + int(money[1]) + int(money[2])
+		for item_value: Variant in inventory:
+			if not (item_value is Dictionary):
+				continue
+			carried_weight += int(item_value.get("weight", 0))
+			carried_weight += int(item_value.get("charges", 0)) \
+				* int(item_value.get("charges_weight", 0))
+		return carried_weight
+
 	func change_cur_sp(change: int) -> void:
 		native_stats["curSP"] = clampi(
 			int(native_stats["curSP"]) + change,
@@ -1199,6 +1245,8 @@ class CampaignRuleCharacter:
 	func save_data() -> Dictionary:
 		var data := {
 			"level": level,
+			"exp_tnl": exp_tnl,
+			"classicPrestigePenalty": classic_prestige_penalty,
 			"classicRaceId": classic_race_id,
 			"classicCasteId": classic_caste_id,
 			"classicRuleProfile": classic_rule_profile.duplicate(true),
@@ -1221,6 +1269,8 @@ class CampaignRuleCharacter:
 			data["classicMagicResistance"] = classic_magic_resistance
 		if classic_hand_to_hand_initialized:
 			data["classicHandToHand"] = classic_hand_to_hand
+		if classic_two_hand_initialized:
+			data["classicTwoHand"] = classic_two_hand
 		if classic_spellcaster_type_initialized:
 			data["classicSpellcasterType"] = classic_spellcaster_type
 		if classic_first_spell_memory_byte_initialized:
@@ -2578,6 +2628,10 @@ func _ready() -> void:
 		_test_classic_native_context_and_corpus_report()
 		_finish()
 		return
+	if OS.get_cmdline_user_args().has("--standard-character-rules-only"):
+		_test_standard_character_rules()
+		_finish()
+		return
 	var bundle = BundleScript.new()
 	_expect(bundle.load_from_directory(FIXTURE), "CoB fixture loads: %s" % bundle.last_error)
 	if not bundle.last_error.is_empty():
@@ -2592,7 +2646,9 @@ func _ready() -> void:
 	_test_builtin_shared_asset_tilesets()
 	_test_classic_campaign_admission()
 	_test_classic_test_party_tiers()
+	_test_standard_character_rules()
 	_test_classic_character_rule_profile()
+	_test_native_character_creation_spell_selection()
 	_test_classic_map_materializer()
 	_test_classic_dungeon_battle_terrain()
 	_test_classic_boat_materialization()
@@ -10736,6 +10792,385 @@ func _changed_caste_spellcasting_profile(rows: Array) -> Dictionary:
 	}
 
 
+func _test_native_character_creation_spell_selection() -> void:
+	var battle_mage := NativeSpellSelectionCharacter.new()
+	battle_mage.classgd = load(
+		"res://Data/Character Classes/Class_Battle mage.gd"
+	)
+	battle_mage.level = 4
+	_expect_equal(
+		CharacterRulesScript.native_spell_selection_total(battle_mage),
+		0,
+		"native Battle Mage selection starts at caste level five"
+	)
+	battle_mage.level = 5
+	_expect_equal(
+		CharacterRulesScript.native_spell_selection_total(battle_mage),
+		3,
+		"native Battle Mage receives first-level spell selection points"
+	)
+	battle_mage.level = 7
+	_expect_equal(
+		CharacterRulesScript.native_spell_selection_total(battle_mage),
+		12,
+		"native Battle Mage receives source triangular growth"
+	)
+	battle_mage.stats["Intellect"] = 17
+	_expect_equal(
+		CharacterRulesScript.native_spell_selection_total(battle_mage),
+		18,
+		"native Sorcerer-school selection includes Intellect above fifteen"
+	)
+	battle_mage.spells[0] = [{"name": "First"}, {"name": "Second"}]
+	battle_mage.spells[1] = [{"name": "Third"}]
+	_expect_equal(
+		CharacterRulesScript.native_spell_selection_remaining(battle_mage),
+		13,
+		"native learned spells spend the exact level cost ladder"
+	)
+
+	var priest := NativeSpellSelectionCharacter.new()
+	priest.classgd = load("res://Data/Character Classes/Class_Priest.gd")
+	priest.level = 3
+	priest.stats["Wisdom"] = 18
+	_expect_equal(
+		CharacterRulesScript.native_spell_selection_total(priest),
+		21,
+		"native Priest-school selection uses Wisdom rather than Intellect"
+	)
+
+	var bard := NativeSpellSelectionCharacter.new()
+	bard.classgd = load("res://Data/Character Classes/Class_Bard.gd")
+	bard.level = 19
+	_expect_equal(
+		CharacterRulesScript.native_spell_selection_total(bard),
+		0,
+		"native Bard selection remains unavailable before level twenty"
+	)
+	bard.level = 20
+	_expect_equal(
+		[
+			CharacterRulesScript.native_spell_selection_total(bard),
+			CharacterRulesScript.native_spell_selection_maximum_level(bard),
+		],
+		[3, 3],
+		"native Bard receives its source level-twenty three-level catalog"
+	)
+
+
+func _test_standard_character_rules() -> void:
+	var bundle := StandardCharacterRulesScript.standard_bundle()
+	_expect(not bundle.is_empty(), "standard Realmz character rules load")
+	if bundle.is_empty():
+		return
+	_expect_equal(
+		StandardCharacterRulesScript.identity_names(bundle, "race").size(),
+		19,
+		"standard character rules expose all nineteen Realmz races"
+	)
+	_expect_equal(
+		StandardCharacterRulesScript.identity_names(bundle, "caste").size(),
+		20,
+		"standard character rules expose all twenty Realmz castes"
+	)
+	_expect(
+		StandardCharacterRulesScript.is_caste_allowed(bundle, 1, 1),
+		"standard legality table allows a Human Fighter"
+	)
+	_expect(
+		not StandardCharacterRulesScript.is_caste_allowed(bundle, 7, 4),
+		"standard legality table rejects a Dwarf Archer"
+	)
+
+	var level_one := CampaignRuleCharacter.new({
+		"classicRaceId": 1,
+		"classicCasteId": 1,
+	})
+	var creation_result := CharacterRulesScript.initialize_character_creation(
+		bundle,
+		level_one,
+		1,
+		1,
+		[10, 10, 10, 10, 10, 10],
+		16,
+		5,
+		[],
+		[81, 91, 96],
+		[1, 2, 8]
+	)
+	_expect_equal(
+		creation_result.get("status"),
+		"ok",
+		"ordinary creation uses the source-backed standard adapter: %s"
+		% str(creation_result)
+	)
+	_expect_equal(
+		level_one.exp_tnl,
+		3000,
+		"standard Fighter creation uses the Classic victory table"
+	)
+	_expect_equal(
+		level_one.classic_prestige_penalty,
+		0,
+		"level-one standard creation has no prestige penalty"
+	)
+	_expect(
+		level_one.classic_creation_demographics_initialized,
+		"standard creation calculates gender and age"
+	)
+	_expect(
+		level_one.classic_saving_throws_initialized,
+		"standard creation calculates all Classic saving throws"
+	)
+	_expect_equal(
+		level_one.classic_age_movement_adjustment,
+		2,
+		"standard creation applies the source age-band movement adjustment"
+	)
+	_expect_equal(
+		level_one.classic_magic_resistance,
+		0,
+		"standard creation applies and clamps the source age-band resistance adjustment"
+	)
+	_expect_equal(
+		creation_result.get("specialAbilities", {}).get("abilities", []).size(),
+		14,
+		"standard creation calculates all fourteen non-spell abilities"
+	)
+	_expect_equal(
+		level_one.classic_two_hand,
+		10,
+		"standard creation calculates the source two-hand combat value"
+	)
+	_expect_equal(
+		level_one.classic_rule_profile.get("foeTypeBonuses", {}).get(
+			"bonuses",
+			[]
+		),
+		[1, 1, 0, 0, 3, 0, 0, 1],
+		"standard creation retains the source foe-type combat rolls"
+	)
+	for profile_key: String in [
+		"creation",
+		"movement",
+		"magicResistance",
+		"attacks",
+		"combatProgression",
+		"staminaProgression",
+		"victoryProgression",
+		"specialAbilities",
+		"itemPermissions",
+	]:
+		_expect(
+			level_one.classic_rule_profile.has(profile_key),
+			"standard creation profile owns %s" % profile_key
+		)
+
+	var shared_items_value: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(
+			"res://shared_assets/items/stuff_book.json"
+		)
+	)
+	_expect(
+		shared_items_value is Dictionary,
+		"shared item book loads for standard creation resources"
+	)
+	if shared_items_value is Dictionary:
+		var resources_result := CharacterRulesScript.apply_character_creation_resources(
+			level_one,
+			shared_items_value
+		)
+		_expect_equal(
+			resources_result.get("status"),
+			"ok",
+			"standard creation resolves the caste starting possessions: %s"
+			% str(resources_result)
+		)
+		_expect_equal(
+			level_one.money[0],
+			30,
+			"standard creation applies the Fighter starting money"
+		)
+		_expect_equal(
+			level_one.get_inventory_weight(),
+			812,
+			"standard creation load includes stock items, charges, and starting gold"
+		)
+		_expect_equal(
+			level_one.get_stat("Weight_Limit"),
+			2880,
+			"standard creation uses Classic's Strength-squared carrying capacity"
+		)
+		_expect_equal(
+			CharacterRulesScript.weighted_movement(
+				level_one,
+				level_one.classic_rule_profile,
+				-1
+			),
+			13,
+			"standard creation applies Classic movement after starting load"
+		)
+
+		var serialized_level_one: Variant = JSON.parse_string(
+			JSON.stringify(level_one.save_data())
+		)
+		var restored_level_one := CampaignRuleCharacter.new(
+			serialized_level_one
+		)
+		_expect_equal(
+			[
+				restored_level_one.exp_tnl,
+				restored_level_one.classic_prestige_penalty,
+				restored_level_one.classic_two_hand,
+				restored_level_one.classic_magic_resistance,
+				restored_level_one.classic_age_years,
+				restored_level_one.classic_saving_throws.size(),
+				restored_level_one.inventory.size(),
+			],
+			[3000, 0, 10, 0, 16, 8, level_one.inventory.size()],
+			"source-created character state survives a save/load round trip"
+		)
+		_expect_equal(
+			Array(
+				restored_level_one.classic_rule_profile.get(
+					"foeTypeBonuses",
+					{}
+				).get("bonuses", [])
+			).map(func(value: Variant) -> int: return int(value)),
+			[1, 1, 0, 0, 3, 0, 0, 1],
+			"source-generated foe bonuses survive a save/load round trip"
+		)
+
+		var generation_failures: Array[String] = []
+		var resource_failures: Array[String] = []
+		var legal_pair_count := 0
+		for race_id: int in range(1, 20):
+			for caste_id: int in range(1, 21):
+				if not StandardCharacterRulesScript.is_caste_allowed(
+					bundle,
+					race_id,
+					caste_id
+				):
+					continue
+				legal_pair_count += 1
+				var generated := CampaignRuleCharacter.new({
+					"classicRaceId": race_id,
+					"classicCasteId": caste_id,
+				})
+				var generated_result := (
+					CharacterRulesScript.initialize_character_creation(
+						bundle,
+						generated,
+						1,
+						1,
+						[10, 10, 10, 10, 10, 10]
+					)
+				)
+				if str(generated_result.get("status", "")) != "ok":
+					generation_failures.append(
+						"race %d / caste %d: %s"
+						% [race_id, caste_id, str(generated_result)]
+					)
+					continue
+				var generated_resources := (
+					CharacterRulesScript.apply_character_creation_resources(
+						generated,
+						shared_items_value
+					)
+				)
+				if str(generated_resources.get("status", "")) != "ok":
+					resource_failures.append(
+						"race %d / caste %d: %s"
+						% [race_id, caste_id, str(generated_resources)]
+					)
+		_expect(legal_pair_count > 0, "standard legality table has playable pairs")
+		_expect_equal(
+			generation_failures,
+			[],
+			"every legal standard race/caste pair generates from one rules owner"
+		)
+		_expect_equal(
+			resource_failures,
+			[],
+			"every legal standard race/caste pair resolves its starting possessions"
+		)
+
+	var scenario_bundle := bundle.duplicate(true)
+	scenario_bundle["manifest"] = {
+		"id": "standard-merge-test",
+		"name": "Standard Merge Test",
+	}
+	var scenario_rules: Dictionary = scenario_bundle["documents"]["rules"]
+	var changed_race: Dictionary = scenario_rules["raceOverrides"][0].duplicate(true)
+	changed_race["baseMove"] = 99
+	scenario_rules["raceOverrides"] = [changed_race]
+	scenario_rules["casteOverrides"] = []
+	scenario_rules["tableSelection"] = {
+		"races": {
+			"source": "scenario-local",
+			"changedRecordIds": [0],
+		},
+		"castes": {
+			"source": "scenario-local",
+			"changedRecordIds": [],
+		},
+	}
+	var merged_bundle := StandardCharacterRulesScript.effective_bundle(
+		scenario_bundle
+	)
+	var merged_rules: Dictionary = merged_bundle["documents"]["rules"]
+	_expect_equal(
+		merged_rules["raceOverrides"].size(),
+		19,
+		"scenario creation keeps unchanged standard races available"
+	)
+	_expect_equal(
+		merged_rules["casteOverrides"].size(),
+		20,
+		"scenario creation keeps unchanged standard castes available"
+	)
+	_expect_equal(
+		merged_rules["raceOverrides"][0].get("baseMove"),
+		99,
+		"scenario-local race replacement overrides the standard record"
+	)
+
+	var advanced := CampaignRuleCharacter.new({
+		"classicRaceId": 1,
+		"classicCasteId": 1,
+	})
+	var advanced_result := CharacterRulesScript.initialize_character_creation(
+		bundle,
+		advanced,
+		2,
+		15,
+		[10, 10, 10, 10, 10, 10],
+		16,
+		5
+	)
+	_expect_equal(
+		advanced_result.get("status"),
+		"ok",
+		"standard generator advances an ordinary character to the chosen level: %s"
+		% str(advanced_result)
+	)
+	_expect_equal(
+		advanced.level,
+		15,
+		"standard generator owns advanced starting level progression"
+	)
+	_expect_equal(
+		advanced.exp_tnl,
+		850000,
+		"advanced standard Fighter uses the source victory requirement"
+	)
+	_expect_equal(
+		advanced.classic_prestige_penalty,
+		1960,
+		"advanced standard creation applies Classic's prestige penalty"
+	)
+
+
 func _test_classic_character_rule_profile() -> void:
 	var install = CampaignInstallScript.new()
 	_expect(
@@ -11351,6 +11786,8 @@ func _test_classic_character_rule_profile() -> void:
 			"casteMissileBase": 15,
 			"canUseMissile": false,
 			"handToHandBase": 6,
+			"raceTwoHandBase": 0,
+			"casteTwoHandBase": 0,
 			"maximumStrengthDamageBonus": 4,
 			"startingMoney": 37,
 			"startingItemIds": [
@@ -12924,6 +13361,7 @@ func _test_classic_character_rule_profile() -> void:
 			"dodge": 54,
 			"missile": 0,
 			"handToHand": 6,
+			"twoHand": 0,
 			"damageBonus": 2,
 		},
 		"Classic creation derives its combat values from finalized attributes"
@@ -35106,6 +35544,29 @@ func _test_shipped_lock_encounter(bundle) -> void:
 	_expect(
 		bool(choice_model.get("canBackOut", false)),
 		"Godot adapter keeps rogue back-out separate from authored actions"
+	)
+	var alternate_rogue := RogueTestCharacter.new()
+	alternate_rogue.name = "Alternate Rogue"
+	alternate_rogue.stat_value = 60.0
+	var alternate_choice_model: Dictionary = (
+		GodotAdapterScript.new().build_rogue_encounter_choices(
+			resolver,
+			alternate_rogue,
+			true
+		)
+	)
+	var pick_lock_choice_index: int = choice_model.get("tokens", []).find(
+		"rogue:6"
+	)
+	_expect_equal(
+		choice_model.get("choices", [])[pick_lock_choice_index],
+		"Pick Lock — Test Rogue (45%)",
+		"rogue choice identifies the selected actor and derived chance"
+	)
+	_expect_equal(
+		alternate_choice_model.get("choices", [])[pick_lock_choice_index],
+		"Pick Lock — Alternate Rogue (%d%%)" % resolver.success_percent(6, 60.0),
+		"rebuilding rogue choices derives the label from the replacement actor"
 	)
 	var failed_pick: Dictionary = resolver.resolve_action(6, false)
 	_expect_equal(failed_pick.get("outcome"), 0, "failed lockpick remains in complex encounter")

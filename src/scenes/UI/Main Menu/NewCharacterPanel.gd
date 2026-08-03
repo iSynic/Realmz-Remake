@@ -1,10 +1,21 @@
 extends NinePatchRect
 
+enum CreationStage {
+	IDENTITY,
+	CALLING,
+	APPEARANCE,
+	REVIEW,
+	SPELLS,
+}
+
 const ClassicCampaignInstallScript = preload(
 	"res://scripts/scenario_runtime/scenario_campaign_install.gd"
 )
 const ClassicCharacterRulesScript = preload(
 	"res://scripts/classic_runtime/classic_character_rules.gd"
+)
+const ClassicStandardCharacterRulesScript = preload(
+	"res://scripts/classic_runtime/classic_standard_character_rules.gd"
 )
 const ClassicItemMaterializerScript = preload(
 	"res://scripts/classic_runtime/classic_item_materializer.gd"
@@ -20,7 +31,6 @@ const ClassicItemMaterializerScript = preload(
 @export var iconContainer : GridContainer# = $"IconScrollContainer/IconContainer"
 @export var portraitScroll : ScrollContainer# = $"PortraitScrollContainer"
 @export var iconScroll : ScrollContainer# = $"IconScrollContainer"
-@export var toggleButton : Button# = $"ToggleIcoPortButton"
 @export var classitemlist : ItemList #= $"ClassItemList"
 @export var raceitemlist : ItemList #= $"RaceItemList"
 @export var characterstatrect : NewCharStatsRect #= $"CharacterStatsRect"
@@ -41,8 +51,8 @@ var newchar_level = 1
 #var onlyportrait : Texture2D = preload("res://Main Menu/onlyportrait.png")
 
 var new_char_name = ""
-@onready var new_char_portrait : Texture2D = load("res://scenes/UI/Main Menu/DefaultPortrait.png")
-@onready var new_char_icon : Texture2D = load("res://scenes/UI/Main Menu/DefaultIcon.png")
+var new_char_portrait : Texture2D
+var new_char_icon : Texture2D
 var new_char_class : GDScript = null
 var new_char_race : GDScript = null
 
@@ -57,30 +67,331 @@ var classic_caste_id := 0
 var classic_gender := 1
 var return_to_campaign_panel: Control
 var classic_creation_active := false
+var character_rules_bundle: Dictionary = {}
 
 @export var portraitRect : TextureRect# = $"PortraitRect"
 @export var iconRect : TextureRect# = $"IconRect"
 
-@onready var default_icon : Texture2D = preload("res://scenes/UI/Main Menu/DefaultIcon.png")
-@onready var default_portrait : Texture2D = preload("res://scenes/UI/Main Menu/DefaultPortrait.png")
+var default_icon : Texture2D
+var default_portrait : Texture2D
+@onready var stageLabel : Label = $BigVBox/HeaderRow/StageLabel
+@onready var identityStage : Control = $BigVBox/ContentRow/StageWorkspace/IdentityStage
+@onready var callingStage : Control = $BigVBox/ContentRow/StageWorkspace/CallingStage
+@onready var appearanceStage : Control = $BigVBox/ContentRow/StageWorkspace/AppearanceStage
+@onready var reviewStage : Control = $BigVBox/ContentRow/StageWorkspace/ReviewStage
+@onready var backButton : Button = $BigVBox/FooterRow/BackButton
+@onready var statusLabel : Label = $BigVBox/StatusLabel
+@onready var portraitTabButton : Button = (
+	$BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/TabRow/PortraitTabButton
+)
+@onready var iconTabButton : Button = (
+	$BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/TabRow/IconTabButton
+)
+@onready var summaryNameLabel : Label = $BigVBox/ContentRow/SummaryVBox/SummaryNameLabel
+@onready var summaryCallingLabel : Label = $BigVBox/ContentRow/SummaryVBox/SummaryCallingLabel
+@onready var summaryLevelLabel : Label = $BigVBox/ContentRow/SummaryVBox/SummaryLevelLabel
+@onready var classHeadingLabel : Label = (
+	$BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox/ClassLabel
+)
+@onready var callingHeadingLabel : Label = (
+	$BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/Heading
+)
+@onready var classDescriptionLabel : Label = (
+	$BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox/ClassDescription
+)
+@onready var raceDescriptionLabel : Label = (
+	$BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/RaceVBox/RaceDescription
+)
+@onready var reviewHelpLabel : Label = (
+	$BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox/ReviewHelp
+)
+
+@onready var stageButtons : Array[Button] = [
+	$BigVBox/StageBar/IdentityButton,
+	$BigVBox/StageBar/CallingButton,
+	$BigVBox/StageBar/AppearanceButton,
+	$BigVBox/StageBar/ReviewButton,
+	$BigVBox/StageBar/SpellsButton,
+]
+@onready var stageContainers : Array[Control] = [
+	identityStage,
+	callingStage,
+	appearanceStage,
+	reviewStage,
+	abilities_rect,
+]
+
+var current_stage: CreationStage = CreationStage.IDENTITY
+var spell_selection_prepared := false
+var portraitButtons : Array[Button] = []
+var iconButtons : Array[Button] = []
+var portraitButtonGroup := ButtonGroup.new()
+var iconButtonGroup := ButtonGroup.new()
 
 #var dir = Directory.new()
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
 	var _err_on_CancelButton_pressed = cancelButton.connect("pressed",Callable(self,"_on_CancelButton_pressed"))
-	var _err_on_OKButton_pressed = okButton.connect("pressed",Callable(self,"_on_OKButton_pressed"))
+	var _err_on_OKButton_pressed = okButton.connect("pressed",Callable(self,"_on_primary_button_pressed"))
 	var _err_on_LineEdit_changed = lineEdit.connect("text_changed",Callable(self,"_on_LineEdit_changed"))
+	backButton.pressed.connect(_on_back_button_pressed)
+	portraitTabButton.pressed.connect(_show_appearance_browser.bind(true))
+	iconTabButton.pressed.connect(_show_appearance_browser.bind(false))
+	for stage_index: int in range(stageButtons.size()):
+		stageButtons[stage_index].pressed.connect(
+			_on_stage_button_pressed.bind(stage_index)
+		)
+	_load_default_appearance()
+	character_rules_bundle = ClassicStandardCharacterRulesScript.effective_bundle()
 	fillIconsPortraitsChoices()
 	loadClassesRaces()
 	fillClassesRacesMenus()
-	fillLevelMenuButton([1,3,5,10,15,20,30])
+	fillLevelMenuButton([1, 3, 5, 7, 9, 11, 13, 15, 17, 20, 25, 30])
+	abilities_rect.set_creation_mode(true)
 	genderOptionButton.item_selected.connect(_on_gender_selected)
-	genderOptionButton.visible = false
-	classicContextLabel.visible = false
+	genderOptionButton.visible = true
+	genderOptionButton.get_parent().visible = true
+	classicContextLabel.text = (
+		"Creating with the source-backed standard Realmz race and class tables."
+	)
+	classicContextLabel.visible = true
+	_update_mode_copy()
+	_show_appearance_browser(true)
+	_show_stage(CreationStage.IDENTITY, false)
 
 	# Connect to visibility changed signal to handle music
 	connect("visibility_changed", Callable(self, "_on_visibility_changed"))
+
+
+func _load_default_appearance() -> void:
+	default_portrait = Utils.FileHandler.load_img_texture(
+		Paths.datafolderpath + "Character Portraits/Human 1.png"
+	)
+	default_icon = Utils.FileHandler.load_img_texture(
+		Paths.datafolderpath + "Character Icons/Vampire 5.png"
+	)
+	new_char_portrait = default_portrait
+	new_char_icon = default_icon
+	portraitRect.texture = default_portrait
+	iconRect.texture = default_icon
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible:
+		return
+	if event.is_action_pressed(&"ui_cancel"):
+		if current_stage > CreationStage.IDENTITY:
+			_show_stage(current_stage - 1)
+		else:
+			_on_CancelButton_pressed()
+		get_viewport().set_input_as_handled()
+
+
+func _on_primary_button_pressed() -> void:
+	if current_stage < CreationStage.REVIEW:
+		_show_stage(current_stage + 1)
+		return
+	if current_stage == CreationStage.REVIEW:
+		if await _prepare_spell_selection_stage():
+			_show_stage(CreationStage.SPELLS)
+		return
+	await _finish_character_creation()
+
+
+func _on_back_button_pressed() -> void:
+	if current_stage > CreationStage.IDENTITY:
+		_show_stage(current_stage - 1)
+
+
+func _on_stage_button_pressed(stage_index: int) -> void:
+	if stage_index < 0 or stage_index >= stageButtons.size():
+		return
+	if stageButtons[stage_index].disabled:
+		return
+	_show_stage(stage_index)
+
+
+func _show_stage(stage_index: int, focus_stage: bool = true) -> void:
+	current_stage = clampi(
+		stage_index,
+		CreationStage.IDENTITY,
+		CreationStage.SPELLS
+	) as CreationStage
+	for index: int in range(stageContainers.size()):
+		stageContainers[index].visible = index == current_stage
+		stageButtons[index].button_pressed = index == current_stage
+	stageLabel.text = "Step %d of %d" % [current_stage + 1, stageContainers.size()]
+	_refresh_creation_ui()
+	if focus_stage:
+		_focus_current_stage.call_deferred()
+
+
+func _focus_current_stage() -> void:
+	match current_stage:
+		CreationStage.IDENTITY:
+			lineEdit.grab_focus()
+		CreationStage.CALLING:
+			classitemlist.grab_focus()
+		CreationStage.APPEARANCE:
+			portraitTabButton.grab_focus()
+		CreationStage.REVIEW:
+			okButton.grab_focus()
+		CreationStage.SPELLS:
+			if abilities_rect.has_spell_choices():
+				abilities_rect.focus_first_control()
+			else:
+				okButton.grab_focus()
+
+
+func _name_validation_message() -> String:
+	if new_char_name.strip_edges().is_empty():
+		return "Enter a character name to continue."
+	var validity: Array = Utils.FileHandler.is_valid_file_name(new_char_name)
+	if validity[0] != 1:
+		return str(validity[1])
+	var character_path: String = (
+		Paths.profilesfolderpath
+		+ Paths.currentProfileFolderName
+		+ "/Characters/"
+		+ new_char_name
+	)
+	if DirAccess.dir_exists_absolute(character_path):
+		return "That character name is already used in this profile."
+	return ""
+
+
+func _calling_is_complete() -> bool:
+	return (
+		_name_validation_message().is_empty()
+		and new_char_class != null
+		and new_char_race != null
+		and new_character != null
+		and ClassicStandardCharacterRulesScript.is_caste_allowed(
+			character_rules_bundle,
+			classic_race_id,
+			classic_caste_id
+		)
+	)
+
+
+func _refresh_creation_ui() -> void:
+	if stageButtons.is_empty():
+		return
+	var name_is_valid := _name_validation_message().is_empty()
+	var calling_is_complete := _calling_is_complete()
+	stageButtons[CreationStage.IDENTITY].disabled = false
+	stageButtons[CreationStage.CALLING].disabled = not name_is_valid
+	stageButtons[CreationStage.APPEARANCE].disabled = not calling_is_complete
+	stageButtons[CreationStage.REVIEW].disabled = not calling_is_complete
+	stageButtons[CreationStage.SPELLS].disabled = not spell_selection_prepared
+	backButton.disabled = current_stage == CreationStage.IDENTITY
+
+	match current_stage:
+		CreationStage.IDENTITY:
+			okButton.text = "Continue"
+			okButton.disabled = not name_is_valid
+			statusLabel.text = (
+				"Choose a name, starting level, and gender when the campaign requires it."
+				if name_is_valid
+				else _name_validation_message()
+			)
+		CreationStage.CALLING:
+			okButton.text = "Continue"
+			okButton.disabled = not calling_is_complete
+			statusLabel.text = (
+				"Review both selections, then continue to appearance."
+				if calling_is_complete
+				else "Choose both a %s and a race to continue." % (
+					"caste" if classic_install != null else "class"
+				)
+			)
+		CreationStage.APPEARANCE:
+			okButton.text = "Continue"
+			okButton.disabled = not calling_is_complete
+			statusLabel.text = "Choose a portrait and combat icon, or keep the defaults."
+		CreationStage.REVIEW:
+			okButton.text = "Continue to Spells"
+			okButton.disabled = not calling_is_complete
+			statusLabel.text = "Review the generated character, then choose spells."
+		CreationStage.SPELLS:
+			okButton.text = "Create Character"
+			okButton.disabled = not spell_selection_prepared
+			statusLabel.text = (
+				"Choose spells within the available selection-point budget."
+				if abilities_rect.has_spell_choices()
+				else "This character has no spells to choose."
+			)
+	_update_summary()
+
+
+func _selected_item_text(item_list: ItemList, fallback: String) -> String:
+	var selected_items: PackedInt32Array = item_list.get_selected_items()
+	if selected_items.is_empty():
+		return fallback
+	return item_list.get_item_text(selected_items[0])
+
+
+func _update_summary() -> void:
+	summaryNameLabel.text = (
+		new_char_name
+		if _name_validation_message().is_empty()
+		else "— unnamed —"
+	)
+	var race_name := _selected_item_text(raceitemlist, "No race selected")
+	var calling_name := _selected_item_text(
+		classitemlist,
+		"No caste selected" if classic_install != null else "No class selected"
+	)
+	summaryCallingLabel.text = "%s\n%s" % [race_name, calling_name]
+	summaryLevelLabel.text = "Starting level %d" % newchar_level
+
+
+func _update_mode_copy() -> void:
+	var is_classic := classic_install != null
+	classHeadingLabel.text = "Caste" if is_classic else "Class"
+	stageButtons[CreationStage.CALLING].text = (
+		"2  Caste & Race" if is_classic else "2  Class & Race"
+	)
+	callingHeadingLabel.text = (
+		"Choose a Caste and Race" if is_classic else "Choose a Class and Race"
+	)
+	reviewHelpLabel.text = (
+		"Classic statistics are generated from the active scenario and selected starting level."
+		if is_classic
+		else (
+			"Statistics are calculated from the standard Realmz race, class, gender, "
+			+ "and starting-level rules. Review is read-only; only spell selection "
+			+ "remains a deliberate creation choice."
+		)
+	)
+	classicContextLabel.text = _rules_context_text()
+
+
+func _rules_context_text() -> String:
+	if classic_install != null:
+		return (
+			"Creating for %s — scenario overrides are merged with the standard Realmz tables."
+			% str(
+				classic_install.bundle.manifest.get(
+					"name",
+					classic_campaign_name
+				)
+			)
+		)
+	return "Creating with the source-backed standard Realmz race and class tables."
+
+
+func _show_appearance_browser(show_portraits: bool) -> void:
+	portraitScroll.visible = show_portraits
+	iconScroll.visible = not show_portraits
+	portraitTabButton.button_pressed = show_portraits
+	iconTabButton.button_pressed = not show_portraits
+	if portraitsTextures.size() == iconsTextures.size():
+		if show_portraits:
+			portraitScroll.set_v_scroll(iconScroll.get_v_scroll())
+		else:
+			iconScroll.set_v_scroll(portraitScroll.get_v_scroll())
 
 
 func configure_classic_campaign(
@@ -95,6 +406,14 @@ func configure_classic_campaign(
 		return {"status": "error", "message": install.last_error}
 	classic_campaign_name = campaign_name
 	classic_install = install
+	character_rules_bundle = (
+		ClassicStandardCharacterRulesScript.effective_bundle(install.bundle)
+	)
+	if character_rules_bundle.is_empty():
+		return {
+			"status": "error",
+			"message": ClassicStandardCharacterRulesScript.last_error(),
+		}
 	return_to_campaign_panel = campaign_panel
 	classicContextLabel.text = (
 		"Creating for %s — scenario race and caste rules apply."
@@ -102,12 +421,15 @@ func configure_classic_campaign(
 	)
 	classicContextLabel.visible = true
 	genderOptionButton.visible = true
+	genderOptionButton.get_parent().visible = true
 	classic_gender = 1
 	classic_creation_active = false
 	genderOptionButton.select(0)
 	fill()
 	loadClassesRaces()
 	fillClassesRacesMenus()
+	_update_mode_copy()
+	_refresh_creation_ui()
 	return {"status": "ok"}
 
 
@@ -120,9 +442,19 @@ func clear_classic_campaign_context() -> void:
 	classic_caste_id = 0
 	classic_gender = 1
 	classic_creation_active = false
-	classicContextLabel.visible = false
-	genderOptionButton.visible = false
+	character_rules_bundle = ClassicStandardCharacterRulesScript.effective_bundle()
+	classicContextLabel.text = (
+		"Creating with the source-backed standard Realmz race and class tables."
+	)
+	classicContextLabel.visible = true
+	genderOptionButton.visible = true
+	genderOptionButton.get_parent().visible = true
 	return_to_campaign_panel = null
+	if is_node_ready():
+		loadClassesRaces()
+		fillClassesRacesMenus()
+	_update_mode_copy()
+	_refresh_creation_ui()
 
 
 func set_clean_character() :
@@ -133,6 +465,7 @@ func set_clean_character() :
 	characterstatrect.display_portrait(portraitRect.texture )
 	new_char_icon = default_icon
 	iconRect.texture = default_icon
+	_update_summary()
 
 #	new_character = GameGlobal.playerCharacterGD.new({"name":"ENTER NAME"}, default_icon, default_portrait, null, null)
 	#GameGlobal.playerCharacterGD.new(jsonresult, newicon, newportrait, classgd, racegd)
@@ -142,48 +475,47 @@ func try_create_character() :
 	print("try create", new_char_class, new_char_race)
 	if not (new_char_class and  new_char_race) :
 		return
-	var construction_level: int = 1 if classic_install != null else newchar_level
+	if not ClassicStandardCharacterRulesScript.is_caste_allowed(
+		character_rules_bundle,
+		classic_race_id,
+		classic_caste_id
+	):
+		new_character = null
+		classic_creation_active = false
+		statusLabel.text = "That race and class combination is not allowed by Realmz."
+		_refresh_creation_ui()
+		return
+	spell_selection_prepared = false
 	new_character = GameGlobal.playerCharacterGD.new(
-		{"level": construction_level},
+		{"level": 1},
 		new_char_icon,
 		new_char_portrait,
 		new_char_class,
 		new_char_race
 	)
-	if classic_install != null:
-		new_character.classic_race_id = classic_race_id
-		new_character.classic_caste_id = classic_caste_id
-		var classic_result := (
-			ClassicCharacterRulesScript.initialize_character_creation(
-				classic_install.bundle,
-				new_character,
-				classic_gender,
-				newchar_level
-			)
+	new_character.classic_race_id = classic_race_id
+	new_character.classic_caste_id = classic_caste_id
+	var classic_result := (
+		ClassicCharacterRulesScript.initialize_character_creation(
+			character_rules_bundle,
+			new_character,
+			classic_gender,
+			newchar_level
 		)
-		var classic_status := str(classic_result.get("status", ""))
-		if classic_status == "native":
-			new_character = GameGlobal.playerCharacterGD.new(
-				{"level": newchar_level},
-				new_char_icon,
-				new_char_portrait,
-				new_char_class,
-				new_char_race
-			)
-			new_character.classic_race_id = classic_race_id
-			new_character.classic_caste_id = classic_caste_id
-			classic_creation_active = false
-		elif classic_status == "ok":
-			classic_creation_active = true
-		else:
-			classicContextLabel.text = str(classic_result.get(
-				"message",
-				"The selected Classic race and caste cannot create a character."
-			))
-			new_character = null
-			classic_creation_active = false
-			okButton.disabled = true
-			return
+	)
+	var classic_status := str(classic_result.get("status", ""))
+	if classic_status == "ok":
+		classic_creation_active = true
+		classicContextLabel.text = _rules_context_text()
+	else:
+		classicContextLabel.text = str(classic_result.get(
+			"message",
+			"The selected Realmz race and class cannot create a character."
+		))
+		new_character = null
+		classic_creation_active = false
+		okButton.disabled = true
+		return
 	new_character.portrait = new_char_portrait
 	new_character.icon = new_char_icon
 	new_character.name = new_char_name
@@ -192,6 +524,7 @@ func try_create_character() :
 #		new_character.level_up()
 #	new_character.recalculate_stats()
 	characterstatrect.display_data(new_character)
+	_refresh_creation_ui()
 
 func fillLevelMenuButton(levels : Array) :
 	var popup : PopupMenu = levelMenuButton.get_popup()
@@ -205,6 +538,8 @@ func _on_level_picked(ID):
 	characterstatrect.set_character_level(newchar_level)
 	if new_character :
 		try_create_character()
+	_update_summary()
+	_refresh_creation_ui()
 
 
 func fillIconsPortraitsChoices():
@@ -225,16 +560,24 @@ func fillIconsPortraitsChoices():
 
 	for p in range(portraitsTextures.size()) :
 		var b = Button.new()
-		b.flat = true
+		b.custom_minimum_size = Vector2(64, 64)
+		b.toggle_mode = true
+		b.button_group = portraitButtonGroup
 		b.icon = portraitsTextures[p]
+		b.tooltip_text = "Portrait %d" % (p + 1)
 		b.connect("pressed",Callable(self,"_on_portrait_button_pressed").bind(p))
 		portraitContainer.add_child(b)
+		portraitButtons.append(b)
 	for i in range(iconsTextures.size()) :
 		var b = Button.new()
-		b.flat = true
+		b.custom_minimum_size = Vector2(64, 64)
+		b.toggle_mode = true
+		b.button_group = iconButtonGroup
 		b.icon = iconsTextures[i]
+		b.tooltip_text = "Combat icon %d" % (i + 1)
 		b.connect("pressed",Callable(self,"_on_icon_button_pressed").bind(i))
 		iconContainer.add_child(b)
+		iconButtons.append(b)
 
 
 func loadClassesRaces() :
@@ -252,61 +595,34 @@ func loadClassesRaces() :
 	for rf in racesfilenames :
 		var racegd : GDScript = load(racespath + rf)
 		racesgd.append(racegd)
-	if classic_install != null:
-		classic_race_options = _classic_identity_options(
-			"race",
-			racesgd
-		)
-		classic_caste_options = _classic_identity_options(
-			"caste",
-			classesgd
-		)
+	classic_race_options = _classic_identity_options(
+		"race",
+		racesgd
+	)
+	classic_caste_options = _classic_identity_options(
+		"caste",
+		classesgd
+	)
 
 
 func fillClassesRacesMenus() :
 	classitemlist.clear()
 	raceitemlist.clear()
-	if classic_install != null:
-		for option_index: int in range(classic_caste_options.size()):
-			var caste_option: Dictionary = classic_caste_options[option_index]
-			classitemlist.add_item(str(caste_option.get("name", "")))
-			classitemlist.set_item_tooltip(
-				option_index,
-				str(caste_option.get("tooltip", ""))
-			)
-			classitemlist.set_item_disabled(
-				option_index,
-				not bool(caste_option.get("allowed", true))
-			)
-		for option_index: int in range(classic_race_options.size()):
-			var race_option: Dictionary = classic_race_options[option_index]
-			raceitemlist.add_item(str(race_option.get("name", "")))
-			raceitemlist.set_item_tooltip(
-				option_index,
-				str(race_option.get("tooltip", ""))
-			)
-			raceitemlist.set_item_disabled(
-				option_index,
-				not bool(race_option.get("allowed", true))
-			)
-		return
-	var i=0
-	for c  in classesgd :
-		classitemlist.add_item(c.classrace_name)
-		classitemlist.set_item_tooltip(i,c.classrace_definition)
-		i=i+1
-	i=0
-	for r in racesgd :
-		raceitemlist.add_item(r.classrace_name)
-		raceitemlist.set_item_tooltip(i,r.classrace_definition)
-		i=i+1
+	for option_index: int in range(classic_caste_options.size()):
+		var caste_option: Dictionary = classic_caste_options[option_index]
+		classitemlist.add_item(str(caste_option.get("name", "")))
+	for option_index: int in range(classic_race_options.size()):
+		var race_option: Dictionary = classic_race_options[option_index]
+		raceitemlist.add_item(str(race_option.get("name", "")))
+	_refresh_identity_legality()
 
 
 func _classic_identity_options(
 	identity_kind: String,
 	native_definitions: Array
 ) -> Array[Dictionary]:
-	var rules: Dictionary = classic_install.bundle.documents.get("rules", {})
+	var documents: Dictionary = character_rules_bundle.get("documents", {})
+	var rules: Dictionary = documents.get("rules", {})
 	var rule_names: Dictionary = rules.get("ruleNames", {})
 	var names_value: Variant = rule_names.get(
 		"raceNames" if identity_kind == "race" else "casteNames",
@@ -355,7 +671,11 @@ func _classic_identity_options(
 				option_ids.append(identity_id)
 	option_ids.sort()
 
-	var selection_rules: Dictionary = classic_install.selection_rules()
+	var selection_rules: Dictionary = (
+		classic_install.selection_rules()
+		if classic_install != null
+		else {}
+	)
 	var banned_ids: Variant = selection_rules.get(
 		"bannedRaceIds" if identity_kind == "race" else "bannedCasteIds",
 		[]
@@ -374,6 +694,17 @@ func _classic_identity_options(
 		var allowed: bool = not (
 			banned_ids is Array and identity_id in banned_ids
 		)
+		var native_description := str(
+			native_definition.get_script_constant_map().get(
+				"classrace_definition",
+				""
+			)
+		) if native_definition != null else ""
+		var rules_description := (
+			"Uses this scenario's effective Classic rules."
+			if classic_install != null
+			else "Uses the standard Realmz rules."
+		)
 		options.append({
 			"id": identity_id,
 			"name": display_name,
@@ -382,33 +713,104 @@ func _classic_identity_options(
 			"tooltip": (
 				"Not allowed by this scenario."
 				if not allowed
-				else "Uses this scenario's active Classic rules."
+				else (
+					"%s\n%s" % [native_description, rules_description]
+				).strip_edges()
 			),
 		})
 	return options
 
 
+func _refresh_identity_legality() -> void:
+	for option_index: int in range(classic_race_options.size()):
+		var option: Dictionary = classic_race_options[option_index]
+		var allowed := bool(option.get("allowed", true))
+		raceitemlist.set_item_disabled(option_index, not allowed)
+		raceitemlist.set_item_tooltip(
+			option_index,
+			str(option.get("tooltip", ""))
+		)
+	for option_index: int in range(classic_caste_options.size()):
+		var option: Dictionary = classic_caste_options[option_index]
+		var allowed := bool(option.get("allowed", true))
+		var pair_allowed := (
+			classic_race_id == 0
+			or ClassicStandardCharacterRulesScript.is_caste_allowed(
+				character_rules_bundle,
+				classic_race_id,
+				int(option.get("id", 0))
+			)
+		)
+		classitemlist.set_item_disabled(
+			option_index,
+			not allowed or not pair_allowed
+		)
+		var tooltip := str(option.get("tooltip", ""))
+		if allowed and not pair_allowed:
+			tooltip = "Not available to the selected race."
+		classitemlist.set_item_tooltip(option_index, tooltip)
+
+
 func _on_class_select(i : int) :
-	if classic_install != null:
-		var option: Dictionary = classic_caste_options[i]
-		new_char_class = option.get("nativeDefinition") as GDScript
-		classic_caste_id = int(option.get("id", 0))
-	else:
-		new_char_class = classesgd[i]
+	if i < 0 or i >= classic_caste_options.size():
+		return
+	var option: Dictionary = classic_caste_options[i]
+	new_char_class = option.get("nativeDefinition") as GDScript
+	classic_caste_id = int(option.get("id", 0))
 	_on_LineEdit_changed(lineEdit.text)
 	characterstatrect.display_partial_selection(new_char_race, new_char_class)
+	classDescriptionLabel.text = _class_description(i)
+	_refresh_identity_legality()
 	try_create_character()
+	_refresh_creation_ui()
 
 func _on_race_select(i : int) :
-	if classic_install != null:
-		var option: Dictionary = classic_race_options[i]
-		new_char_race = option.get("nativeDefinition") as GDScript
-		classic_race_id = int(option.get("id", 0))
-	else:
-		new_char_race = racesgd[i]
+	if i < 0 or i >= classic_race_options.size():
+		return
+	var option: Dictionary = classic_race_options[i]
+	new_char_race = option.get("nativeDefinition") as GDScript
+	classic_race_id = int(option.get("id", 0))
+	if classic_caste_id > 0 \
+			and not ClassicStandardCharacterRulesScript.is_caste_allowed(
+				character_rules_bundle,
+				classic_race_id,
+				classic_caste_id
+			):
+		classitemlist.deselect_all()
+		new_char_class = null
+		classic_caste_id = 0
+		new_character = null
+		spell_selection_prepared = false
 	_on_LineEdit_changed(lineEdit.text)
 	characterstatrect.display_partial_selection(new_char_race, new_char_class)
+	raceDescriptionLabel.text = _race_description(i)
+	_refresh_identity_legality()
 	try_create_character()
+	_refresh_creation_ui()
+
+
+func _class_description(index: int) -> String:
+	if index >= 0 and index < classic_caste_options.size():
+		var option: Dictionary = classic_caste_options[index]
+		return "%s\n%s" % [
+			str(option.get("name", "")),
+			str(option.get("tooltip", "")),
+		]
+	if index >= 0 and index < classesgd.size():
+		return str(classesgd[index].classrace_definition)
+	return "Select a class to view its description."
+
+
+func _race_description(index: int) -> String:
+	if index >= 0 and index < classic_race_options.size():
+		var option: Dictionary = classic_race_options[index]
+		return "%s\n%s" % [
+			str(option.get("name", "")),
+			str(option.get("tooltip", "")),
+		]
+	if index >= 0 and index < racesgd.size():
+		return str(racesgd[index].classrace_definition)
+	return "Select a race to view its description."
 
 func _on_portrait_button_pressed(i : int) :
 	new_char_portrait = portraitsTextures[i]
@@ -416,6 +818,9 @@ func _on_portrait_button_pressed(i : int) :
 		new_character.portrait = portraitsTextures[i]
 	portraitRect.texture = portraitsTextures[i]
 	characterstatrect.display_portrait( portraitsTextures[i])
+	if i >= 0 and i < portraitButtons.size():
+		portraitButtons[i].button_pressed = true
+	_update_summary()
 
 
 func _on_icon_button_pressed(i : int) :
@@ -423,6 +828,9 @@ func _on_icon_button_pressed(i : int) :
 	iconRect.texture = iconsTextures[i]
 	if new_character :
 		new_character.icon = iconsTextures[i]
+	if i >= 0 and i < iconButtons.size():
+		iconButtons[i].button_pressed = true
+	_update_summary()
 
 func _on_CancelButton_pressed() -> void :
 	var campaign_panel := return_to_campaign_panel
@@ -438,16 +846,13 @@ func _on_CancelButton_pressed() -> void :
 		)
 #	self.get_parent().get_parent().newCampaignButton.show()
 
-func _on_OKButton_pressed() -> void :
+func _prepare_spell_selection_stage() -> bool:
+	if spell_selection_prepared:
+		return true
 	if new_character==null or new_char_name == "" or new_char_class==null or new_char_race==null :
 		okButton.disabled = true
-		return
+		return false
 	new_character.name = new_char_name
-	if not classic_creation_active:
-		new_character.exp_tnl = PlayerCharacter.get_exp_req_for_lvl(
-			new_character.level + 1
-		)
-		new_character.level = newchar_level
 	if classic_install != null:
 		new_character.cur_campaign = classic_campaign_name
 	
@@ -460,28 +865,32 @@ func _on_OKButton_pressed() -> void :
 	#for i  in  range(max_spell_level) :
 		#new_character.spells.append([])
 
-	# Let native identities get their ordinary gifts. Active Classic profiles
-	# receive their source-ordered resources after spell selection below.
-	if not classic_creation_active:
-		await new_character.racegd._character_creation_gifts(new_character)
-		await new_character.classgd._character_creation_gifts(new_character)
-	
-	
-	printerr("Newcharpanel before adding spells ;", new_character.spells)
 	abilities_rect.set_displayed_character(new_character, true, [])
-	abilities_rect.show()
-	await abilities_rect.on_closed
+	spell_selection_prepared = true
+	_refresh_creation_ui()
+	return true
+
+
+func _finish_character_creation() -> void:
+	if not spell_selection_prepared:
+		if not await _prepare_spell_selection_stage():
+			return
+	okButton.disabled = true
+	abilities_rect.apply_selection()
 
 	if classic_creation_active:
 		var resources: Object = NodeAccess.__Resources()
-		var campaign_items_path: String = (
-			classic_install.campaign_directory.path_join("Items") + "/"
-		)
-		if resources != null \
-				and FileAccess.file_exists(
-					campaign_items_path.path_join("stuff_book.json")
-				):
-			resources.load_item_resources(campaign_items_path)
+		if resources != null:
+			resources.load_item_resources("res://shared_assets/items/")
+		if classic_install != null:
+			var campaign_items_path: String = (
+				classic_install.campaign_directory.path_join("Items") + "/"
+			)
+			if resources != null \
+					and FileAccess.file_exists(
+						campaign_items_path.path_join("stuff_book.json")
+					):
+				resources.load_item_resources(campaign_items_path)
 		var item_book: Dictionary = (
 			resources.items_book
 			if resources != null and resources.items_book is Dictionary
@@ -507,37 +916,6 @@ func _on_OKButton_pressed() -> void :
 			))
 			okButton.disabled = true
 			return
-	
-	
-#
-	# generate the stats modification  trait script source
-
-	var statsmodsdict : Dictionary = (
-		{}
-		if classic_creation_active
-		else characterstatrect.stat_mods_dict
-	)
-	print("NewCharacterPanel ADDING custom_stats.gd ? ", statsmodsdict.size() >0)
-	if statsmodsdict.size() >0 :
-		print("NewCharacterPanel ADDING custom_stats.gd")
-		var traitscript = load('res://shared_assets/traits/custom_stats.gd')
-#		var ntraitscript = traitscript.new([statsmodsdict])
-		new_character.add_trait(traitscript, [statsmodsdict])
-#	var stats_mod_source : String = "var name : String = 'character_creation_stats_mod'\n"
-#	for stat in statsmodsdict.keys() :
-#		stats_mod_source += "\nvar "+"_on_calculate_"+stat+" : int = "+String(statsmodsdict[stat])
-#	var traitscript : GDScript = GDScript.new()
-#	traitscript.set_source_code(stats_mod_source)
-#	var _err_traitscript_reload = traitscript.reload()
-#	if _err_traitscript_reload != OK :
-#		print("ERROR LOADING CHARACTER CREATION STATS MOD TRAIT SCRIPT, error code : "+_err_traitscript_reload)
-#	var  traitscriptinstance = traitscript.new()
-#	new_character.add_trait(traitscriptinstance)
-
-#
-#	path = "D:/Programming/Godot 4/Godot 4 Projects/Realmz Remake Folder/Profiles/Samuel/Saves/City of Bywater/toto/Characters/test"
-
-
 	new_character.stats["curHP"] = new_character.get_stat("maxHP")
 	match new_character.used_resource :
 		"SP" :
@@ -574,21 +952,24 @@ func _on_OKButton_pressed() -> void :
 
 func _on_LineEdit_changed(newtext : String) -> void :
 	new_char_name = newtext
+	if new_character != null:
+		new_character.name = new_char_name
+		if spell_selection_prepared:
+			abilities_rect.refresh_character_heading()
 	if new_char_name == "" :
-		okButton.disabled = true
 		characterstatrect.display_name("")
+		_refresh_creation_ui()
 		return
 	var is_valid_filename : Array = Utils.FileHandler.is_valid_file_name(new_char_name)
 	if is_valid_filename[0]!=1 :
-		okButton.disabled = true
 		characterstatrect.display_name(is_valid_filename[1])
+		_refresh_creation_ui()
 		return
 	if DirAccess.dir_exists_absolute(Paths.profilesfolderpath+Paths.currentProfileFolderName+"/Characters/"+new_char_name) :
-		okButton.disabled = true
 		characterstatrect.display_name("NAME ALREADY USED")
 	else :
-		okButton.disabled = false
 		characterstatrect.display_name(new_char_name)
+	_refresh_creation_ui()
 
 func fill() -> void :
 	lineEdit.text = ""
@@ -599,39 +980,40 @@ func fill() -> void :
 	new_char_class = null
 	new_char_portrait = default_portrait
 	new_char_icon = default_icon
+	for button: Button in portraitButtons:
+		button.button_pressed = false
+	for button: Button in iconButtons:
+		button.button_pressed = false
 	portraitRect.texture = default_portrait
 	iconRect.texture = default_icon
 	new_character = null
+	spell_selection_prepared = false
 	classic_creation_active = false
 	classic_race_id = 0
 	classic_caste_id = 0
 	newchar_level = 1
+	classic_gender = 1
+	genderOptionButton.select(0)
 	levelMenuButton.set_text('1')
-	okButton.disabled = true
 	characterstatrect.clear()
 	characterstatrect.display_portrait(default_portrait)
+	classDescriptionLabel.text = "Select a class to view its description."
+	raceDescriptionLabel.text = "Select a race to view its description."
+	_refresh_identity_legality()
+	_update_mode_copy()
+	_show_appearance_browser(true)
+	_show_stage(CreationStage.IDENTITY, false)
 
 
 func _on_gender_selected(index: int) -> void:
 	classic_gender = index + 1
-	if classic_install != null and new_char_class != null and new_char_race != null:
+	if new_char_class != null and new_char_race != null:
 		try_create_character()
+	_refresh_creation_ui()
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 #func _process(delta):
 #	pass
 
-
-func _on_ToggleIcoPortButton_pressed():
-	portraitScroll.visible = not portraitScroll.visible
-	iconScroll.visible = not iconScroll.visible
-	if portraitScroll.visible :
-		toggleButton.text = "Show Icons"
-		if iconsTextures.size() == portraitsTextures.size() :
-			portraitScroll.set_v_scroll(iconScroll.get_v_scroll())
-	else :
-		toggleButton.text = "Show Portraits"
-		if iconsTextures.size() == portraitsTextures.size() :
-			iconScroll.set_v_scroll(portraitScroll.get_v_scroll())
 
 func _on_visibility_changed():
 	if visible:

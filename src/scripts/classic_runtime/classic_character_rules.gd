@@ -30,6 +30,86 @@ const CLASSIC_CASTER_SCHOOLS := {
 	2: "Priest",
 	3: "Enchanter",
 }
+# Standard-caste spellcaster rows from Realmz's Data CD, cross-checked against
+# the Character Editor metadata. The original rows are [enabled, start, max];
+# only start levels and the combined maximum drive spellselect.c.
+const NATIVE_CASTE_SPELLCASTING := {
+	"Crusader": {
+		"casterType": 2,
+		"startLevels": [0, 7, 0],
+		"maximumSpellLevel": 4,
+	},
+	"Archer": {
+		"casterType": 1,
+		"startLevels": [15, 0, 0],
+		"maximumSpellLevel": 2,
+	},
+	"Rogue": {
+		"casterType": 1,
+		"startLevels": [15, 0, 0],
+		"maximumSpellLevel": 3,
+	},
+	"Sorcerer": {
+		"casterType": 1,
+		"startLevels": [1, 0, 0],
+		"maximumSpellLevel": 7,
+	},
+	"Priest": {
+		"casterType": 2,
+		"startLevels": [0, 1, 0],
+		"maximumSpellLevel": 7,
+	},
+	"Enchanter": {
+		"casterType": 3,
+		"startLevels": [0, 0, 1],
+		"maximumSpellLevel": 7,
+	},
+	"Evoker": {
+		"casterType": 3,
+		"startLevels": [0, 0, 1],
+		"maximumSpellLevel": 7,
+	},
+	"Cardinal": {
+		"casterType": 2,
+		"startLevels": [0, 1, 0],
+		"maximumSpellLevel": 7,
+	},
+	"Cabalist": {
+		"casterType": 1,
+		"startLevels": [1, 0, 0],
+		"maximumSpellLevel": 7,
+	},
+	"Bard": {
+		"casterType": 1,
+		"startLevels": [20, 0, 0],
+		"maximumSpellLevel": 3,
+	},
+	"Assassin": {
+		"casterType": 1,
+		"startLevels": [15, 0, 0],
+		"maximumSpellLevel": 3,
+	},
+	"Dabbler": {
+		"casterType": 3,
+		"startLevels": [0, 0, 5],
+		"maximumSpellLevel": 5,
+	},
+	"Battle Mage": {
+		"casterType": 1,
+		"startLevels": [5, 0, 0],
+		"maximumSpellLevel": 5,
+	},
+	"Warlock": {
+		"casterType": 3,
+		"startLevels": [0, 0, 1],
+		"maximumSpellLevel": 7,
+	},
+	"Minstrel": {
+		"casterType": 3,
+		"startLevels": [0, 0, 4],
+		"maximumSpellLevel": 4,
+	},
+}
 const SPECIAL_ABILITY_COUNT := 14
 const PERCENT_SPECIAL_ABILITY_COUNT := 12
 const FOE_TYPE_TAGS: Array[String] = [
@@ -114,7 +194,9 @@ static func initialize_character_creation(
 	attribute_rolls: Array[int] = [],
 	age_year: int = RANDOM_ROLL_UNSET,
 	stamina_roll: int = RANDOM_ROLL_UNSET,
-	spell_point_rolls: Array[int] = []
+	spell_point_rolls: Array[int] = [],
+	foe_type_rolls: Array[int] = [],
+	foe_type_indices: Array[int] = []
 ) -> Dictionary:
 	if not (character is Object) \
 			or not character.has_method("apply_classic_rule_profile") \
@@ -179,6 +261,13 @@ static func initialize_character_creation(
 	)
 	if str(special_abilities.get("status", "")) != "ok":
 		return special_abilities
+	var foe_type_bonuses := apply_character_creation_foe_type_bonuses(
+		character,
+		foe_type_rolls,
+		foe_type_indices
+	)
+	if str(foe_type_bonuses.get("status", "")) != "ok":
+		return foe_type_bonuses
 
 	while int(_value(character, "level", 0)) < starting_level:
 		character.call("level_up")
@@ -194,6 +283,9 @@ static func initialize_character_creation(
 	)
 	if _has_property(character, "exp_tnl"):
 		character.set("exp_tnl", next_requirement)
+	var prestige_penalty := starting_prestige_penalty(starting_level)
+	if _has_property(character, "classic_prestige_penalty"):
+		character.set("classic_prestige_penalty", prestige_penalty)
 	return {
 		"status": "ok",
 		"startingLevel": starting_level,
@@ -202,8 +294,82 @@ static func initialize_character_creation(
 		"combat": combat,
 		"spellcasting": spellcasting,
 		"specialAbilities": special_abilities,
+		"foeTypeBonuses": foe_type_bonuses,
 		"nextExperienceRequirement": next_requirement,
+		"prestigePenalty": prestige_penalty,
+}
+
+
+## Initializes the eight race-owned foe modifiers, including the three bonus
+## checks performed by newcharacter.c. The resulting values live in the saved
+## rule profile consumed by combat, rather than in a second UI-only model.
+static func apply_character_creation_foe_type_bonuses(
+	character: Variant,
+	requested_rolls: Array[int] = [],
+	requested_indices: Array[int] = []
+) -> Dictionary:
+	if not requested_rolls.is_empty() and requested_rolls.size() != 3:
+		return {
+			"status": "error",
+			"message": "Classic foe bonuses require three chance rolls.",
+		}
+	if not requested_indices.is_empty() and requested_indices.size() != 3:
+		return {
+			"status": "error",
+			"message": "Classic foe bonuses require three target rolls.",
+		}
+	var profile := _dictionary_value(
+		_value(character, "classic_rule_profile", {})
+	)
+	var foe_profile := _dictionary_value(profile.get("foeTypeBonuses", {}))
+	var bonuses := _integer_array(foe_profile.get("bonuses", []))
+	if bonuses.size() != FOE_TYPE_TAGS.size():
+		return {
+			"status": "error",
+			"message": "Classic character creation has incomplete foe bonuses.",
+		}
+	var rolls: Array[int] = []
+	var target_indices: Array[int] = []
+	var thresholds: Array[int] = [80, 90, 95]
+	for roll_index: int in range(thresholds.size()):
+		var chance_roll := _classic_rand(
+			100,
+			requested_rolls[roll_index]
+				if not requested_rolls.is_empty()
+				else RANDOM_ROLL_UNSET
+		)
+		rolls.append(chance_roll)
+		var target_index := -1
+		if chance_roll > thresholds[roll_index]:
+			var target_roll := _classic_rand(
+				8,
+				requested_indices[roll_index]
+					if not requested_indices.is_empty()
+					else RANDOM_ROLL_UNSET
+			)
+			if target_roll < 1 or target_roll > bonuses.size():
+				return {
+					"status": "error",
+					"message": "Classic foe-bonus target rolls must be 1 through 8.",
+				}
+			target_index = target_roll - 1
+			bonuses[target_index] += 1
+		target_indices.append(target_index)
+	foe_profile["bonuses"] = bonuses
+	profile["foeTypeBonuses"] = foe_profile
+	character.call("apply_classic_rule_profile", profile)
+	return {
+		"status": "ok",
+		"rolls": rolls,
+		"targetIndices": target_indices,
+		"bonuses": bonuses,
 	}
+
+
+## newcharacter.c applies this permanent penalty when creating above level one.
+static func starting_prestige_penalty(starting_level: int) -> int:
+	var completed_levels := maxi(0, starting_level - 1)
+	return 10 * completed_levels * completed_levels
 
 
 static func profile_for_character(bundle: Variant, character: Variant) -> Dictionary:
@@ -514,6 +680,9 @@ static func adjusted_stat(
 	stat_name: String,
 	native_value: Variant
 ) -> Variant:
+	if stat_name == "Weight_Limit" and not profile.is_empty():
+		var strength := maxi(0, _character_stat(character, "Strength"))
+		return maxi(500, strength * strength * 20)
 	if stat_name == "MaxMovement":
 		var movement := _dictionary_value(profile.get("movement", {}))
 		var adjusted := float(native_value)
@@ -561,6 +730,43 @@ static func adjusted_stat(
 			)
 		)
 	return native_value
+
+
+## Applies Classic's post-inventory movement formula. The race base is reduced
+## by carried load; caste, age, equipment, and effect adjustments are added
+## afterward. This is deliberately separate from the generic Remake formula,
+## which scales every movement contribution by encumbrance.
+static func weighted_movement(
+	character: Variant,
+	profile: Dictionary,
+	native_fallback: int
+) -> int:
+	var movement := _dictionary_value(profile.get("movement", {}))
+	if movement.is_empty() \
+			or not (character is Object) \
+			or not character.has_method("get_inventory_weight"):
+		return native_fallback
+	var load_limit := maxi(1, _character_stat(character, "Weight_Limit"))
+	var carried_load := int(character.call("get_inventory_weight"))
+	var race_base := int(movement.get("raceBaseMove", 0))
+	var caste_bonus := int(movement.get("casteMoveBonus", 0))
+	var age_adjustment := int(
+		_value(character, "classic_age_movement_adjustment", 0)
+	)
+	var classic_identity_total := race_base + caste_bonus + age_adjustment
+	var unweighted_total := _character_stat(character, "MaxMovement")
+	var runtime_adjustment := unweighted_total - classic_identity_total
+	var available_fraction := float(load_limit - carried_load) / float(load_limit)
+	return maxi(
+		2,
+		int(
+			1.0
+			+ available_fraction * race_base
+			+ caste_bonus
+			+ age_adjustment
+			+ runtime_adjustment
+		)
+	)
 
 
 static func apply_level_up_combat_progression(
@@ -1388,7 +1594,8 @@ static func apply_character_creation_defenses(character: Variant) -> Dictionary:
 	if not (character is Object) \
 			or not character.has_method("set_classic_saving_throws") \
 			or not character.has_method("set_classic_conditions") \
-			or not character.has_method("set_classic_can_regenerate"):
+			or not character.has_method("set_classic_can_regenerate") \
+			or not character.has_method("set_classic_age_state"):
 		return {
 			"status": "error",
 			"message": "Classic character creation requires mutable defense state.",
@@ -1466,6 +1673,25 @@ static func apply_character_creation_defenses(character: Variant) -> Dictionary:
 			"unsupportedConditionIndices": unsupported_indices,
 		}
 
+	var age_magic_resistance_adjustment := 0
+	var age_movement_adjustment := 0
+	for age_group_index: int in range(age_group):
+		age_magic_resistance_adjustment += age_changes[age_group_index][6]
+		age_movement_adjustment += age_changes[age_group_index][7]
+	var magic_resistance := clampi(
+		int(_value(character, "classic_magic_resistance", 0))
+			+ age_magic_resistance_adjustment,
+		0,
+		100
+	)
+	character.call(
+		"set_classic_age_state",
+		{
+			"classicAgeMovementAdjustment": age_movement_adjustment,
+			"classicMagicResistance": magic_resistance,
+		}
+	)
+
 	character.call("set_classic_saving_throws", saving_throws)
 	character.call("set_classic_conditions", starting_conditions)
 	character.call(
@@ -1490,6 +1716,8 @@ static func apply_character_creation_defenses(character: Variant) -> Dictionary:
 	return {
 		"status": "ok",
 		"savingThrows": saving_throws,
+		"magicResistance": magic_resistance,
+		"ageMovementAdjustment": age_movement_adjustment,
 		"conditions": starting_conditions,
 		"canRegenerate": bool(creation.get("raceCanRegenerate", false)),
 		"appliedConditions": applied_conditions,
@@ -1559,6 +1787,12 @@ static func apply_character_creation_combat(
 		0,
 		200
 	)
+	var two_hand := clampi(
+		int(creation.get("raceTwoHandBase", 0))
+			+ int(creation.get("casteTwoHandBase", 0)),
+		0,
+		100
+	)
 	character.call(
 		"set_classic_creation_combat_stats",
 		{
@@ -1571,6 +1805,7 @@ static func apply_character_creation_combat(
 				strength_bonuses.get("damage", 0)
 			),
 			"classicHandToHand": hand_to_hand,
+			"classicTwoHand": two_hand,
 		}
 	)
 	return {
@@ -1583,6 +1818,7 @@ static func apply_character_creation_combat(
 		"dodge": dodge,
 		"missile": missile,
 		"handToHand": hand_to_hand,
+		"twoHand": two_hand,
 		"damageBonus": int(strength_bonuses.get("damage", 0)),
 	}
 
@@ -1835,6 +2071,41 @@ static func has_classic_spell_selection(character: Variant) -> bool:
 # attributes. It is not the saved generic ability budget used by Remake.
 static func classic_spell_selection_total(character: Variant) -> int:
 	var progression := _spellcasting_progression(character)
+	return _spell_selection_total(character, progression)
+
+
+static func has_native_spell_selection(character: Variant) -> bool:
+	return not native_spell_selection_profile(character).is_empty()
+
+
+static func native_spell_selection_profile(character: Variant) -> Dictionary:
+	var class_definition: Variant = _value(character, "classgd", null)
+	var caste_name := ""
+	if class_definition is Script:
+		caste_name = str(
+			class_definition.get_script_constant_map().get("classrace_name", "")
+		)
+	else:
+		caste_name = str(_value(class_definition, "classrace_name", ""))
+	var profile: Variant = NATIVE_CASTE_SPELLCASTING.get(caste_name, {})
+	if not (profile is Dictionary) or profile.is_empty():
+		return {}
+	var result: Dictionary = profile.duplicate(true)
+	result["school"] = spellcaster_school(int(result.get("casterType", 0)))
+	return result
+
+
+static func native_spell_selection_total(character: Variant) -> int:
+	return _spell_selection_total(
+		character,
+		native_spell_selection_profile(character)
+	)
+
+
+static func _spell_selection_total(
+	character: Variant,
+	progression: Dictionary
+) -> int:
 	if progression.is_empty():
 		return 0
 	var start_levels := _integer_array(progression.get("startLevels", []))
@@ -1861,7 +2132,24 @@ static func classic_spell_selection_total(character: Variant) -> int:
 
 
 static func classic_spell_selection_remaining(character: Variant) -> int:
-	var remaining := classic_spell_selection_total(character)
+	return _spell_selection_remaining(
+		character,
+		classic_spell_selection_total(character)
+	)
+
+
+static func native_spell_selection_remaining(character: Variant) -> int:
+	return _spell_selection_remaining(
+		character,
+		native_spell_selection_total(character)
+	)
+
+
+static func _spell_selection_remaining(
+	character: Variant,
+	selection_total: int
+) -> int:
+	var remaining := selection_total
 	var spell_levels: Variant = _value(character, "spells", [])
 	if not (spell_levels is Array):
 		return remaining
@@ -1879,7 +2167,26 @@ static func classic_spell_selection_remaining(character: Variant) -> int:
 static func enforce_classic_spell_selection_budget(
 	character: Variant
 ) -> Dictionary:
-	var remaining := classic_spell_selection_total(character)
+	return _enforce_spell_selection_budget(
+		character,
+		classic_spell_selection_total(character)
+	)
+
+
+static func enforce_native_spell_selection_budget(
+	character: Variant
+) -> Dictionary:
+	return _enforce_spell_selection_budget(
+		character,
+		native_spell_selection_total(character)
+	)
+
+
+static func _enforce_spell_selection_budget(
+	character: Variant,
+	selection_total: int
+) -> Dictionary:
+	var remaining := selection_total
 	var spell_levels: Variant = _value(character, "spells", [])
 	if not (spell_levels is Array):
 		return {
@@ -1939,6 +2246,45 @@ static func classic_spell_selection_cost_for_spell(
 	spell: Variant
 ) -> int:
 	return classic_spell_selection_cost(classic_spell_level(character, spell))
+
+
+static func native_spell_level(character: Variant, spell: Variant) -> int:
+	var progression := native_spell_selection_profile(character)
+	if progression.is_empty():
+		return 0
+	var school := str(progression.get("school", ""))
+	var school_levels := _dictionary_value(
+		_value(spell, "school_levels", {})
+	)
+	var spell_level := int(school_levels.get(school, 0))
+	var maximum_level := clampi(
+		int(progression.get("maximumSpellLevel", 0)),
+		0,
+		7
+	)
+	if spell_level < 1 or spell_level > maximum_level:
+		return 0
+	return spell_level
+
+
+static func native_spell_selection_cost_for_spell(
+	character: Variant,
+	spell: Variant
+) -> int:
+	return classic_spell_selection_cost(native_spell_level(character, spell))
+
+
+static func native_spell_selection_maximum_level(character: Variant) -> int:
+	return clampi(
+		int(
+			native_spell_selection_profile(character).get(
+				"maximumSpellLevel",
+				0
+			)
+		),
+		0,
+		7
+	)
 
 
 static func _sync_spellcasting_identity(
@@ -2156,6 +2502,8 @@ static func _creation_profile(
 			or not caste_record.has("startMoney") \
 			or starting_item_ids.size() != 20 \
 			or not race_record.has("missile") \
+			or not race_record.has("twoHand") \
+			or not caste_record.has("twoHand") \
 			or not race_record.has("maxAge") \
 			or not race_record.has("canRegenerate"):
 		return {}
@@ -2182,6 +2530,8 @@ static func _creation_profile(
 		"casteMissileBase": caste_missile[0],
 		"canUseMissile": int(caste_record["canUseMissile"]) != 0,
 		"handToHandBase": hand_to_hand[0],
+		"raceTwoHandBase": int(race_record["twoHand"]),
+		"casteTwoHandBase": int(caste_record["twoHand"]),
 		"maximumStrengthDamageBonus": strength[1],
 		"startingMoney": int(caste_record["startMoney"]),
 		"startingItemIds": starting_item_ids,
@@ -2894,7 +3244,7 @@ static func apply_level_up_magic_resistance(
 	var actual_roll := roll if roll >= 1 else randi_range(1, 100)
 	var gained := actual_roll <= chance
 	if gained:
-		current_value += 1
+		current_value = mini(100, current_value + 1)
 		_store_magic_resistance(character, current_value)
 	return {
 		"status": "ok",

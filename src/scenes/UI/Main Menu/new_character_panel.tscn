@@ -1,13 +1,15 @@
-[gd_scene load_steps=7 format=3 uid="uid://ci4cf1yx31p2n"]
+[gd_scene load_steps=9 format=3 uid="uid://ci4cf1yx31p2n"]
 
 [ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="1_fcejw"]
 [ext_resource type="Script" path="res://scenes/UI/Main Menu/NewCharacterPanel.gd" id="2_nga7k"]
-[ext_resource type="Texture2D" uid="uid://bvyrbf7dsq0da" path="res://scenes/UI/Main Menu/DefaultPortrait.png" id="3_nona8"]
-[ext_resource type="Texture2D" uid="uid://djft2r1qk03px" path="res://scenes/UI/Main Menu/DefaultIcon.png" id="4_k8qi4"]
 [ext_resource type="PackedScene" uid="uid://bov2d346tediq" path="res://scenes/UI/Main Menu/CharacterStatsRect/CharacterStatsRect.tscn" id="5_pga5p"]
 [ext_resource type="PackedScene" uid="uid://biqyyjm2makqt" path="res://scenes/UI/HUD/AbilitiesManagement/abilities_mngt_rect.tscn" id="6_oel76"]
+[ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="7_heading"]
+[ext_resource type="StyleBox" path="res://shared_assets/UI/button_normal_styleboxtexture.tres" id="8_level_normal"]
+[ext_resource type="StyleBox" path="res://shared_assets/UI/button_hover_styleboxtexture.tres" id="9_level_hover"]
+[ext_resource type="StyleBox" path="res://shared_assets/UI/button_pressed_styleboxtexture.tres" id="10_level_pressed"]
 
-[node name="NewCharacterPanel" type="NinePatchRect" node_paths=PackedStringArray("cancelButton", "okButton", "lineEdit", "portraitContainer", "iconContainer", "portraitScroll", "iconScroll", "toggleButton", "classitemlist", "raceitemlist", "characterstatrect", "levelMenuButton", "classicContextLabel", "genderOptionButton", "abilities_rect", "portraitRect", "iconRect")]
+[node name="NewCharacterPanel" type="NinePatchRect" node_paths=PackedStringArray("cancelButton", "okButton", "lineEdit", "portraitContainer", "iconContainer", "portraitScroll", "iconScroll", "classitemlist", "raceitemlist", "characterstatrect", "levelMenuButton", "classicContextLabel", "genderOptionButton", "abilities_rect", "portraitRect", "iconRect")]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -21,23 +23,22 @@ patch_margin_bottom = 10
 axis_stretch_horizontal = 1
 axis_stretch_vertical = 1
 script = ExtResource("2_nga7k")
-cancelButton = NodePath("BigVBox/BotHBox/CancelButton")
-okButton = NodePath("BigVBox/BotHBox/OKButton")
-lineEdit = NodePath("BigVBox/TopHBox/NewCharVBox/NameLvlCntrl/LineEdit")
-portraitContainer = NodePath("BigVBox/TopHBox/NewCharVBox/ImgsControl/PortraitScrollContainer/PortraitContainer")
-iconContainer = NodePath("BigVBox/TopHBox/NewCharVBox/ImgsControl/IconScrollContainer/IconContainer")
-portraitScroll = NodePath("BigVBox/TopHBox/NewCharVBox/ImgsControl/PortraitScrollContainer")
-iconScroll = NodePath("BigVBox/TopHBox/NewCharVBox/ImgsControl/IconScrollContainer")
-toggleButton = NodePath("BigVBox/TopHBox/NewCharVBox/ChosenImgHBox/ToggleIcoPortButton")
-classitemlist = NodePath("BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/ClassVBox/ClassItemList")
-raceitemlist = NodePath("BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/RaceVBox/RaceItemList")
-characterstatrect = NodePath("BigVBox/TopHBox/CharacterStatsRect")
-levelMenuButton = NodePath("BigVBox/TopHBox/NewCharVBox/NameLvlCntrl/LevelMenuButton")
+cancelButton = NodePath("BigVBox/FooterRow/CancelButton")
+okButton = NodePath("BigVBox/FooterRow/PrimaryButton")
+lineEdit = NodePath("BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/NameRow/LineEdit")
+portraitContainer = NodePath("BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/PortraitScrollContainer/PortraitContainer")
+iconContainer = NodePath("BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/IconScrollContainer/IconContainer")
+portraitScroll = NodePath("BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/PortraitScrollContainer")
+iconScroll = NodePath("BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/IconScrollContainer")
+classitemlist = NodePath("BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox/ClassItemList")
+raceitemlist = NodePath("BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/RaceVBox/RaceItemList")
+characterstatrect = NodePath("BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox/CharacterStatsRect")
+levelMenuButton = NodePath("BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow/LevelMenuButton")
 classicContextLabel = NodePath("BigVBox/ClassicContextLabel")
-genderOptionButton = NodePath("BigVBox/TopHBox/NewCharVBox/NameLvlCntrl/GenderOptionButton")
-abilities_rect = NodePath("AbilitiesMngtRect")
-portraitRect = NodePath("BigVBox/TopHBox/NewCharVBox/ChosenImgHBox/PortraitRect")
-iconRect = NodePath("BigVBox/TopHBox/NewCharVBox/ChosenImgHBox/IconRect")
+genderOptionButton = NodePath("BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/GenderRow/GenderOptionButton")
+abilities_rect = NodePath("BigVBox/ContentRow/StageWorkspace/SpellsStage")
+portraitRect = NodePath("BigVBox/ContentRow/SummaryVBox/SummaryPortrait")
+iconRect = NodePath("BigVBox/ContentRow/SummaryVBox/SummaryIconRow/SummaryIcon")
 
 [node name="BigVBox" type="VBoxContainer" parent="."]
 layout_mode = 1
@@ -45,88 +46,287 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 20.0
-offset_top = 20.0
+offset_top = 16.0
 offset_right = -20.0
-offset_bottom = -20.0
+offset_bottom = -16.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_constants/separation = 8
+
+[node name="HeaderRow" type="HBoxContainer" parent="BigVBox"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+
+[node name="Title" type="Label" parent="BigVBox/HeaderRow"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("7_heading")
+theme_override_font_sizes/font_size = 24
+text = "Create Character"
+vertical_alignment = 1
+
+[node name="HeaderSpacer" type="Control" parent="BigVBox/HeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="StageLabel" type="Label" parent="BigVBox/HeaderRow"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.25, 1)
+text = "Step 1 of 5"
+horizontal_alignment = 2
+vertical_alignment = 1
 
 [node name="ClassicContextLabel" type="Label" parent="BigVBox"]
 visible = false
 layout_mode = 2
-theme_override_colors/font_color = Color(1, 1, 0, 1)
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
 text = "Creating for a Classic campaign."
 horizontal_alignment = 1
 autowrap_mode = 2
 
-[node name="TopHBox" type="HBoxContainer" parent="BigVBox"]
+[node name="StageBar" type="HBoxContainer" parent="BigVBox"]
+custom_minimum_size = Vector2(0, 38)
 layout_mode = 2
-size_flags_vertical = 3
+theme_override_constants/separation = 6
 
-[node name="NewCharVBox" type="VBoxContainer" parent="BigVBox/TopHBox"]
+[node name="IdentityButton" type="Button" parent="BigVBox/StageBar"]
 layout_mode = 2
 size_flags_horizontal = 3
+toggle_mode = true
+button_pressed = true
+text = "1  Identity"
 
-[node name="NameLvlCntrl" type="HBoxContainer" parent="BigVBox/TopHBox/NewCharVBox"]
+[node name="CallingButton" type="Button" parent="BigVBox/StageBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+toggle_mode = true
+text = "2  Class & Race"
+
+[node name="AppearanceButton" type="Button" parent="BigVBox/StageBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+toggle_mode = true
+text = "3  Appearance"
+
+[node name="ReviewButton" type="Button" parent="BigVBox/StageBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+toggle_mode = true
+text = "4  Review"
+
+[node name="SpellsButton" type="Button" parent="BigVBox/StageBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+disabled = true
+toggle_mode = true
+text = "5  Spells"
+
+[node name="TopSeparator" type="HSeparator" parent="BigVBox"]
+layout_mode = 2
+
+[node name="ContentRow" type="HBoxContainer" parent="BigVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 14
+
+[node name="SummaryVBox" type="VBoxContainer" parent="BigVBox/ContentRow"]
+custom_minimum_size = Vector2(224, 0)
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="EnterNameLabel" type="Label" parent="BigVBox/TopHBox/NewCharVBox/NameLvlCntrl"]
+[node name="SummaryHeading" type="Label" parent="BigVBox/ContentRow/SummaryVBox"]
 layout_mode = 2
-size_flags_vertical = 4
-text = "Name"
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("7_heading")
+theme_override_font_sizes/font_size = 20
+text = "Character"
+horizontal_alignment = 1
 
-[node name="LineEdit" type="LineEdit" parent="BigVBox/TopHBox/NewCharVBox/NameLvlCntrl"]
+[node name="SummaryPortrait" type="TextureRect" parent="BigVBox/ContentRow/SummaryVBox"]
+custom_minimum_size = Vector2(112, 112)
+layout_mode = 2
+size_flags_horizontal = 4
+expand_mode = 1
+stretch_mode = 5
+
+[node name="SummaryIconRow" type="HBoxContainer" parent="BigVBox/ContentRow/SummaryVBox"]
+custom_minimum_size = Vector2(0, 64)
+layout_mode = 2
+alignment = 1
+theme_override_constants/separation = 10
+
+[node name="IconLabel" type="Label" parent="BigVBox/ContentRow/SummaryVBox/SummaryIconRow"]
+layout_mode = 2
+text = "Combat Icon"
+vertical_alignment = 1
+
+[node name="SummaryIcon" type="TextureRect" parent="BigVBox/ContentRow/SummaryVBox/SummaryIconRow"]
+custom_minimum_size = Vector2(64, 64)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="SummarySeparator" type="HSeparator" parent="BigVBox/ContentRow/SummaryVBox"]
+layout_mode = 2
+
+[node name="SummaryNameLabel" type="Label" parent="BigVBox/ContentRow/SummaryVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("7_heading")
+theme_override_font_sizes/font_size = 19
+text = "— unnamed —"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="SummaryCallingLabel" type="Label" parent="BigVBox/ContentRow/SummaryVBox"]
+layout_mode = 2
+text = "No race selected\nNo class selected"
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="SummaryLevelLabel" type="Label" parent="BigVBox/ContentRow/SummaryVBox"]
+layout_mode = 2
+text = "Starting level 1"
+horizontal_alignment = 1
+
+[node name="SummarySpacer" type="Control" parent="BigVBox/ContentRow/SummaryVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SummaryHint" type="Label" parent="BigVBox/ContentRow/SummaryVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.7, 0.7, 1)
+text = "Your selections remain visible throughout creation."
+horizontal_alignment = 1
+autowrap_mode = 2
+
+[node name="ContentSeparator" type="VSeparator" parent="BigVBox/ContentRow"]
+layout_mode = 2
+
+[node name="StageWorkspace" type="Control" parent="BigVBox/ContentRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 4
-placeholder_text = "Enter character name"
+size_flags_vertical = 3
+
+[node name="IdentityStage" type="MarginContainer" parent="BigVBox/ContentRow/StageWorkspace"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
+
+[node name="IdentityVBox" type="VBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Heading" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("7_heading")
+theme_override_font_sizes/font_size = 22
+text = "Identity"
+
+[node name="Introduction" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
+layout_mode = 2
+text = "Begin with the character's name and starting experience."
+autowrap_mode = 2
+
+[node name="IdentitySeparator" type="HSeparator" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
+layout_mode = 2
+
+[node name="NameRow" type="HBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="NameLabel" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/NameRow"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+text = "Character Name"
+vertical_alignment = 1
+
+[node name="LineEdit" type="LineEdit" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/NameRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Enter a unique character name"
 caret_blink = true
 caret_blink_interval = 0.5
 
-[node name="LevelLabel" type="Label" parent="BigVBox/TopHBox/NewCharVBox/NameLvlCntrl"]
+[node name="LevelRow" type="HBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
+custom_minimum_size = Vector2(0, 42)
 layout_mode = 2
-size_flags_vertical = 4
-text = "Level"
+theme_override_constants/separation = 12
 
-[node name="LevelMenuButton" type="MenuButton" parent="BigVBox/TopHBox/NewCharVBox/NameLvlCntrl"]
-custom_minimum_size = Vector2(48, 0)
+[node name="LevelLabel" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow"]
+custom_minimum_size = Vector2(150, 0)
 layout_mode = 2
-size_flags_vertical = 4
+text = "Starting Level"
+vertical_alignment = 1
+
+[node name="LevelMenuButton" type="MenuButton" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow"]
+custom_minimum_size = Vector2(92, 36)
+layout_mode = 2
+tooltip_text = "Choose the character's starting level."
+flat = false
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 0.55, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 0.75, 1)
+theme_override_styles/normal = ExtResource("8_level_normal")
+theme_override_styles/hover = ExtResource("9_level_hover")
+theme_override_styles/pressed = ExtResource("10_level_pressed")
+theme_override_styles/focus = ExtResource("9_level_hover")
 text = "1"
+alignment = 1
 
-[node name="GenderOptionButton" type="OptionButton" parent="BigVBox/TopHBox/NewCharVBox/NameLvlCntrl"]
-visible = false
+[node name="LevelHelp" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/LevelRow"]
 layout_mode = 2
-size_flags_vertical = 4
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.72, 0.72, 0.72, 1)
+text = "Campaign rules may adjust the resulting character."
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="GenderRow" type="HBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
+visible = false
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="GenderLabel" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/GenderRow"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+text = "Gender"
+vertical_alignment = 1
+
+[node name="GenderOptionButton" type="OptionButton" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox/GenderRow"]
+custom_minimum_size = Vector2(140, 36)
+layout_mode = 2
 item_count = 2
 popup/item_0/text = "Male"
 popup/item_0/id = 0
 popup/item_1/text = "Female"
 popup/item_1/id = 1
 
-[node name="ImgsControl" type="Control" parent="BigVBox/TopHBox/NewCharVBox"]
+[node name="IdentitySpacer" type="Control" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="PortraitScrollContainer" type="ScrollContainer" parent="BigVBox/TopHBox/NewCharVBox/ImgsControl"]
-layout_mode = 1
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-follow_focus = true
-
-[node name="PortraitContainer" type="GridContainer" parent="BigVBox/TopHBox/NewCharVBox/ImgsControl/PortraitScrollContainer"]
+[node name="IdentityNote" type="Label" parent="BigVBox/ContentRow/StageWorkspace/IdentityStage/IdentityVBox"]
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_constants/h_separation = 6
-theme_override_constants/v_separation = 6
-columns = 6
+theme_override_colors/font_color = Color(0.75, 0.75, 0.75, 1)
+text = "The character is not saved until every creation stage is complete."
+autowrap_mode = 2
 
-[node name="IconScrollContainer" type="ScrollContainer" parent="BigVBox/TopHBox/NewCharVBox/ImgsControl"]
+[node name="CallingStage" type="MarginContainer" parent="BigVBox/ContentRow/StageWorkspace"]
 visible = false
 layout_mode = 1
 anchors_preset = 15
@@ -134,103 +334,236 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-follow_focus = true
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
 
-[node name="IconContainer" type="GridContainer" parent="BigVBox/TopHBox/NewCharVBox/ImgsControl/IconScrollContainer"]
+[node name="CallingVBox" type="VBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/CallingStage"]
 layout_mode = 2
-size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_constants/h_separation = 18
-theme_override_constants/v_separation = 18
-columns = 6
+theme_override_constants/separation = 8
 
-[node name="ChosenImgHBox" type="HBoxContainer" parent="BigVBox/TopHBox/NewCharVBox"]
+[node name="Heading" type="Label" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox"]
 layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("7_heading")
+theme_override_font_sizes/font_size = 22
+text = "Choose a Class and Race"
 
-[node name="PortraitLabel" type="Label" parent="BigVBox/TopHBox/NewCharVBox/ChosenImgHBox"]
+[node name="Introduction" type="Label" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox"]
 layout_mode = 2
-text = "Portrait"
+text = "These familiar Realmz choices determine the character's capabilities and statistics."
+autowrap_mode = 2
 
-[node name="PortraitRect" type="TextureRect" parent="BigVBox/TopHBox/NewCharVBox/ChosenImgHBox"]
-layout_mode = 2
-texture = ExtResource("3_nona8")
-
-[node name="IconLabel" type="Label" parent="BigVBox/TopHBox/NewCharVBox/ChosenImgHBox"]
-layout_mode = 2
-text = "Icon"
-
-[node name="IconRect" type="TextureRect" parent="BigVBox/TopHBox/NewCharVBox/ChosenImgHBox"]
-layout_mode = 2
-texture = ExtResource("4_k8qi4")
-
-[node name="ToggleIcoPortButton" type="Button" parent="BigVBox/TopHBox/NewCharVBox/ChosenImgHBox"]
-layout_mode = 2
-text = "Show Icons"
-
-[node name="ClassRaceHBox" type="HBoxContainer" parent="BigVBox/TopHBox/NewCharVBox"]
+[node name="ChoicesRow" type="HBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 16
+theme_override_constants/separation = 18
 
-[node name="RaceVBox" type="VBoxContainer" parent="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox"]
+[node name="ClassVBox" type="VBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_constants/separation = 6
 
-[node name="RaceLabel" type="Label" parent="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/RaceVBox"]
+[node name="ClassLabel" type="Label" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox"]
 layout_mode = 2
-text = "Race"
-
-[node name="RaceItemList" type="ItemList" parent="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/RaceVBox"]
-layout_mode = 2
-size_flags_vertical = 3
-
-[node name="ClassVBox" type="VBoxContainer" parent="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox"]
-layout_mode = 2
-size_flags_horizontal = 3
-
-[node name="ClassLabel" type="Label" parent="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/ClassVBox"]
-layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.25, 1)
 text = "Class"
 
-[node name="ClassItemList" type="ItemList" parent="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/ClassVBox"]
+[node name="ClassItemList" type="ItemList" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="ClassDescription" type="Label" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox"]
+custom_minimum_size = Vector2(0, 78)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.78, 1)
+text = "Select a class to view its description."
+autowrap_mode = 2
+text_overrun_behavior = 3
+
+[node name="RaceVBox" type="VBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 6
+
+[node name="RaceLabel" type="Label" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/RaceVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.25, 1)
+text = "Race"
+
+[node name="RaceItemList" type="ItemList" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/RaceVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+allow_reselect = true
+
+[node name="RaceDescription" type="Label" parent="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/RaceVBox"]
+custom_minimum_size = Vector2(0, 78)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.78, 1)
+text = "Select a race to view its description."
+autowrap_mode = 2
+text_overrun_behavior = 3
+
+[node name="AppearanceStage" type="MarginContainer" parent="BigVBox/ContentRow/StageWorkspace"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
+
+[node name="AppearanceVBox" type="VBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Heading" type="Label" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("7_heading")
+theme_override_font_sizes/font_size = 22
+text = "Appearance"
+
+[node name="Introduction" type="Label" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox"]
+layout_mode = 2
+text = "Choose a character portrait and the smaller combat icon used on maps."
+autowrap_mode = 2
+
+[node name="TabRow" type="HBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox"]
+custom_minimum_size = Vector2(0, 38)
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PortraitTabButton" type="Button" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/TabRow"]
+custom_minimum_size = Vector2(150, 36)
+layout_mode = 2
+toggle_mode = true
+button_pressed = true
+text = "Portraits"
+
+[node name="IconTabButton" type="Button" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/TabRow"]
+custom_minimum_size = Vector2(150, 36)
+layout_mode = 2
+toggle_mode = true
+text = "Combat Icons"
+
+[node name="BrowserControl" type="Control" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="CharacterStatsRect" parent="BigVBox/TopHBox" instance=ExtResource("5_pga5p")]
-layout_mode = 2
-
-[node name="BotHBox" type="Control" parent="BigVBox"]
-custom_minimum_size = Vector2(0, 32)
-layout_mode = 2
-
-[node name="OKButton" type="Button" parent="BigVBox/BotHBox"]
+[node name="PortraitScrollContainer" type="ScrollContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl"]
 layout_mode = 1
-anchors_preset = 6
-anchor_left = 1.0
-anchor_top = 0.5
+anchors_preset = 15
 anchor_right = 1.0
-anchor_bottom = 0.5
-offset_left = -72.0
-offset_top = -17.5
-offset_right = -41.0
-offset_bottom = 13.5
-grow_horizontal = 0
+anchor_bottom = 1.0
+grow_horizontal = 2
 grow_vertical = 2
-disabled = true
-text = "OK"
+follow_focus = true
 
-[node name="CancelButton" type="Button" parent="BigVBox/BotHBox"]
+[node name="PortraitContainer" type="GridContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/PortraitScrollContainer"]
 layout_mode = 2
-offset_left = 35.0
-offset_top = -2.0
-offset_right = 95.0
-offset_bottom = 29.0
-text = "Cancel"
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+columns = 9
 
-[node name="AbilitiesMngtRect" parent="." instance=ExtResource("6_oel76")]
+[node name="IconScrollContainer" type="ScrollContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+follow_focus = true
+
+[node name="IconContainer" type="GridContainer" parent="BigVBox/ContentRow/StageWorkspace/AppearanceStage/AppearanceVBox/BrowserControl/IconScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 8
+columns = 9
+
+[node name="ReviewStage" type="MarginContainer" parent="BigVBox/ContentRow/StageWorkspace"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
+
+[node name="ReviewVBox" type="VBoxContainer" parent="BigVBox/ContentRow/StageWorkspace/ReviewStage"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="Heading" type="Label" parent="BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.25, 1)
+theme_override_fonts/font = ExtResource("7_heading")
+theme_override_font_sizes/font_size = 22
+text = "Review Statistics"
+
+[node name="ReviewHelp" type="Label" parent="BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.78, 0.78, 0.78, 1)
+text = "Statistics are generated from the selected class, race, and starting level."
+autowrap_mode = 2
+
+[node name="CharacterStatsRect" parent="BigVBox/ContentRow/StageWorkspace/ReviewStage/ReviewVBox" instance=ExtResource("5_pga5p")]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SpellsStage" parent="BigVBox/ContentRow/StageWorkspace" instance=ExtResource("6_oel76")]
 visible = false
 layout_mode = 1
 
-[connection signal="pressed" from="BigVBox/TopHBox/NewCharVBox/ChosenImgHBox/ToggleIcoPortButton" to="." method="_on_ToggleIcoPortButton_pressed"]
-[connection signal="item_selected" from="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/ClassVBox/ClassItemList" to="." method="_on_class_select"]
-[connection signal="item_selected" from="BigVBox/TopHBox/NewCharVBox/ClassRaceHBox/RaceVBox/RaceItemList" to="." method="_on_race_select"]
+[node name="StatusLabel" type="Label" parent="BigVBox"]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.82, 0.82, 0.82, 1)
+text = "Enter a character name to continue."
+vertical_alignment = 1
+autowrap_mode = 2
+
+[node name="BottomSeparator" type="HSeparator" parent="BigVBox"]
+layout_mode = 2
+
+[node name="FooterRow" type="HBoxContainer" parent="BigVBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="CancelButton" type="Button" parent="BigVBox/FooterRow"]
+custom_minimum_size = Vector2(120, 38)
+layout_mode = 2
+text = "Cancel"
+
+[node name="FooterSpacer" type="Control" parent="BigVBox/FooterRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BackButton" type="Button" parent="BigVBox/FooterRow"]
+custom_minimum_size = Vector2(120, 38)
+layout_mode = 2
+disabled = true
+text = "Back"
+
+[node name="PrimaryButton" type="Button" parent="BigVBox/FooterRow"]
+custom_minimum_size = Vector2(190, 38)
+layout_mode = 2
+disabled = true
+text = "Continue"
+
+[connection signal="item_selected" from="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/ClassVBox/ClassItemList" to="." method="_on_class_select"]
+[connection signal="item_selected" from="BigVBox/ContentRow/StageWorkspace/CallingStage/CallingVBox/ChoicesRow/RaceVBox/RaceItemList" to="." method="_on_race_select"]

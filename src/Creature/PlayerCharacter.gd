@@ -104,6 +104,8 @@ var classic_magic_resistance := 0
 var classic_magic_resistance_initialized := false
 var classic_hand_to_hand := 0
 var classic_hand_to_hand_initialized := false
+var classic_two_hand := 0
+var classic_two_hand_initialized := false
 var classic_prestige_penalty := 0
 var classic_spellcaster_type := 0
 var classic_spellcaster_type_initialized := false
@@ -176,6 +178,10 @@ func _init(data : Dictionary,new_icon : Texture,new_portrait : Texture,new_class
 		set_classic_hand_to_hand(int(data["classicHandToHand"]))
 	elif data.has("classic_hand_to_hand"):
 		set_classic_hand_to_hand(int(data["classic_hand_to_hand"]))
+	if data.has("classicTwoHand"):
+		set_classic_two_hand(int(data["classicTwoHand"]))
+	elif data.has("classic_two_hand"):
+		set_classic_two_hand(int(data["classic_two_hand"]))
 	classic_prestige_penalty = int(
 		data.get(
 			"classicPrestigePenalty",
@@ -437,6 +443,15 @@ func has_classic_hand_to_hand() -> bool:
 	return classic_hand_to_hand_initialized
 
 
+func set_classic_two_hand(value: int) -> void:
+	classic_two_hand = clampi(value, 0, 100)
+	classic_two_hand_initialized = true
+
+
+func has_classic_two_hand() -> bool:
+	return classic_two_hand_initialized
+
+
 func set_classic_spellcaster_type(value: int) -> void:
 	classic_spellcaster_type = value
 	classic_spellcaster_type_initialized = value > 0
@@ -631,6 +646,8 @@ func set_classic_creation_combat_stats(values: Dictionary) -> void:
 			base_stats[stat_name] = values[stat_name]
 	if values.has("classicHandToHand"):
 		set_classic_hand_to_hand(int(values["classicHandToHand"]))
+	if values.has("classicTwoHand"):
+		set_classic_two_hand(int(values["classicTwoHand"]))
 	recalculate_stats()
 	stats["curHP"] = get_stat("maxHP")
 
@@ -717,6 +734,14 @@ func get_stat(statname: String):
 		classic_rule_profile,
 		statname,
 		super.get_stat(statname)
+	)
+
+
+func get_max_movement_weighted_down() -> int:
+	return ClassicCharacterRulesScript.weighted_movement(
+		self,
+		classic_rule_profile,
+		super.get_max_movement_weighted_down()
 	)
 
 
@@ -877,6 +902,11 @@ func get_selection_cost(ability) -> int:
 			self,
 			ability
 		)
+	if ClassicCharacterRulesScript.has_native_spell_selection(self):
+		return ClassicCharacterRulesScript.native_spell_selection_cost_for_spell(
+			self,
+			ability
+		)
 	var cost : float = 0
 	cost = racegd.get_selection_cost(self, ability, cost) + classgd.get_selection_cost(self, ability, cost)
 	return roundi(cost)
@@ -927,17 +957,21 @@ func can_show_ability_list() -> bool :
 func get_ability_selection_points() -> int:
 	if ClassicCharacterRulesScript.has_classic_spell_selection(self):
 		return ClassicCharacterRulesScript.classic_spell_selection_remaining(self)
+	if ClassicCharacterRulesScript.has_native_spell_selection(self):
+		return ClassicCharacterRulesScript.native_spell_selection_remaining(self)
 	return selection_pts
 
 
 func set_ability_selection_points(value: int) -> void:
-	if ClassicCharacterRulesScript.has_classic_spell_selection(self):
+	if ClassicCharacterRulesScript.has_classic_spell_selection(self) \
+			or ClassicCharacterRulesScript.has_native_spell_selection(self):
 		return
 	selection_pts = value
 
 
 func get_ability_selection_points_label() -> String:
-	if ClassicCharacterRulesScript.has_classic_spell_selection(self):
+	if ClassicCharacterRulesScript.has_classic_spell_selection(self) \
+			or ClassicCharacterRulesScript.has_native_spell_selection(self):
 		return "Spell Selection Points"
 	return "Ability Selection Points"
 
@@ -945,12 +979,22 @@ func get_ability_selection_points_label() -> String:
 func prepare_ability_selection() -> void:
 	if ClassicCharacterRulesScript.has_classic_spell_selection(self):
 		ClassicCharacterRulesScript.enforce_classic_spell_selection_budget(self)
+		return
+	if ClassicCharacterRulesScript.has_native_spell_selection(self):
+		ensure_spell_levels(
+			ClassicCharacterRulesScript.native_spell_selection_maximum_level(self)
+		)
+		ClassicCharacterRulesScript.enforce_native_spell_selection_budget(self)
 
 
-func ensure_classic_spell_levels(maximum_level: int) -> void:
+func ensure_spell_levels(maximum_level: int) -> void:
 	var target_level := clampi(maximum_level, 0, 7)
 	while spells.size() < target_level:
 		spells.append([])
+
+
+func ensure_classic_spell_levels(maximum_level: int) -> void:
+	ensure_spell_levels(maximum_level)
 
 
 func get_spell_resource_cost(spell, plvl : int) :
@@ -1027,6 +1071,11 @@ func get_save_string()->String :
 		crea_string += (
 			',\n"classicHandToHand" : '
 			+ str(classic_hand_to_hand)
+		)
+	if classic_two_hand_initialized:
+		crea_string += (
+			',\n"classicTwoHand" : '
+			+ str(classic_two_hand)
 		)
 	if classic_prestige_penalty != 0:
 		crea_string += (

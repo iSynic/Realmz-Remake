@@ -14038,6 +14038,27 @@
 	"delete_on_empty": 1,
 	"unique": 0
   },
+  "Wine": {
+	"name": "Wine",
+	"unidentified_name": "Wine",
+	"is_magical": 0,
+	"description": "A fine wine distilled in the sunken city of Waterford",
+	"weight": 0,
+	"price": 200,
+	"type": "Supplies",
+	"img_ptr": "ITEM_Wine",
+	"sound": "cloth armor.wav",
+	"slots": [],
+	"hands": 0,
+	"equippable": 0,
+	"stats_mini": "",
+	"stats": {},
+	"charges": 1,
+	"charges_max": 1,
+	"charges_weight": 25,
+	"delete_on_empty": 1,
+	"unique": 0
+  },
   "Rope": {
 	"name": "Rope",
 	"unidentified_name": "Rope",
