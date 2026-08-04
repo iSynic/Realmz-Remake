@@ -82,7 +82,7 @@ const ELEMENT_BY_SPECIAL_ATTACK := {
 const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
-const MATERIALIZATION_VERSION := 17
+const MATERIALIZATION_VERSION := 18
 
 var last_error := ""
 

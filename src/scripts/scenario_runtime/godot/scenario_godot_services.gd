@@ -2229,6 +2229,18 @@ func classify_complex_item(item: Variant, scenario_items: Array) -> Dictionary:
 			}
 
 	var definition := _item_definition(item)
+	var door_action_point_value: Variant = definition.extra_data_value(
+		"classicDoorActivationActionPointId",
+		null
+	) if definition != null else item.get(
+		"extra_data",
+		{}
+	).get("classicDoorActivationActionPointId") if item is Dictionary else null
+	if door_action_point_value != null:
+		return {
+			"mode": "door-activation",
+			"doorActivationActionPointId": absi(int(door_action_point_value)),
+		}
 	var encounter_spell: Variant = definition.extra_data_value(
 		"classicEncounterSpellUse",
 		{}

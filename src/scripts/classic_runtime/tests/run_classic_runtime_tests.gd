@@ -7782,6 +7782,37 @@ func _test_classic_item_materializer() -> void:
 		},
 		"encounter-only Classic spells remain unavailable to ordinary field use"
 	)
+	var door_item_record := armor_record.duplicate(true)
+	door_item_record["type"] = 23
+	door_item_record["special5"] = 283
+	var door_item: Dictionary = materializer._native_item(door_item_record, [])
+	_expect_equal(
+		door_item.get("extra_data", {}).get(
+			"classicDoorActivationActionPointId"
+		),
+		283,
+		"Classic door items retain their complex-encounter action point"
+	)
+	_expect(
+		not door_item.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		).has("special5"),
+		"implemented Classic door action points no longer block materialization"
+	)
+	var combat_door_record := armor_record.duplicate(true)
+	combat_door_record["special1"] = -23
+	combat_door_record["special5"] = 7
+	var combat_door_item: Dictionary = materializer._native_item(
+		combat_door_record,
+		[]
+	)
+	_expect_equal(
+		combat_door_item.get("extra_data", {}).get(
+			"classicDoorActivationActionPointId"
+		),
+		7,
+		"special -23 preserves a combat-eligible door activation"
+	)
 	var condition_record := armor_record.duplicate(true)
 	condition_record["special1"] = 22
 	condition_record["special2"] = -1
@@ -36496,6 +36527,15 @@ func _test_complex_response_modes() -> void:
 		door_mode.get("doorActivationActionPointId"),
 		7,
 		"compiled door item preserves its Data ED3 target"
+	)
+	var materialized_door_mode: Dictionary = adapter.classify_complex_item({
+		"name": "Materialized door sigil",
+		"extra_data": {"classicDoorActivationActionPointId": 7},
+	}, [])
+	_expect_equal(
+		materialized_door_mode,
+		{"mode": "door-activation", "doorActivationActionPointId": 7},
+		"materialized door metadata preserves encounter activation without source tables"
 	)
 	var door_holder := InventoryTestCharacter.new()
 	door_holder.inventory = [door_sigil]

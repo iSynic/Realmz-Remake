@@ -64,6 +64,7 @@ static func enrich_definition_source(
 	var record: Variant = source.get("classicRecord", {})
 	if record is Dictionary and not record.is_empty():
 		_apply_stored_spell(result, record, handled_fields, custom_spell_overrides)
+		_apply_door_activation(result, record, handled_fields)
 		_apply_on_hit_condition(result, record, handled_fields)
 		_apply_equipped_condition(result, record, handled_fields)
 		_apply_attack_bonus(result, record, handled_fields)
@@ -95,6 +96,10 @@ static func handles_special_field(record: Dictionary, field_name: String) -> boo
 		return true
 	var spell_behavior := stored_spell_behavior(record)
 	if not spell_behavior.is_empty() and field_name in ["special1", "special2"]:
+		return true
+	var door_activation := door_activation_behavior(record)
+	if not door_activation.is_empty() \
+			and field_name in ["special1", "special5"]:
 		return true
 	var condition := equipped_condition_behavior(record)
 	if not condition.is_empty() and field_name in ["special1", "special2"]:
@@ -176,6 +181,16 @@ static func stored_spell_behavior(
 		"inField": in_field,
 		"inCombat": in_combat,
 		"encounterOnly": not in_field and not in_combat,
+	}
+
+
+static func door_activation_behavior(record: Dictionary) -> Dictionary:
+	var classic_type := absi(int(record.get("type", 0)))
+	var special1 := int(record.get("special1", 0))
+	if classic_type != 23 and special1 != -23:
+		return {}
+	return {
+		"actionPointId": absi(int(record.get("special5", 0))),
 	}
 
 
@@ -309,6 +324,25 @@ static func _apply_stored_spell(
 		result["extra_data"] = extra_data
 	handled_fields.append("special1")
 	handled_fields.append("special2")
+
+
+static func _apply_door_activation(
+	result: Dictionary,
+	record: Dictionary,
+	handled_fields: Array[String]
+) -> void:
+	var behavior := door_activation_behavior(record)
+	if behavior.is_empty():
+		return
+	var extra_data: Dictionary = result.get("extra_data", {}).duplicate(true) \
+		if result.get("extra_data", {}) is Dictionary else {}
+	extra_data["classicDoorActivationActionPointId"] = int(
+		behavior["actionPointId"]
+	)
+	result["extra_data"] = extra_data
+	handled_fields.append("special5")
+	if int(record.get("special1", 0)) == -23:
+		handled_fields.append("special1")
 
 
 static func _apply_equipped_condition(
