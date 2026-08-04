@@ -7323,14 +7323,22 @@ func _test_classic_item_materializer() -> void:
 		).get("unsupportedFields", []).has("itemCategory.missing"),
 		"categoryless Classic equipment remains an explicit blocker"
 	)
-	var unsupported_category_record := weapon_record.duplicate(true)
-	unsupported_category_record["itemCat0"] = 0
-	unsupported_category_record["itemCat1"] = 1 << 16
+	var miscellaneous_item_record := weapon_record.duplicate(true)
+	miscellaneous_item_record["itemCat0"] = 0
+	miscellaneous_item_record["itemCat1"] = 1 << 16
+	var miscellaneous_item: Dictionary = materializer._native_item(
+		miscellaneous_item_record, []
+	)
+	_expect_equal(
+		miscellaneous_item.get("type"),
+		"Misc. Item",
+		"Classic category 47 maps to the stock miscellaneous-item family"
+	)
 	_expect(
-		materializer._native_item(unsupported_category_record, []).get(
-			"classicMaterialization", {}
-		).get("unsupportedFields", []).has("itemCategory[47]"),
-		"Classic categories without native equip permissions remain blockers"
+		not miscellaneous_item.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		).has("itemCategory[47]"),
+		"the stock miscellaneous-item category remains launchable"
 	)
 	var negative_element_record := weapon_record.duplicate(true)
 	negative_element_record["heat"] = -1
@@ -7442,6 +7450,19 @@ func _test_classic_item_materializer() -> void:
 		[],
 		"standard Classic restriction groups remain launchable"
 	)
+	var ignored_high_bits_record := grouped_restriction_record.duplicate(true)
+	ignored_high_bits_record["raceClassOnly"] |= 1
+	ignored_high_bits_record["casteClassOnly"] |= 1
+	var ignored_high_bits_item: Dictionary = materializer._native_item(
+		ignored_high_bits_record, []
+	)
+	_expect_equal(
+		ignored_high_bits_item.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		),
+		[],
+		"restriction mask bits ignored by Classic do not create false fallbacks"
+	)
 	var excluded_group_record := grouped_restriction_record.duplicate(true)
 	excluded_group_record["raceClassOnly"] = 0
 	excluded_group_record["casteClassOnly"] = 0
@@ -7532,10 +7553,10 @@ func _test_classic_item_materializer() -> void:
 	non_equipment_restriction_record["ac"] = 0
 	non_equipment_restriction_record["specificRace"] = 1
 	_expect(
-		materializer._native_item(non_equipment_restriction_record, []).get(
+		not materializer._native_item(non_equipment_restriction_record, []).get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("specificRace"),
-		"non-equipment restrictions remain blocked until native item use enforces them"
+		"central Classic item use enforces restrictions on non-equipment"
 	)
 	var unsupported_blunt_record := weapon_record.duplicate(true)
 	unsupported_blunt_record["blunt"] = 1
@@ -11870,6 +11891,30 @@ func _test_classic_character_rule_profile() -> void:
 			).get("allowed", true)
 		),
 		"Classic item restriction rejects the wrong active caste class"
+	)
+	var identity_only_character := CampaignRuleCharacter.new()
+	identity_only_character.race = "Human"
+	identity_only_character.character_class = "Fighter"
+	var identity_only_item := {
+		"classicItemId": 156,
+		"classicRecord": {"specificRace": 2},
+	}
+	_expect_equal(
+		CharacterRulesScript.classic_item_use_permission(
+			identity_only_character,
+			identity_only_item
+		).get("allowed"),
+		false,
+		"item identity restrictions apply without a campaign item-category profile"
+	)
+	identity_only_item["classicRecord"]["specificRace"] = 1
+	_expect_equal(
+		CharacterRulesScript.classic_item_use_permission(
+			identity_only_character,
+			identity_only_item
+		).get("allowed"),
+		true,
+		"item identity restrictions admit the matching standard race"
 	)
 	var identity_adapter = GodotAdapterScript.new()
 	_expect_equal(

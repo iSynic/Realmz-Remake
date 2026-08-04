@@ -824,17 +824,29 @@ static func classic_item_use_permission(
 	character: Variant,
 	item: Variant
 ) -> Dictionary:
-	var profile := _dictionary_value(
-		_value(character, "classic_rule_profile", {})
-	)
-	var permissions := _dictionary_value(profile.get("itemPermissions", {}))
-	if permissions.is_empty():
-		return {"status": "native", "allowed": true}
 	if not (item is Dictionary):
 		return {
 			"status": "error",
 			"allowed": false,
 			"message": "Classic item permissions require an item record.",
+		}
+	var profile := _dictionary_value(
+		_value(character, "classic_rule_profile", {})
+	)
+	var permissions := _dictionary_value(profile.get("itemPermissions", {}))
+	var classic_record := _dictionary_value(item.get("classicRecord", {}))
+	var identity_permission := _classic_item_identity_permission(
+		character,
+		classic_record
+	)
+	if permissions.is_empty():
+		if not bool(identity_permission.get("handled", false)):
+			return {"status": "native", "allowed": true}
+		return {
+			"status": "ok",
+			"allowed": bool(identity_permission.get("allowed", true)),
+			"identityAllowed": bool(identity_permission.get("allowed", true)),
+			"handlesIdentityRestrictions": true,
 		}
 
 	var category := _classic_item_category(item)
@@ -851,11 +863,6 @@ static func classic_item_use_permission(
 	var caste_masks := _integer_array(permissions.get("casteMasks", []))
 	var race_allowed := _item_category_allowed(race_masks, category)
 	var caste_allowed := _item_category_allowed(caste_masks, category)
-	var classic_record := _dictionary_value(item.get("classicRecord", {}))
-	var identity_permission := _classic_item_identity_permission(
-		character,
-		classic_record
-	)
 	var result := {
 		"status": "ok",
 		"allowed": (

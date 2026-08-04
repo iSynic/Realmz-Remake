@@ -12,7 +12,7 @@ const ITEM_BOOK_PATH := "Items/stuff_book.json"
 const ITEM_IMAGE_BOOK_PATH := "Items/img_pack.json"
 const ITEM_ATLAS_PATH := "Items/textureAtlas.png"
 const SHARED_ITEM_BOOK_PATH := "res://shared_assets/items/stuff_book.json"
-const MATERIALIZATION_VERSION := 2
+const MATERIALIZATION_VERSION := 3
 const ITEM_ATLAS_CELL_SIZE := 34
 const ITEM_IMAGE_SIZE := 32
 const ITEM_IMAGE_INSET := 1
@@ -152,8 +152,11 @@ const NATIVE_TYPE_BY_CLASSIC_ITEM_CATEGORY := {
 	44: "Misc. Melee Weapon",
 	45: "Misc. Melee Weapon",
 	46: "Misc Ranged Weapon",
+	47: "Misc. Item",
 	48: "Scroll Case",
+	49: "Broach \uFFFD Pin",
 	50: "Ring",
+	52: "Misc. Magical Item",
 	54: "Ion Stone",
 }
 const SLOT_BY_CLASSIC_TYPE := {
@@ -604,10 +607,7 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 			]
 		)
 
-	var native_restrictions := _native_restrictions(
-		record,
-		SLOT_BY_CLASSIC_TYPE.has(classic_type)
-	)
+	var native_restrictions := _native_restrictions(record)
 	for field_name: String in native_restrictions.get("fields", {}):
 		fields[field_name] = native_restrictions["fields"][field_name]
 	for field_name: String in native_restrictions.get("unsupportedFields", []):
@@ -625,87 +625,50 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 	}
 
 
-func _native_restrictions(record: Dictionary, is_equipment: bool) -> Dictionary:
+func _native_restrictions(record: Dictionary) -> Dictionary:
 	var fields := {}
-	var unsupported_fields: Array[String] = []
 	var race_restrictions := int(record.get("raceRestrictions", 0))
 	var race_only := int(record.get("raceClassOnly", 0))
 	var specific_race := int(record.get("specificRace", 0))
 	var caste_restrictions := int(record.get("casteRestrictions", 0))
 	var caste_only := int(record.get("casteClassOnly", 0))
 	var specific_caste := int(record.get("specificCaste", 0))
-	var restriction_values := {
-		"raceRestrictions": race_restrictions,
-		"raceClassOnly": race_only,
-		"specificRace": specific_race,
-		"casteRestrictions": caste_restrictions,
-		"casteClassOnly": caste_only,
-		"specificCaste": specific_caste,
-	}
-	if not is_equipment:
-		for field_name: String in restriction_values:
-			if int(restriction_values[field_name]) != 0:
-				unsupported_fields.append(field_name)
-		return {"fields": fields, "unsupportedFields": unsupported_fields}
-
-	if _mask_has_bits_after(race_restrictions, 9):
-		unsupported_fields.append("raceRestrictions")
-	if _mask_has_bits_after(race_only, 9):
-		unsupported_fields.append("raceClassOnly")
-	if _mask_has_bits_after(caste_restrictions, 7):
-		unsupported_fields.append("casteRestrictions")
-	if _mask_has_bits_after(caste_only, 7):
-		unsupported_fields.append("casteClassOnly")
-
 	var has_race_restriction := (
 		race_restrictions != 0 or race_only != 0 or specific_race != 0
 	)
 	if has_race_restriction:
-		if specific_race < 0 or specific_race > STANDARD_RACE_NAMES.size():
-			unsupported_fields.append("specificRace")
-		else:
-			var allowed_races: Array[String] = []
-			for race_index: int in range(STANDARD_RACE_NAMES.size()):
-				if specific_race > 0 and race_index != specific_race - 1:
-					continue
-				var descriptors: int = STANDARD_RACE_DESCRIPTORS[race_index]
-				if _masks_overlap(descriptors, race_restrictions, 9):
-					continue
-				if not _mask_contains_all(descriptors, race_only, 9):
-					continue
-				allowed_races.append(STANDARD_RACE_NAMES[race_index])
-			fields["only_usable_by_races"] = allowed_races
+		var allowed_races: Array[String] = []
+		for race_index: int in range(STANDARD_RACE_NAMES.size()):
+			if specific_race != 0 and race_index != specific_race - 1:
+				continue
+			var descriptors: int = STANDARD_RACE_DESCRIPTORS[race_index]
+			if _masks_overlap(descriptors, race_restrictions, 9):
+				continue
+			if not _mask_contains_all(descriptors, race_only, 9):
+				continue
+			allowed_races.append(STANDARD_RACE_NAMES[race_index])
+		fields["only_usable_by_races"] = allowed_races
 
 	var has_caste_restriction := (
 		caste_restrictions != 0 or caste_only != 0 or specific_caste != 0
 	)
 	if has_caste_restriction:
-		if specific_caste < 0 or specific_caste > STANDARD_CASTE_NAMES.size():
-			unsupported_fields.append("specificCaste")
-		else:
-			var allowed_castes: Array[String] = []
-			for caste_index: int in range(STANDARD_CASTE_NAMES.size()):
-				if specific_caste > 0 and caste_index != specific_caste - 1:
-					continue
-				var caste_class: int = STANDARD_CASTE_CLASSES[caste_index]
-				if _classic_mask_has(caste_restrictions, caste_class - 1):
-					continue
-				if caste_only != 0 and not _classic_mask_has(caste_only, caste_class - 1):
-					continue
-				allowed_castes.append(STANDARD_CASTE_NAMES[caste_index])
-			fields["only_usable_by_classes"] = allowed_castes
-	return {"fields": fields, "unsupportedFields": unsupported_fields}
+		var allowed_castes: Array[String] = []
+		for caste_index: int in range(STANDARD_CASTE_NAMES.size()):
+			if specific_caste != 0 and caste_index != specific_caste - 1:
+				continue
+			var caste_class: int = STANDARD_CASTE_CLASSES[caste_index]
+			if _classic_mask_has(caste_restrictions, caste_class - 1):
+				continue
+			if caste_only != 0 and not _classic_mask_has(caste_only, caste_class - 1):
+				continue
+			allowed_castes.append(STANDARD_CASTE_NAMES[caste_index])
+		fields["only_usable_by_classes"] = allowed_castes
+	return {"fields": fields, "unsupportedFields": []}
 
 
 func _classic_mask_has(mask: int, bit_index: int) -> bool:
 	return (mask & (1 << (15 - bit_index))) != 0
-
-
-func _mask_has_bits_after(mask: int, supported_bits: int) -> bool:
-	for bit_index: int in range(supported_bits, 16):
-		if _classic_mask_has(mask, bit_index):
-			return true
-	return false
 
 
 func _masks_overlap(left: int, right: int, bit_count: int) -> bool:
