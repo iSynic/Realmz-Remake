@@ -19,6 +19,13 @@ func _run() -> void:
 	var resources: CampaignResources = $Resources
 	if not UI.main_menu.initial_profile_ready:
 		await UI.main_menu.initial_profile_loaded
+	var campaign_panel: Node = await UI.main_menu.ensure_new_campaign_panel_async()
+	campaign_panel._launch_in_progress = true
+	await campaign_panel.fill_async()
+	_expect(
+		not campaign_panel._launch_in_progress,
+		"reopening campaign selection resets the completed launch guard",
+	)
 	var coordinator: ClassicCampaignPreparationCoordinator = (
 		PreparationCoordinatorScript.new()
 	)

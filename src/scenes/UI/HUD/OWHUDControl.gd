@@ -211,7 +211,9 @@ func initialize() : # takes an array of Characters GD class objects !
 	settingsControl._initialize()
 	bestiaryRect._initialize()
 	charSwapRect._initialize()
-	characterStatRect.close_requested.connect(_on_character_stat_close_requested)
+	var close_character_stats := Callable(self, "_on_character_stat_close_requested")
+	if not characterStatRect.close_requested.is_connected(close_character_stats):
+		characterStatRect.close_requested.connect(close_character_stats)
 	if GameGlobal.allow_character_swap_anywhere :
 		set_party_swap_enabled(true)
 	update_classic_camping_permission()

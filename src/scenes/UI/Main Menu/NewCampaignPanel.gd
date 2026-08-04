@@ -451,6 +451,8 @@ func recover_launch_failure(message: String) -> void:
 func _reset_catalog() -> void:
 	var catalog_trace := LoadPerformanceTrace.begin_phase(&"campaign.catalog")
 	set_meta(&"catalog_trace", catalog_trace)
+	# This panel persists while gameplay runs. Reopening it starts a new launch cycle.
+	_launch_in_progress = false
 	selectedCampaign = ""
 	selected_campaign_index = -1
 	selectedcampaign_onselect = null

@@ -73,6 +73,8 @@ func _on_YesButton_pressed():
 
 func _return_to_main_menu():
 	StateMachine.transition_to("Inactive", {})
+	GameGlobal.stop_classic_campaign_runtime()
+	GameGlobal.cmp_resources.deactivate_campaign_resources()
 	GameGlobal.player_characters.clear()
 	MusicStreamPlayer.stop()
 	Input.set_custom_mouse_cursor(null)
