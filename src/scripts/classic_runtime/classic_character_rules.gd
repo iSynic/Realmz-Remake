@@ -278,8 +278,22 @@ static func initialize_character_creation(
 	)
 	if can_batch_level_ups:
 		character.call("begin_character_creation_level_batch")
-	while int(_value(character, "level", 0)) < starting_level:
-		character.call("level_up")
+	var used_fast_leveling: bool = (
+		can_batch_level_ups
+		and character.has_method("supports_fast_character_creation_levels")
+		and bool(character.call("supports_fast_character_creation_levels"))
+	)
+	if used_fast_leveling:
+		var fast_result := advance_character_creation_levels(
+			character,
+			starting_level
+		)
+		if str(fast_result.get("status", "")) != "ok":
+			character.call("finish_character_creation_level_batch")
+			return fast_result
+	else:
+		while int(_value(character, "level", 0)) < starting_level:
+			character.call("level_up")
 	if can_batch_level_ups:
 		character.call("finish_character_creation_level_batch")
 	if int(_value(character, "level", 0)) != starting_level:
@@ -309,6 +323,238 @@ static func initialize_character_creation(
 		"nextExperienceRequirement": next_requirement,
 		"prestigePenalty": prestige_penalty,
 }
+
+
+## Advances built-in creation definitions with their native level hook, while
+## keeping Classic random tracks in local accumulators. Random calls retain
+## their original per-level order; expensive profile and array writes happen once.
+static func advance_character_creation_levels(
+	character: Variant,
+	target_level: int
+) -> Dictionary:
+	if not (character is Object) \
+			or not character.has_method("apply_native_character_creation_level"):
+		return {"status": "unsupported"}
+	var current_level := int(_value(character, "level", 0))
+	if current_level >= target_level:
+		return {"status": "ok", "levelsAdvanced": 0}
+
+	var profile := _dictionary_value(
+		_value(character, "classic_rule_profile", {})
+	)
+	var base_stats: Variant = _value(character, "base_stats", {})
+	if not (base_stats is Dictionary):
+		return {
+			"status": "error",
+			"message": "Fast Classic creation requires mutable native base stats.",
+		}
+
+	var stamina := _dictionary_value(profile.get("staminaProgression", {}))
+	var spellcasting := _dictionary_value(
+		profile.get("spellcastingProgression", {})
+	)
+	var combat := _dictionary_value(profile.get("combatProgression", {}))
+	var magic_resistance := _dictionary_value(
+		profile.get("magicResistance", {})
+	)
+	var special_rules := _dictionary_value(
+		profile.get("specialAbilities", {})
+	)
+	var condition_progression: Variant = profile.get(
+		"conditionProgression",
+		[]
+	)
+
+	var native_max_hp := roundi(_native_level_up_stat(character, "maxHP"))
+	var native_max_sp := roundi(_native_level_up_stat(character, "maxSP"))
+	var native_melee_accuracy := _native_level_up_stat(
+		character,
+		"AccuracyMelee"
+	)
+	var native_ranged_accuracy := _native_level_up_stat(
+		character,
+		"AccuracyRanged"
+	)
+	var native_ranged_evasion := _native_level_up_stat(
+		character,
+		"EvasionRanged"
+	)
+
+	var stamina_die := int(stamina.get("dieMaximum", 0))
+	var maximum_vitality_bonus := int(
+		stamina.get("maximumVitalityBonus", 0)
+	)
+	var caster_type := int(spellcasting.get("casterType", 0))
+	var spell_start_level := int(spellcasting.get("startLevel", 0))
+	var to_hit_gain := float(combat.get("toHitPerLevel", 0)) / 5.0
+	var dodge_gain := float(combat.get("dodgePerLevel", 0)) / 5.0
+	var missile_max := maxi(
+		0,
+		int(combat.get("missilePerLevelMaximum", 0))
+	)
+	var hand_to_hand_gain := int(combat.get("handToHandPerLevel", 0))
+	var hand_to_hand := (
+		_current_hand_to_hand(character)
+		if _has_hand_to_hand(character)
+		else _native_unarmed_max(character)
+	)
+
+	var magic_resistance_value := 0
+	if not magic_resistance.is_empty():
+		_sync_magic_resistance(character, profile)
+		if not _has_magic_resistance(character):
+			return {
+				"status": "error",
+				"message": "Classic magic resistance could not be initialized.",
+			}
+		magic_resistance_value = _current_magic_resistance(character)
+
+	var race_special_base: Array[int] = []
+	var caste_special_base: Array[int] = []
+	var special_maximums: Array[int] = []
+	var abilities: Array[int] = []
+	if not special_rules.is_empty():
+		race_special_base = _integer_array(special_rules.get("raceBase", []))
+		caste_special_base = _integer_array(
+			special_rules.get("casteBase", [])
+		)
+		special_maximums = _integer_array(
+			special_rules.get("levelMaximums", [])
+		)
+		abilities = _integer_array(
+			_value(character, "classic_special_abilities", [])
+		)
+		if race_special_base.size() != SPECIAL_ABILITY_COUNT \
+				or caste_special_base.size() != SPECIAL_ABILITY_COUNT \
+				or special_maximums.size() != SPECIAL_ABILITY_COUNT \
+				or abilities.size() < SPECIAL_ABILITY_COUNT:
+			return {
+				"status": "error",
+				"message": "Classic special-ability progression has incomplete state.",
+			}
+
+	var condition_levels := {}
+	if condition_progression is Array:
+		for entry_value: Variant in condition_progression:
+			if entry_value is Dictionary:
+				condition_levels[int(entry_value.get("level", 0))] = true
+
+	for next_level: int in range(current_level + 1, target_level + 1):
+		character.call("apply_native_character_creation_level", next_level)
+
+		if not stamina.is_empty():
+			var vitality_bonus := 0
+			var vitality := _character_stat(character, "Vitality")
+			if vitality > 16:
+				vitality_bonus = mini(
+					vitality - 16,
+					maximum_vitality_bonus
+				)
+			base_stats["maxHP"] = (
+				int(base_stats.get("maxHP", 0))
+				- native_max_hp
+				+ _classic_rand(stamina_die)
+				+ vitality_bonus
+			)
+
+		if not spellcasting.is_empty():
+			var spell_point_gain := 0
+			if next_level > 1 and spell_start_level <= next_level:
+				var intellect := _character_stat(character, "Intellect")
+				var wisdom := _character_stat(character, "Wisdom")
+				var roll_maximum := (
+					intellect + int(wisdom / 2.0)
+					if caster_type == 1
+					else wisdom + int(intellect / 2.0)
+				)
+				spell_point_gain = next_level + _classic_rand(roll_maximum)
+			base_stats["maxSP"] = (
+				int(base_stats.get("maxSP", 0))
+				- native_max_sp
+				+ spell_point_gain
+			)
+
+		if not combat.is_empty():
+			var missile_gain := float(
+				_missile_level_gain(missile_max)
+			) / 5.0
+			base_stats["AccuracyMelee"] = (
+				float(base_stats.get("AccuracyMelee", 0.0))
+				- native_melee_accuracy
+				+ to_hit_gain
+			)
+			base_stats["AccuracyRanged"] = clampf(
+				float(base_stats.get("AccuracyRanged", 0.0))
+				- native_ranged_accuracy
+				+ missile_gain,
+				0.0,
+				20.0
+			)
+			base_stats["EvasionRanged"] = clampf(
+				float(base_stats.get("EvasionRanged", 0.0))
+				- native_ranged_evasion
+				+ dodge_gain,
+				0.0,
+				20.0
+			)
+			hand_to_hand = clampi(
+				hand_to_hand + hand_to_hand_gain,
+				0,
+				200
+			)
+
+		if not magic_resistance.is_empty():
+			var resistance_chance := (
+				_character_stat(character, "Intellect")
+				+ _character_stat(character, "Wisdom")
+				+ _character_stat(character, "Vitality")
+			)
+			if randi_range(1, 100) <= resistance_chance:
+				magic_resistance_value = mini(
+					100,
+					magic_resistance_value + 1
+				)
+
+		if not special_rules.is_empty():
+			for ability_index: int in range(SPECIAL_ABILITY_COUNT):
+				var maximum := special_maximums[ability_index]
+				if maximum != 0:
+					abilities[ability_index] += _classic_rand(maximum)
+				if ability_index < PERCENT_SPECIAL_ABILITY_COUNT:
+					abilities[ability_index] = clampi(
+						abilities[ability_index],
+						0,
+						100
+					)
+			var turn_undead_floor := (
+				race_special_base[TURN_UNDEAD_ABILITY_INDEX]
+				+ caste_special_base[TURN_UNDEAD_ABILITY_INDEX]
+				+ special_maximums[TURN_UNDEAD_ABILITY_INDEX]
+					* maxi(0, next_level - 1)
+			)
+			abilities[TURN_UNDEAD_ABILITY_INDEX] = maxi(
+				abilities[TURN_UNDEAD_ABILITY_INDEX],
+				turn_undead_floor
+			)
+
+		if condition_levels.has(next_level):
+			var condition_result := apply_level_up_condition_progression(
+				character
+			)
+			if str(condition_result.get("status", "")) == "error":
+				push_error(str(condition_result.get("message", "")))
+
+	if not combat.is_empty():
+		_store_hand_to_hand(character, hand_to_hand)
+	if not magic_resistance.is_empty():
+		_store_magic_resistance(character, magic_resistance_value)
+	if not special_rules.is_empty():
+		character.call("set_classic_special_abilities", abilities)
+	apply_level_up_attack_progression(character, false)
+	return {
+		"status": "ok",
+		"levelsAdvanced": target_level - current_level,
+	}
 
 
 ## Initializes the eight race-owned foe modifiers, including the three bonus
@@ -877,7 +1123,10 @@ static func adjusted_unarmed_damage_range(
 	return [1, hand_to_hand]
 
 
-static func apply_level_up_attack_progression(character: Variant) -> Dictionary:
+static func apply_level_up_attack_progression(
+	character: Variant,
+	store_profile: bool = true
+) -> Dictionary:
 	var profile := _dictionary_value(
 		_value(character, "classic_rule_profile", {})
 	)
@@ -896,7 +1145,8 @@ static func apply_level_up_attack_progression(character: Variant) -> Dictionary:
 		desired_actions - _raw_base_stat(character, "MaxActions")
 	)
 	profile["attacks"] = attacks
-	if character is Object \
+	if store_profile \
+			and character is Object \
 			and character.has_method("apply_classic_rule_profile"):
 		character.call("apply_classic_rule_profile", profile)
 	return {

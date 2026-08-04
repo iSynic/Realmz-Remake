@@ -771,6 +771,25 @@ func begin_character_creation_level_batch() -> void:
 	_batching_character_creation_levels = true
 
 
+func supports_fast_character_creation_levels() -> bool:
+	if not (classgd is Script) or not (racegd is Script):
+		return false
+	return (
+		str(classgd.resource_path).begins_with(
+			"res://Data/Character Classes/"
+		)
+		and str(racegd.resource_path).begins_with(
+			"res://Data/Character Races/"
+		)
+	)
+
+
+func apply_native_character_creation_level(new_level: int) -> void:
+	level = new_level
+	classgd._level_up(self, level)
+	racegd._level_up(self, level)
+
+
 func finish_character_creation_level_batch() -> void:
 	if not _batching_character_creation_levels:
 		return

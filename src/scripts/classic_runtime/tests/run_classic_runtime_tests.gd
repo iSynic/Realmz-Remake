@@ -1209,6 +1209,19 @@ class CampaignRuleCharacter:
 	func begin_character_creation_level_batch() -> void:
 		_batching_character_creation_levels = true
 
+	func supports_fast_character_creation_levels() -> bool:
+		return true
+
+	func apply_native_character_creation_level(new_level: int) -> void:
+		level = new_level
+		base_stats["AccuracyMelee"] += 0.03
+		base_stats["AccuracyRanged"] += 0.03
+		base_stats["EvasionRanged"] += 0.03
+		base_stats["maxHP"] += 4
+		base_stats["maxSP"] += 3
+		if level == 2:
+			base_stats["MaxActions"] += 0.5
+
 	func finish_character_creation_level_batch() -> void:
 		if not _batching_character_creation_levels:
 			return
@@ -11188,6 +11201,7 @@ func _test_standard_character_rules() -> void:
 		"advanced standard creation applies Classic's prestige penalty"
 	)
 
+	var batch_parity_level := 500
 	for caste_id: int in [1, 6]:
 		_expect(
 			StandardCharacterRulesScript.is_caste_allowed(
@@ -11208,7 +11222,7 @@ func _test_standard_character_rules() -> void:
 				bundle,
 				unbatched,
 				1,
-				100,
+				batch_parity_level,
 				[10, 10, 10, 10, 10, 10],
 				CharacterRulesScript.RANDOM_ROLL_UNSET,
 				5,
@@ -11231,7 +11245,7 @@ func _test_standard_character_rules() -> void:
 				bundle,
 				batched,
 				1,
-				100,
+				batch_parity_level,
 				[10, 10, 10, 10, 10, 10],
 				CharacterRulesScript.RANDOM_ROLL_UNSET,
 				5
@@ -11241,11 +11255,11 @@ func _test_standard_character_rules() -> void:
 		_expect_equal(
 			[unbatched_result.get("status"), batched_result.get("status")],
 			["ok", "ok"],
-			"batched and unbatched level-100 creation both complete"
+			"batched and unbatched high-level creation both complete"
 		)
 		_expect(
 			batched.save_data() == unbatched.save_data(),
-			"batched level-100 creation preserves the complete character state"
+			"batched high-level creation preserves the complete character state"
 		)
 		_expect(
 			batched.recalculation_count < unbatched.recalculation_count,
@@ -11259,10 +11273,11 @@ func _test_standard_character_rules() -> void:
 		)
 		print(
 			(
-				"CHARACTER_CREATION_BATCH caste=%d unbatched_us=%d "
+				"CHARACTER_CREATION_BATCH level=%d caste=%d unbatched_us=%d "
 				+ "batched_us=%d recalculations=%d/%d"
 			)
 			% [
+				batch_parity_level,
 				caste_id,
 				unbatched_elapsed,
 				batched_elapsed,
