@@ -17,10 +17,53 @@ const SAVE_BY_SPECIAL := {
 	18: 7,
 	19: 7,
 }
+const ELEMENTAL_SPECIALS := {
+	11: {
+		"element": "Fire",
+		"saveIndex": 1,
+		"protectionTraits": [
+			"t_prot_fire.gd", "p_prot_fire.gd", "t_classic_prot_fire.gd",
+		],
+	},
+	12: {
+		"element": "Ice",
+		"saveIndex": 2,
+		"protectionTraits": [
+			"t_prot_ice.gd", "p_prot_ice.gd", "t_classic_prot_ice.gd",
+		],
+	},
+	13: {
+		"element": "Electric",
+		"saveIndex": 3,
+		"protectionTraits": [
+			"t_prot_elect.gd", "p_prot_elect.gd", "t_classic_prot_elect.gd",
+		],
+	},
+	14: {
+		"element": "Chemical",
+		"saveIndex": 4,
+		"protectionTraits": [
+			"t_prot_chem.gd", "p_prot_chem.gd", "t_classic_prot_chem.gd",
+		],
+	},
+	15: {
+		"element": "Mental",
+		"saveIndex": 5,
+		"protectionTraits": [
+			"t_prot_mental.gd", "p_prot_mental.gd", "t_classic_prot_mental.gd",
+		],
+	},
+}
 
 
 static func supports(special_code: int) -> bool:
-	return StatusAttackScript.supports(special_code) or SAVE_BY_SPECIAL.has(special_code)
+	return StatusAttackScript.supports(special_code) \
+		or SAVE_BY_SPECIAL.has(special_code) \
+		or ELEMENTAL_SPECIALS.has(special_code)
+
+
+static func is_elemental(special_code: int) -> bool:
+	return ELEMENTAL_SPECIALS.has(special_code)
 
 
 static func apply_from_weapon(
@@ -29,7 +72,8 @@ static func apply_from_weapon(
 	weapon: Dictionary,
 	save_roll := -1,
 	party_charm_bonus := 0,
-	chance_modifier := Callable()
+	chance_modifier := Callable(),
+	damage_roll := -1
 ) -> Dictionary:
 	var extra_data: Variant = weapon.get("extra_data", {})
 	if not (extra_data is Dictionary):
@@ -43,7 +87,9 @@ static func apply_from_weapon(
 		special_code,
 		save_roll,
 		party_charm_bonus,
-		chance_modifier
+		chance_modifier,
+		int(extra_data.get("classicSpecialDamageMax", 0)),
+		damage_roll
 	)
 
 
@@ -53,7 +99,9 @@ static func apply(
 	special_code: int,
 	save_roll := -1,
 	party_charm_bonus := 0,
-	chance_modifier := Callable()
+	chance_modifier := Callable(),
+	damage_max := 0,
+	damage_roll := -1
 ) -> Dictionary:
 	if StatusAttackScript.supports(special_code):
 		return StatusAttackScript.apply(
@@ -64,7 +112,8 @@ static func apply(
 			save_roll,
 			chance_modifier
 		)
-	if not SAVE_BY_SPECIAL.has(special_code):
+	if not SAVE_BY_SPECIAL.has(special_code) \
+			and not ELEMENTAL_SPECIALS.has(special_code):
 		return {"handled": false}
 	if attacker == null or target == null \
 			or not attacker.has_method("get_stat") \
@@ -72,11 +121,15 @@ static func apply(
 		return _error("Classic monster special attack has an invalid combatant")
 
 	var is_monster_target := target.has_meta("classic_hit_dice")
+	var elemental: Variant = ELEMENTAL_SPECIALS.get(special_code, {})
+	var save_index := int(elemental.get("saveIndex", -1)) \
+		if elemental is Dictionary and not elemental.is_empty() \
+		else int(SAVE_BY_SPECIAL[special_code])
 	var result := {
 		"handled": true,
 		"status": "ok",
 		"specialCode": special_code,
-		"saveIndex": int(SAVE_BY_SPECIAL[special_code]),
+		"saveIndex": save_index,
 		"applied": false,
 	}
 	if is_monster_target \
@@ -114,6 +167,15 @@ static func apply(
 	result["saveChance"] = save_chance
 	result["saveRoll"] = actual_save_roll
 	result["saved"] = actual_save_roll <= save_chance
+	if elemental is Dictionary and not elemental.is_empty():
+		return _elemental_damage(
+			target,
+			result,
+			elemental,
+			damage_max,
+			damage_roll,
+			is_monster_target
+		)
 	if bool(result["saved"]):
 		return result
 
@@ -129,6 +191,68 @@ static func apply(
 		19:
 			return _petrify(target, result)
 	return result
+
+
+static func _elemental_damage(
+	target: Object,
+	result: Dictionary,
+	elemental: Dictionary,
+	damage_max: int,
+	damage_roll: int,
+	is_monster_target: bool
+) -> Dictionary:
+	if damage_max < 1:
+		return _error("Classic elemental special attack has no damage maximum")
+	var actual_damage_roll := clampi(
+		damage_roll if damage_roll >= 0 else randi_range(1, damage_max),
+		1,
+		damage_max
+	)
+	var damage := actual_damage_roll
+	if bool(result.get("saved", false)):
+		damage = floori(float(damage) / 2.0)
+	var protected := _has_elemental_protection(
+		target,
+		elemental.get("protectionTraits", [])
+	)
+	var displayed_damage := damage
+	if protected:
+		displayed_damage = floori(float(displayed_damage) / 2.0)
+		# attack.c adds Cold, Shock, Chemical, and Mental damage to the
+		# monster-target total before checking protection. Preserve that quirk;
+		# Fire and every party-target branch apply both reductions normally.
+		if not is_monster_target or int(result.get("specialCode", 0)) == 11:
+			damage = displayed_damage
+		else:
+			result["monsterProtectionDisplayOnly"] = true
+	result["element"] = str(elemental.get("element", ""))
+	result["damageMax"] = damage_max
+	result["damageRoll"] = actual_damage_roll
+	result["damage"] = damage
+	result["displayedDamage"] = displayed_damage
+	result["protected"] = protected
+	result["applied"] = damage > 0
+	return result
+
+
+static func _has_elemental_protection(
+	target: Object,
+	protection_names: Variant
+) -> bool:
+	if target == null or not (protection_names is Array):
+		return false
+	var traits: Variant = _property_value(target, "traits")
+	if not (traits is Array):
+		return false
+	for trait_value: Variant in traits:
+		var trait_name := ""
+		if trait_value is Dictionary:
+			trait_name = str(trait_value.get("name", ""))
+		elif trait_value is Object:
+			trait_name = str(_property_value(trait_value, "name"))
+		if protection_names.has(trait_name):
+			return true
+	return false
 
 
 static func _drain_spell_points(

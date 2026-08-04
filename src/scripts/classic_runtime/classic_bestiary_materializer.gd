@@ -82,7 +82,7 @@ const ELEMENT_BY_SPECIAL_ATTACK := {
 const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
-const MATERIALIZATION_VERSION := 8
+const MATERIALIZATION_VERSION := 9
 
 var last_error := ""
 
@@ -806,11 +806,7 @@ func _native_attacks(record: Dictionary) -> Dictionary:
 				if high < 1:
 					unsupported_fields.append("attacks[%d].specialDamage" % attack_index)
 				else:
-					damage[ELEMENT_BY_SPECIAL_ATTACK[special]] = [1, high]
-					# Native resistance replaces Classic's separate save and
-					# protection rolls for the same damage family.
-					if not fidelity_fallbacks.has("elementalSpecialAttackMitigation"):
-						fidelity_fallbacks.append("elementalSpecialAttackMitigation")
+					attack["extra_data"]["classicSpecialDamageMax"] = high
 			elif special != 0 and not MonsterSpecialAttackScript.supports(special):
 				unsupported_fields.append("attacks[%d].special" % attack_index)
 			entries.append(attack)

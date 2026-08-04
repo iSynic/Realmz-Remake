@@ -905,21 +905,53 @@ func perform_melee_attack(msg : Dictionary) -> Array:
 				weapon_definition,
 				weapon
 			)
+		var special_weapon: Dictionary = (
+			item_resources.legacy_item_view_for_adapter(weapon_instance)
+				if weapon_instance != null else weapon
+		)
+		var special_extra: Variant = special_weapon.get("extra_data", {})
+		var special_code := int(special_extra.get("classicSpecialAttack", 0)) \
+			if special_extra is Dictionary else 0
+		var classic_special := {}
+		if CLASSIC_MONSTER_SPECIAL_ATTACK_SCRIPT.is_elemental(special_code):
+			classic_special = CLASSIC_MONSTER_SPECIAL_ATTACK_SCRIPT.apply_from_weapon(
+				attacker.creature,
+				defender.creature,
+				special_weapon,
+				-1,
+				GameGlobal.classic_party_charm_resistance_bonus(defender.creature),
+				Callable(GameGlobal, "apply_scenario_rule_modifier")
+			)
+			if str(classic_special.get("status", "ok")) == "error":
+				push_error(str(classic_special.get(
+					"message", "Classic monster special attack failed"
+				)))
+			var elemental_damage := int(classic_special.get("damage", 0))
+			var elemental_type := str(classic_special.get("element", ""))
+			if elemental_damage > 0:
+				if not elemental_type.is_empty():
+					damage_detail[elemental_type] = (
+						float(damage_detail.get(elemental_type, 0.0))
+						+ elemental_damage
+					)
+				damage_detail["total"] = (
+					int(damage_detail.get("total", 0)) + elemental_damage
+				)
 		SfxPlayer.stream = item_resources.sounds_book[weapon_sound]
 		UI.ow_hud.creatureRect.logrect.log_melee_attack(attacker,defender,damage_detail, accuracy, is_crit, crit_mult, crit_rate)
 		defender.display_effect(picture, damage_detail["total"], 0.8 *2)
 		SfxPlayer.play()
 		#await defender.atkanimTimer.timeout
 		defender.creature.focus_counter +=1 
-		var classic_special: Dictionary = CLASSIC_MONSTER_SPECIAL_ATTACK_SCRIPT.apply_from_weapon(
-			attacker.creature,
-			defender.creature,
-			item_resources.legacy_item_view_for_adapter(weapon_instance)
-				if weapon_instance != null else weapon,
-			-1,
-			GameGlobal.classic_party_charm_resistance_bonus(defender.creature),
-			Callable(GameGlobal, "apply_scenario_rule_modifier")
-		)
+		if classic_special.is_empty():
+			classic_special = CLASSIC_MONSTER_SPECIAL_ATTACK_SCRIPT.apply_from_weapon(
+				attacker.creature,
+				defender.creature,
+				special_weapon,
+				-1,
+				GameGlobal.classic_party_charm_resistance_bonus(defender.creature),
+				Callable(GameGlobal, "apply_scenario_rule_modifier")
+			)
 		if str(classic_special.get("status", "ok")) == "error":
 			push_error(str(classic_special.get(
 				"message", "Classic monster special attack failed"

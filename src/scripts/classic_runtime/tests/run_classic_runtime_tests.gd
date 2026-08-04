@@ -1654,6 +1654,14 @@ class MonsterSpecialAttackTestCharacter:
 		"maxHP": 20,
 		"MultiplierMental": 1.0,
 		"ResistanceMental": 0.0,
+		"MultiplierFire": 1.0,
+		"ResistanceFire": 0.0,
+		"MultiplierIce": 1.0,
+		"ResistanceIce": 0.0,
+		"MultiplierElect": 1.0,
+		"ResistanceElect": 0.0,
+		"MultiplierChemical": 1.0,
+		"ResistanceChemical": 0.0,
 		"MultiplierMagic": 1.0,
 		"ResistanceMagic": 0.0,
 	}
@@ -9830,15 +9838,19 @@ func _test_classic_bestiary_materializer() -> void:
 	var elemental_attack: Dictionary = elemental_monster.get(
 		"tools", {}
 	).get("unarmed_melee_attacks", [])[0]
-	_expect_equal(
-		elemental_attack.get("weapon_dmg", {}).get("Fire"),
-		[1.0, 8.0],
-		"Classic fire damage uses its source attack maximum"
+	_expect(
+		not elemental_attack.get("weapon_dmg", {}).has("Fire"),
+		"Classic fire special damage bypasses native resistance multiplication"
 	)
 	_expect_equal(
 		elemental_attack.get("extra_data", {}).get("classicSpecialAttack"),
 		11,
 		"native attack retains its Classic special-attack identity"
+	)
+	_expect_equal(
+		elemental_attack.get("extra_data", {}).get("classicSpecialDamageMax"),
+		8,
+		"Classic fire damage retains its independent source attack maximum"
 	)
 	_expect_equal(
 		elemental_monster.get(
@@ -9848,10 +9860,10 @@ func _test_classic_bestiary_materializer() -> void:
 		"unarmed elemental damage does not block launch"
 	)
 	_expect(
-		elemental_monster.get(
+		not elemental_monster.get(
 			"classicMaterialization", {}
 		).get("fidelityFallbacks", []).has("elementalSpecialAttackMitigation"),
-		"native resistance records the Classic per-hit save fallback"
+		"source-backed per-hit saves and protection remove the elemental fallback"
 	)
 	_expect(
 		bool(ReadinessScript.new().inspect(
@@ -9871,14 +9883,25 @@ func _test_classic_bestiary_materializer() -> void:
 		var attack_record: Dictionary = bundle.get_monster(1).duplicate(true)
 		attack_record["attacks"][0][3] = special_code
 		var native_attack_result: Dictionary = materializer._native_attacks(attack_record)
+		var native_elemental_attack: Dictionary = native_attack_result.get(
+			"entries", []
+		)[0]
 		_expect(
-			native_attack_result.get("entries", [])[0].get(
-				"weapon_dmg", {}
-			).has(expected_elements[special_code]),
-			"Classic special attack %d maps to native %s damage" % [
+			not native_elemental_attack.get("weapon_dmg", {}).has(
+				expected_elements[special_code]
+			),
+			"Classic special attack %d keeps %s outside native mitigation" % [
 				special_code,
 				expected_elements[special_code],
 			]
+		)
+		_expect_equal(
+			native_elemental_attack.get(
+				"extra_data", {}
+			).get("classicSpecialDamageMax"),
+			8,
+			"Classic special attack %d retains its source damage maximum"
+			% special_code
 		)
 	var exact_variant_root := test_root.path_join("exact-spell-variant")
 	DirAccess.make_dir_recursive_absolute(exact_variant_root)
@@ -10268,7 +10291,11 @@ func _test_classic_monster_attack_sequence() -> void:
 		},
 		{
 			"name": "NO_MELEE_WEAPON",
-			"weapon_dmg": {"Physical": [2, 8], "Fire": [1, 8]},
+			"weapon_dmg": {"Physical": [2, 8]},
+			"extra_data": {
+				"classicSpecialAttack": 11,
+				"classicSpecialDamageMax": 8,
+			},
 		},
 	]
 	_expect_equal(
@@ -10321,8 +10348,13 @@ func _test_classic_monster_attack_sequence() -> void:
 	)
 	_expect_equal(
 		elemental_weapon.get("weapon_dmg", {}).get("Fire"),
-		[3, 12],
-		"armed elemental specials add their damage to the equipped weapon"
+		[2, 4],
+		"armed elemental specials preserve the equipped weapon's own elemental damage"
+	)
+	_expect_equal(
+		elemental_weapon.get("extra_data", {}).get("classicSpecialDamageMax"),
+		8,
+		"armed elemental specials retain their independent Classic damage roll"
 	)
 	_expect_equal(
 		equipped_weapon.get("weapon_dmg", {}).get("Fire"),
@@ -10338,6 +10370,167 @@ func _test_classic_monster_attack_sequence() -> void:
 
 
 func _test_classic_monster_special_attacks() -> void:
+	var elemental_attacker := MonsterSpecialAttackTestCharacter.new(
+		"Elemental attacker", 1
+	)
+	elemental_attacker.set_meta("classic_hit_dice", 4)
+	var elemental_target := MonsterSpecialAttackTestCharacter.new(
+		"Elemental target", 0, 0, 20, true
+	)
+	var elemental_result: Dictionary = MonsterSpecialAttackScript.apply(
+		elemental_attacker,
+		elemental_target,
+		11,
+		100,
+		0,
+		Callable(),
+		8,
+		8
+	)
+	_expect_equal(
+		elemental_result.get("damage"),
+		8,
+		"failed fire save applies the complete independent special-damage roll"
+	)
+	_expect_equal(
+		elemental_result.get("element"),
+		"Fire",
+		"elemental special attacks retain their native display family"
+	)
+
+	var saved_elemental_target := MonsterSpecialAttackTestCharacter.new(
+		"Saved elemental target", 0, 0, 20, true
+	)
+	saved_elemental_target.stats["MultiplierFire"] = 0.75
+	var saved_elemental: Dictionary = MonsterSpecialAttackScript.apply(
+		elemental_attacker,
+		saved_elemental_target,
+		11,
+		1,
+		0,
+		Callable(),
+		8,
+		8
+	)
+	_expect(bool(saved_elemental.get("saved")), "successful fire save is recorded")
+	_expect_equal(
+		saved_elemental.get("damage"),
+		4,
+		"successful Classic elemental saves halve special damage"
+	)
+
+	var protected_elemental_target := MonsterSpecialAttackTestCharacter.new(
+		"Protected elemental target", 0, 0, 20, true
+	)
+	protected_elemental_target.traits.append(
+		ConditionTestTrait.new("t_prot_fire.gd", 1)
+	)
+	var protected_elemental: Dictionary = MonsterSpecialAttackScript.apply(
+		elemental_attacker,
+		protected_elemental_target,
+		11,
+		100,
+		0,
+		Callable(),
+		8,
+		8
+	)
+	_expect(bool(protected_elemental.get("protected")), "fire protection is detected")
+	_expect_equal(
+		protected_elemental.get("damage"),
+		4,
+		"Classic elemental protection halves party-target special damage"
+	)
+
+	var doubly_reduced_target := MonsterSpecialAttackTestCharacter.new(
+		"Saved and protected target", 0, 0, 20, true
+	)
+	doubly_reduced_target.stats["MultiplierFire"] = 0.75
+	doubly_reduced_target.traits.append(
+		ConditionTestTrait.new("p_prot_fire.gd", 1)
+	)
+	var doubly_reduced: Dictionary = MonsterSpecialAttackScript.apply(
+		elemental_attacker,
+		doubly_reduced_target,
+		11,
+		1,
+		0,
+		Callable(),
+		8,
+		8
+	)
+	_expect_equal(
+		doubly_reduced.get("damage"),
+		2,
+		"Classic elemental saves and protection stack as two integer halvings"
+	)
+
+	var protected_monster_target := MonsterSpecialAttackTestCharacter.new(
+		"Protected monster", 0
+	)
+	protected_monster_target.set_meta("classic_hit_dice", 2)
+	SpellSavesScript.apply_monster_metadata(
+		protected_monster_target,
+		[0, 0, 0, 0, 0, 0],
+		[0, 0, 0, 0, 0, 0]
+	)
+	protected_monster_target.traits.append(
+		ConditionTestTrait.new("t_classic_prot_ice.gd", 1)
+	)
+	var protected_monster_cold: Dictionary = MonsterSpecialAttackScript.apply(
+		elemental_attacker,
+		protected_monster_target,
+		12,
+		100,
+		0,
+		Callable(),
+		8,
+		8
+	)
+	_expect_equal(
+		protected_monster_cold.get("damage"),
+		8,
+		"Classic preserves the monster-target cold-protection damage-order quirk"
+	)
+	_expect_equal(
+		protected_monster_cold.get("displayedDamage"),
+		4,
+		"the monster-target cold-protection quirk still reports its reduced effect"
+	)
+	var protected_monster_fire: Dictionary = MonsterSpecialAttackScript.apply(
+		elemental_attacker,
+		protected_monster_target,
+		11,
+		100,
+		0,
+		Callable(),
+		8,
+		8
+	)
+	_expect_equal(
+		protected_monster_fire.get("damage"),
+		8,
+		"unrelated elemental protection does not reduce fire damage"
+	)
+	protected_monster_target.traits.append(
+		ConditionTestTrait.new("t_classic_prot_fire.gd", 1)
+	)
+	protected_monster_fire = MonsterSpecialAttackScript.apply(
+		elemental_attacker,
+		protected_monster_target,
+		11,
+		100,
+		0,
+		Callable(),
+		8,
+		8
+	)
+	_expect_equal(
+		protected_monster_fire.get("damage"),
+		4,
+		"Classic monster-target fire protection reduces actual special damage"
+	)
+
 	var drain_attacker := MonsterSpecialAttackTestCharacter.new(
 		"Spell drainer", 1, 2, 20, false
 	)
