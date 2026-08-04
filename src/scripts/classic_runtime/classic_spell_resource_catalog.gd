@@ -64,6 +64,67 @@ static func merge_directory(directory: String, destination: Dictionary) -> void:
 		_merge_loaded_script(path, destination)
 
 
+static func merge_directory_async(
+	directory: String,
+	destination: Dictionary,
+	tree: SceneTree,
+	frame_budget_usec := 8000,
+) -> void:
+	var file_names := _resource_file_names(directory)
+	if file_names.is_empty():
+		return
+	var name_expression := _expression("(?m)^\\s*name\\s*=\\s*[\"']([^\"']+)[\"']")
+	var class_expression := _expression("(?m)^\\s*classic_spell_class\\s*=\\s*(-?\\d+)")
+	var ids_expression := _expression("(?m)^\\s*classic_spell_ids\\s*=\\s*\\[([^\\]]*)\\]")
+	var save_index_expression := _expression(
+		"(?m)^\\s*classic_spell_save_index\\s*=\\s*(-?\\d+)"
+	)
+	var save_mode_expression := _expression(
+		"(?m)^\\s*classic_spell_save_mode\\s*=\\s*[\"']([^\"']+)[\"']"
+	)
+	var field_expression := _expression("(?m)^\\s*in_field\\s*=\\s*(true|false)")
+	var combat_expression := _expression("(?m)^\\s*in_combat\\s*=\\s*(true|false)")
+	var use_core_save_metadata := (
+		directory.replace("\\", "/").trim_suffix("/")
+		== "res://shared_assets/spells"
+	)
+	var budget_start := Time.get_ticks_usec()
+	for file_name: String in file_names:
+		if file_name.ends_with("/") or not file_name.ends_with(".gd"):
+			continue
+		var path := directory.path_join(file_name)
+		var source := FileAccess.get_file_as_string(path)
+		var name_match := name_expression.search(source)
+		if name_match != null:
+			var metadata := {"resourcePath": path}
+			var class_match := class_expression.search(source)
+			if class_match != null:
+				metadata["classicSpellClass"] = int(class_match.get_string(1))
+			var ids_match := ids_expression.search(source)
+			if ids_match != null:
+				metadata["classicSpellIds"] = _integer_list(ids_match.get_string(1))
+			var save_index_match := save_index_expression.search(source)
+			if save_index_match != null:
+				metadata["classicSpellSaveIndex"] = int(save_index_match.get_string(1))
+			var save_mode_match := save_mode_expression.search(source)
+			if save_mode_match != null:
+				metadata["classicSpellSaveMode"] = save_mode_match.get_string(1)
+			var field_match := field_expression.search(source)
+			if field_match != null:
+				metadata["inField"] = field_match.get_string(1) == "true"
+			var combat_match := combat_expression.search(source)
+			if combat_match != null:
+				metadata["inCombat"] = combat_match.get_string(1) == "true"
+			if use_core_save_metadata:
+				_merge_core_save_metadata(metadata)
+			destination[name_match.get_string(1)] = metadata
+		else:
+			_merge_loaded_script(path, destination)
+		if Time.get_ticks_usec() - budget_start >= frame_budget_usec:
+			await tree.process_frame
+			budget_start = Time.get_ticks_usec()
+
+
 static func _resource_file_names(directory: String) -> Array[String]:
 	var file_names: Array[String] = []
 	if directory.begins_with("res://"):

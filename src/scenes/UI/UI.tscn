@@ -1,9 +1,95 @@
-[gd_scene load_steps=3 format=3 uid="uid://gjamep3mqvl7"]
+[gd_scene load_steps=5 format=3 uid="uid://gjamep3mqvl7"]
 
 [ext_resource type="PackedScene" uid="uid://c3on0sw1e8ed5" path="res://scenes/UI/Main Menu/MainMenuNode2D.tscn" id="1"]
 [ext_resource type="Script" path="res://scripts/UI.gd" id="2"]
+[ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="3_loading_stone"]
+[ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="4_loading_font"]
 
 [node name="UI" type="CanvasLayer"]
 script = ExtResource("2")
 
 [node name="MainMenuControl" parent="." instance=ExtResource("1")]
+
+[node name="LoadingOverlay" type="Control" parent="."]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+focus_mode = 2
+
+[node name="Dim" type="ColorRect" parent="LoadingOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0.72)
+
+[node name="Panel" type="NinePatchRect" parent="LoadingOverlay"]
+custom_minimum_size = Vector2(540, 190)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -270.0
+offset_top = -95.0
+offset_right = 270.0
+offset_bottom = 95.0
+grow_horizontal = 2
+grow_vertical = 2
+texture_filter = 1
+texture = ExtResource("3_loading_stone")
+patch_margin_left = 11
+patch_margin_top = 11
+patch_margin_right = 11
+patch_margin_bottom = 11
+axis_stretch_horizontal = 1
+axis_stretch_vertical = 1
+
+[node name="Margin" type="MarginContainer" parent="LoadingOverlay/Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
+
+[node name="VBox" type="VBoxContainer" parent="LoadingOverlay/Panel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="LoadingOverlay/Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.86, 0.1, 1)
+theme_override_fonts/font = ExtResource("4_loading_font")
+theme_override_font_sizes/font_size = 30
+text = "Preparing Campaign"
+horizontal_alignment = 1
+
+[node name="Stage" type="Label" parent="LoadingOverlay/Panel/Margin/VBox"]
+layout_mode = 2
+text = "Preparing the campaign…"
+horizontal_alignment = 1
+
+[node name="Progress" type="ProgressBar" parent="LoadingOverlay/Panel/Margin/VBox"]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+show_percentage = false
+
+[node name="Hint" type="Label" parent="LoadingOverlay/Panel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.72, 0.72, 0.72, 1)
+text = "The game will begin when the map and party are ready."
+horizontal_alignment = 1

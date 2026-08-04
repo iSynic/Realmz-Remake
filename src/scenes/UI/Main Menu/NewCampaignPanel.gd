@@ -62,6 +62,7 @@ var _catalog_generation := 0
 var _preparation_coordinator: ClassicCampaignPreparationCoordinator
 var _active_preparation_generation := 0
 var _preparation_trace_tokens: Dictionary = {}
+var _launch_in_progress := false
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
@@ -357,10 +358,18 @@ func _on_preparation_finished(
 	})
 
 func _on_StartButton_pressed() -> void :
+	if _launch_in_progress:
+		return
 	if selectedcampaign_onselect is Dictionary and not bool(
 		selectedcampaign_onselect.get("valid", false)
 	):
 		return
+	_launch_in_progress = true
+	startButton.disabled = true
+	UI.begin_loading(str(selectedcampaign_onselect.get(
+		"title", selectedCampaign
+	)))
+	await get_tree().process_frame
 	LoadPerformanceTrace.begin_named(&"campaign_launch.first_playable_frame", {
 		"campaign": selectedCampaign,
 	})
@@ -419,6 +428,21 @@ func _on_StartButton_pressed() -> void :
 #
 #	print("STARTCAMPAIGN playerchat0 item0 ", pickedparty[0].inventory[0])
 	return
+
+
+func recover_launch_failure(message: String) -> void:
+	_launch_in_progress = false
+	show()
+	startButton.disabled = (
+		pickedparty.is_empty()
+		or not (selectedcampaign_onselect is Dictionary)
+		or not bool(selectedcampaign_onselect.get("valid", false))
+	)
+	selectedCampaignDescrLabel.text = (
+		_classic_campaign_description(selectedcampaign_onselect)
+		+ "\nLaunch failed: "
+		+ message
+	)
 		
 
 

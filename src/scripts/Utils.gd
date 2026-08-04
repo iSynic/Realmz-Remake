@@ -152,7 +152,10 @@ class FileHandler:
 		#config.load(path)
 		#print('Utils set_cfg_setting    ',key, value,"set to ",config.get_value(section, key, null) )
 	
-	static func load_character(path)-> PlayerCharacter :		
+	static func load_character(
+		path,
+		defer_spell_materialization := false,
+	)-> PlayerCharacter:
 		
 		var newicon = Utils.FileHandler.load_img_texture(path+"/icon.png")
 
@@ -167,7 +170,14 @@ class FileHandler:
 		#else :
 			#print("UTILS load_character "+jsonresult["name"]+": Melee_Crit_Rate ? "+str(jsonresult["base_stats"]["Melee_Crit_Rate"]))
 
-		var newchar : PlayerCharacter = GameGlobal.playerCharacterGD.new(jsonresult, newicon, newportrait, classgd, racegd)
+		var newchar : PlayerCharacter = GameGlobal.playerCharacterGD.new(
+			jsonresult,
+			newicon,
+			newportrait,
+			classgd,
+			racegd,
+			defer_spell_materialization,
+		)
 		
 		#print("UTILS load character : curHP", newchar.get_stat("curHP"), 'curSP:', newchar.get_stat("curSP"))
 		

@@ -11,6 +11,8 @@ All resources are loaded and accessed through this module.
 extends Node
 class_name CampaignResources
 
+signal shared_resources_finished(success: bool)
+
 const NativeEncounterBookScript = preload(
 	"res://scripts/native_encounters/native_encounter_book.gd"
 )
@@ -33,6 +35,7 @@ const ClassicSharedAssetStoreScript = preload(
 )
 const LEGACY_ITEM_IDENTITY_STATE_KEY := "legacyDefinitionIdentity"
 const SHARED_SPELL_PATH := "res://shared_assets/spells/"
+const LOAD_FRAME_BUDGET_USEC := 8000
 var g_scripts = {}
 
 var images_book : Dictionary = {}
@@ -58,12 +61,13 @@ var _shared_spell_cache: Dictionary = {}
 var _shared_spell_paths: Array[String] = []
 var _materialized_shared_spell_paths: Dictionary = {}
 var _shared_spell_cache_complete := false
-
-# Initialize resources #
-func _ready():
-	load_music_resources(Paths.datafolderpath+'Music/')
-	call_deferred("_request_shared_spell_warmup")
-
+var _saved_spell_script_cache: Dictionary = {}
+var _shared_resources_loaded := false
+var _shared_resources_loading := false
+var _shared_music_loaded := false
+var _active_campaign_id := ""
+var _active_campaign_package_hash := ""
+var _shared_books: Dictionary = {}
 
 func _request_shared_spell_warmup() -> void:
 	if not _shared_spell_paths.is_empty():
@@ -74,40 +78,237 @@ func _request_shared_spell_warmup() -> void:
 		if filename.ends_with(".gd"):
 			_shared_spell_paths.append(SHARED_SPELL_PATH + filename)
 	_shared_spell_paths.sort()
-	call_deferred("_materialize_shared_spell_warmup")
 
 
-func _materialize_shared_spell_warmup() -> void:
-	while not _shared_spell_cache_complete and is_inside_tree():
-		for spell_path: String in _shared_spell_paths:
-			if _materialized_shared_spell_paths.has(spell_path):
-				continue
-			_cache_shared_spell_script(spell_path, load(spell_path))
-			break
-		_shared_spell_cache_complete = (
-			_materialized_shared_spell_paths.size()
-			== _shared_spell_paths.size()
+func ensure_shared_spell_cache_loaded_async() -> void:
+	if _shared_spell_cache_complete:
+		spells_book.merge(_shared_spell_cache, true)
+		return
+	if _shared_spell_paths.is_empty():
+		_request_shared_spell_warmup()
+	for spell_path: String in _shared_spell_paths:
+		if not _materialized_shared_spell_paths.has(spell_path):
+			ResourceLoader.load_threaded_request(spell_path, "GDScript")
+	var budget_start := Time.get_ticks_usec()
+	for spell_path: String in _shared_spell_paths:
+		if _materialized_shared_spell_paths.has(spell_path):
+			continue
+		_cache_shared_spell_script(
+			spell_path,
+			await _load_script_async(spell_path),
 		)
-		if not _shared_spell_cache_complete:
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
 			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+	_shared_spell_cache_complete = true
+	spells_book.merge(_shared_spell_cache, true)
+
+
+func _load_script_async(path: String) -> GDScript:
+	var status := ResourceLoader.load_threaded_get_status(path)
+	if status == ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+		var request_error := ResourceLoader.load_threaded_request(path, "GDScript")
+		if request_error != OK:
+			return load(path) as GDScript
+	while true:
+		status = ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_LOADED:
+			return ResourceLoader.load_threaded_get(path) as GDScript
+		if status == ResourceLoader.THREAD_LOAD_FAILED:
+			return null
+		await get_tree().process_frame
+	return null
 
 func clear_ressources() -> void:
+	_active_campaign_id = ""
+	_active_campaign_package_hash = ""
+	_shared_resources_loaded = false
+	_shared_resources_loading = false
+	_shared_music_loaded = false
+	_shared_books.clear()
+	_clear_active_books()
+	item_catalog.clear()
+	item_hooks.clear()
+
+
+func _clear_active_books() -> void:
+	images_book.clear()
 	tiles_book.clear()
 	battles_book.clear()
 	crea_book.clear()
 	maps_book.clear()
 	map_info_book.clear()
 	items_book.clear()
-	item_catalog.clear()
-	item_hooks.clear()
 	sounds_book.clear()
 	musics_book.clear()
 	musics_types_book.clear()
 	special_encounters_book.clear()
 	spells_book.clear()
 	creascripts_book.clear()
-#	shopsGD = null
-	load_music_resources(Paths.datafolderpath+'Music/')
+
+
+func _ensure_shared_resources_loaded() -> bool:
+	if _shared_resources_loaded:
+		GameGlobal.materialize_profile_spells()
+		return true
+	var trace_token := LoadPerformanceTrace.begin_phase(
+		&"campaign_launch.shared_resources"
+	)
+	if tiles_book.is_empty():
+		load_tile_resources("res://shared_assets/tiles/")
+	if not ensure_shared_item_catalog_loaded():
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"error": "shared_item_catalog_failed",
+		})
+		return false
+	if sounds_book.is_empty():
+		load_sound_ressources("res://shared_assets/sounds/")
+	if not _shared_music_loaded:
+		load_music_resources(Paths.datafolderpath + "Music/")
+		_shared_music_loaded = true
+	load_spell_resources(SHARED_SPELL_PATH)
+	GameGlobal.materialize_profile_spells()
+	if creascripts_book.is_empty():
+		load_creature_ai_resources("res://shared_assets/CreatureScripts/")
+	if crea_book.is_empty():
+		load_bestiary_resources("res://shared_assets/Bestiary/")
+	_capture_shared_books()
+	_shared_resources_loaded = true
+	LoadPerformanceTrace.end_phase(trace_token, true, {
+		"cache_status": "cold",
+	})
+	return true
+
+
+func ensure_shared_resources_loaded_async() -> bool:
+	if _shared_resources_loaded:
+		await GameGlobal.materialize_profile_spells_async()
+		var cached_trace := LoadPerformanceTrace.begin_phase(
+			&"campaign_launch.shared_resources"
+		)
+		LoadPerformanceTrace.end_phase(
+			cached_trace, true, {"cache_status": "memory"}
+		)
+		return true
+	if _shared_resources_loading:
+		var load_succeeded := bool(await shared_resources_finished)
+		if load_succeeded:
+			await GameGlobal.materialize_profile_spells_async()
+		return load_succeeded
+	_shared_resources_loading = true
+	var trace_token := LoadPerformanceTrace.begin_phase(
+		&"campaign_launch.shared_resources"
+	)
+	UI.update_loading("Loading shared terrain…", 0, 6)
+	if tiles_book.is_empty():
+		await load_tile_resources_async("res://shared_assets/tiles/")
+	await get_tree().process_frame
+	UI.update_loading("Loading shared items…", 1, 6)
+	if not await ensure_shared_item_catalog_loaded_async():
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"error": "shared_item_catalog_failed",
+		})
+		_shared_resources_loading = false
+		shared_resources_finished.emit(false)
+		return false
+	await get_tree().process_frame
+	UI.update_loading("Loading shared sound and music…", 2, 6)
+	if sounds_book.is_empty():
+		await load_sound_resources_async("res://shared_assets/sounds/")
+	if not _shared_music_loaded:
+		await load_music_resources_async(Paths.datafolderpath + "Music/")
+		_shared_music_loaded = true
+	await get_tree().process_frame
+	UI.update_loading("Loading shared spells…", 3, 6)
+	await ensure_shared_spell_cache_loaded_async()
+	await GameGlobal.materialize_profile_spells_async()
+	await get_tree().process_frame
+	UI.update_loading("Loading creature behavior…", 4, 6)
+	if creascripts_book.is_empty():
+		load_creature_ai_resources("res://shared_assets/CreatureScripts/")
+	await get_tree().process_frame
+	UI.update_loading("Loading the bestiary…", 5, 6)
+	if crea_book.is_empty():
+		await load_bestiary_resources_async("res://shared_assets/Bestiary/")
+	_capture_shared_books()
+	_shared_resources_loaded = true
+	_shared_resources_loading = false
+	LoadPerformanceTrace.end_phase(trace_token, true, {
+		"cache_status": "cold",
+	})
+	shared_resources_finished.emit(true)
+	return true
+
+
+func _capture_shared_books() -> void:
+	_shared_books = {
+		"images": images_book.duplicate(false),
+		"tiles": tiles_book.duplicate(false),
+		"items": items_book.duplicate(false),
+		"creatures": crea_book.duplicate(false),
+		"sounds": sounds_book.duplicate(false),
+		"spells": spells_book.duplicate(false),
+		"creatureScripts": creascripts_book.duplicate(false),
+		"music": musics_book.duplicate(false),
+		"musicTypes": musics_types_book.duplicate(true),
+	}
+
+
+func _reset_to_shared_books(campaign: String) -> void:
+	images_book = _shared_books.get("images", {}).duplicate(false)
+	tiles_book = _shared_books.get("tiles", {}).duplicate(false)
+	items_book = _shared_books.get("items", {}).duplicate(false)
+	crea_book = _shared_books.get("creatures", {}).duplicate(false)
+	sounds_book = _shared_books.get("sounds", {}).duplicate(false)
+	spells_book = _shared_books.get("spells", {}).duplicate(false)
+	creascripts_book = _shared_books.get("creatureScripts", {}).duplicate(false)
+	musics_book = _shared_books.get("music", {}).duplicate(false)
+	musics_types_book = _shared_books.get("musicTypes", {}).duplicate(true)
+	battles_book.clear()
+	maps_book.clear()
+	map_info_book.clear()
+	special_encounters_book.clear()
+	item_catalog.activate_campaign(_campaign_catalog_id(campaign))
+
+
+func _campaign_package_hash(campaign: String) -> String:
+	var install: Variant = GameGlobal.get_classic_campaign_install(campaign)
+	if install != null and install.get("bundle") != null:
+		return str(install.bundle.package_hash()).to_lower()
+	return ""
+
+
+func _campaign_catalog_id(campaign: String) -> String:
+	if campaign.is_empty():
+		return ""
+	var install: Variant = GameGlobal.get_classic_campaign_install(campaign)
+	if install != null and install.get("bundle") != null:
+		var manifest_id := str(
+			install.bundle.manifest.get("id", "")
+		).strip_edges()
+		if not manifest_id.is_empty():
+			return manifest_id
+	var item_directory := (
+		Paths.campaignsfolderpath.path_join(campaign).path_join("Items") + "/"
+	)
+	return _item_campaign_id(item_directory)
+
+
+func is_campaign_package_active(
+	campaign: String,
+	package_hash: String,
+	catalog_id: String = "",
+) -> bool:
+	if campaign != _active_campaign_id:
+		return false
+	if package_hash.is_empty() or package_hash.to_lower() != (
+		_active_campaign_package_hash.to_lower()
+	):
+		return false
+	var expected_catalog_id := catalog_id.strip_edges()
+	if expected_catalog_id.is_empty():
+		expected_catalog_id = _campaign_catalog_id(campaign)
+	return item_catalog.active_campaign_id() == expected_catalog_id
 
 func load_campaign_ressources( campaign : String = "") ->void :
 	var trace_token := LoadPerformanceTrace.begin_phase(
@@ -115,56 +316,191 @@ func load_campaign_ressources( campaign : String = "") ->void :
 		{"campaign": campaign}
 	)
 	print("RESOURCES load_campaign_ressources")
-	clear_ressources()
-	load_tile_resources("res://shared_assets/tiles/")
+	if not _ensure_shared_resources_loaded():
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"campaign": campaign,
+			"error": "shared_resources_failed",
+		})
+		return
+	_reset_to_shared_books(campaign)
+	_load_campaign_overlay(campaign)
+	_active_campaign_id = campaign
+	_active_campaign_package_hash = _campaign_package_hash(campaign)
+	LoadPerformanceTrace.end_phase(trace_token, true, {
+		"campaign": campaign,
+		"cache_status": "cold",
+	})
+
+
+func activate_campaign_resources_async(campaign: String) -> bool:
+	if not await ensure_shared_resources_loaded_async():
+		return false
+	var package_hash := _campaign_package_hash(campaign)
+	if (
+		campaign == _active_campaign_id
+		and not package_hash.is_empty()
+		and package_hash == _active_campaign_package_hash
+	):
+		var cached_trace := LoadPerformanceTrace.begin_phase(
+			&"campaign_launch.campaign_resources",
+			{"campaign": campaign}
+		)
+		LoadPerformanceTrace.end_phase(cached_trace, true, {
+			"campaign": campaign,
+			"cache_status": "memory",
+		})
+		return true
+	var trace_token := LoadPerformanceTrace.begin_phase(
+		&"campaign_launch.campaign_resources",
+		{"campaign": campaign}
+	)
+	_reset_to_shared_books(campaign)
+	var campaign_root := Paths.campaignsfolderpath.path_join(campaign)
+	UI.update_loading("Loading campaign terrain…", 0, 6)
+	if FileAccess.file_exists(campaign_root.path_join("campaign.json")):
+		if not await _load_classic_campaign_tile_resources_async(campaign_root):
+			return _campaign_activation_failed(
+				trace_token, campaign, "campaign_tiles_failed"
+			)
+	else:
+		var tilesets_path := campaign_root.path_join("Tilesets")
+		if DirAccess.dir_exists_absolute(tilesets_path):
+			await load_tile_resources_async(tilesets_path)
+	await get_tree().process_frame
+	UI.update_loading("Loading campaign items…", 1, 6)
+	var itemset_path := campaign_root.path_join("Items") + "/"
+	if DirAccess.dir_exists_absolute(itemset_path):
+		if not await load_item_resources_async(
+			itemset_path,
+			_campaign_catalog_id(campaign),
+		):
+			return _campaign_activation_failed(
+				trace_token, campaign, "campaign_items_failed"
+			)
+	await get_tree().process_frame
+	UI.update_loading("Loading campaign sound…", 2, 6)
+	var sounds_path := campaign_root.path_join("Sounds") + "/"
+	if DirAccess.dir_exists_absolute(sounds_path):
+		await load_sound_resources_async(sounds_path)
+	var music_path := campaign_root.path_join("Music") + "/"
+	if DirAccess.dir_exists_absolute(music_path):
+		await load_music_resources_async(music_path)
+	await get_tree().process_frame
+	UI.update_loading("Loading campaign spells…", 3, 6)
+	var spells_path := campaign_root.path_join("Spells") + "/"
+	if DirAccess.dir_exists_absolute(spells_path):
+		await load_spell_resources_async(spells_path)
+	await get_tree().process_frame
+	UI.update_loading("Loading campaign creatures…", 4, 6)
+	var bestiary_path := campaign_root.path_join("Bestiary") + "/"
+	if DirAccess.dir_exists_absolute(bestiary_path):
+		await load_bestiary_resources_async(bestiary_path)
+	await get_tree().process_frame
+	UI.update_loading("Loading the starting map…", 5, 6)
+	if not await _load_campaign_maps_async(campaign, campaign_root):
+		return _campaign_activation_failed(
+			trace_token, campaign, "campaign_start_map_failed"
+		)
+	_restore_deferred_character_inventories()
+	_active_campaign_id = campaign
+	_active_campaign_package_hash = package_hash
+	LoadPerformanceTrace.end_phase(trace_token, true, {
+		"campaign": campaign,
+		"cache_status": "cold",
+	})
+	return true
+
+
+func _campaign_activation_failed(
+	trace_token: int,
+	campaign: String,
+	error: String
+) -> bool:
+	_reset_to_shared_books("")
+	_active_campaign_id = ""
+	_active_campaign_package_hash = ""
+	LoadPerformanceTrace.end_phase(trace_token, false, {
+		"campaign": campaign,
+		"error": error,
+	})
+	return false
+
+
+func deactivate_campaign_resources() -> void:
+	if _shared_resources_loaded:
+		_reset_to_shared_books("")
+	else:
+		_clear_active_books()
+	_active_campaign_id = ""
+	_active_campaign_package_hash = ""
+
+
+func _load_campaign_overlay(campaign: String) -> void:
 	var campaign_root := Paths.campaignsfolderpath.path_join(campaign)
 	var tilesetspath: String = campaign_root.path_join("Tilesets")
 	if FileAccess.file_exists(campaign_root.path_join("campaign.json")):
 		_load_classic_campaign_tile_resources(campaign_root)
 	elif DirAccess.dir_exists_absolute(tilesetspath):
 		load_tile_resources(tilesetspath)
-	load_item_resources("res://shared_assets/items/")
 	var itemsetpath : String = Paths.campaignsfolderpath + campaign + "/Items/"
 	if DirAccess.dir_exists_absolute(itemsetpath) :
-		load_item_resources(itemsetpath)
+		load_item_resources(itemsetpath, _campaign_catalog_id(campaign))
 
-	load_sound_ressources("res://shared_assets/sounds/")
 	var soundsspath : String = Paths.campaignsfolderpath + campaign + "/Sounds/"
 	if DirAccess.dir_exists_absolute(soundsspath) :
 		load_sound_ressources(soundsspath)
 
 #	print(sounds_book)
-	load_music_resources(Paths.datafolderpath+'Music/')
 	var musicspath = Paths.campaignsfolderpath + campaign + "/Music/"
 	if DirAccess.dir_exists_absolute(musicspath) :
 		load_music_resources(musicspath)
 
 	print("Resources B4load spells")
 
-	load_spell_resources("res://shared_assets/spells/")
+	var spellspath = Paths.campaignsfolderpath + campaign + "/Spells/"
+	if DirAccess.dir_exists_absolute(spellspath):
+		load_spell_resources(spellspath)
 #	print("\n\n", "spell resources : \n", spells_book.keys() ,"\n\n")
 
-	load_creature_ai_resources("res://shared_assets/CreatureScripts/")
-
-	load_bestiary_resources("res://shared_assets/Bestiary/")
 	var bestiarypath = Paths.campaignsfolderpath + campaign + "/Bestiary/"
 	if DirAccess.dir_exists_absolute(bestiarypath) :
 		load_bestiary_resources(bestiarypath)
 
-	var mapspath : String =  Paths.campaignsfolderpath + campaign + "/Maps/"
+	_load_campaign_maps(campaign, campaign_root)
+	_restore_deferred_character_inventories()
+
+
+func _load_campaign_maps(campaign: String, campaign_root: String) -> bool:
+	var mapspath := campaign_root.path_join("Maps") + "/"
 	print("RESOURCES load_campaign_ressources mapspath : ", mapspath)
 	var mapnames : Array = Utils.FileHandler.list_dirs_in_directory(mapspath)
 	var classic_start_map := _classic_start_map_name(campaign)
 	if not classic_start_map.is_empty():
-		ensure_campaign_map_resource(campaign, classic_start_map)
+		return ensure_campaign_map_resource(campaign, classic_start_map)
 	else:
 		for mn in mapnames :
 			load_map_ressources(mapspath + mn + '/', mn)
-	_restore_deferred_character_inventories()
-	LoadPerformanceTrace.end_phase(trace_token, true, {
-		"campaign": campaign,
-		"cache_status": "cold",
-	})
+	return not maps_book.is_empty()
+
+
+func _load_campaign_maps_async(campaign: String, campaign_root: String) -> bool:
+	var maps_path := campaign_root.path_join("Maps") + "/"
+	print("RESOURCES load_campaign_ressources mapspath : ", maps_path)
+	var map_names: Array = Utils.FileHandler.list_dirs_in_directory(maps_path)
+	var classic_start_map := _classic_start_map_name(campaign)
+	if not classic_start_map.is_empty():
+		return await ensure_campaign_map_resource_async(
+			campaign,
+			classic_start_map,
+		)
+	for map_name_value: Variant in map_names:
+		var map_name := str(map_name_value)
+		if not await load_map_resources_async(
+			maps_path + map_name + "/",
+			map_name,
+		):
+			return false
+	return not maps_book.is_empty()
 
 
 func _restore_deferred_character_inventories() -> void:
@@ -217,6 +553,39 @@ func ensure_campaign_map_resource(campaign: String, map_name: String) -> bool:
 	return maps_book.has(map_name)
 
 
+func ensure_campaign_map_resource_async(
+	campaign: String,
+	map_name: String,
+) -> bool:
+	if maps_book.has(map_name):
+		return true
+	if (
+		map_name.is_empty()
+		or map_name in [".", ".."]
+		or map_name.contains("/")
+		or map_name.contains("\\")
+		or map_name.contains(":")
+	):
+		return false
+	var map_directory := (
+		Paths.campaignsfolderpath
+		+ campaign
+		+ "/Maps/"
+		+ map_name
+		+ "/"
+	)
+	if not DirAccess.dir_exists_absolute(map_directory):
+		return false
+	for file_name: String in [
+		"map_info.json",
+		"map_scriptareas.json",
+		"map_things.json",
+	]:
+		if not FileAccess.file_exists(map_directory + file_name):
+			return false
+	return await load_map_resources_async(map_directory, map_name)
+
+
 func _classic_start_map_name(campaign: String) -> String:
 	var manifest_path := (
 		Paths.campaignsfolderpath + campaign + "/campaign.json"
@@ -261,6 +630,23 @@ func load_tile_resources( path : String ) -> void:
 	return
 
 
+func load_tile_resources_async(path: String) -> void:
+	var tileset_folder_names: Array = (
+		Utils.FileHandler.list_dirs_in_directory(path)
+	)
+	tileset_folder_names.sort()
+	for tileset_name_value: Variant in tileset_folder_names:
+		var tileset_name := str(tileset_name_value)
+		var tileset_directory := path.path_join(tileset_name)
+		await _load_tile_resource_from_paths_async(
+			tileset_name,
+			tileset_directory.path_join("%s.json" % tileset_name),
+			tileset_directory.path_join("%s.png" % tileset_name),
+			tileset_directory.path_join("tile_templates.json")
+		)
+	print("Done loading tiles from : ", path)
+
+
 func _load_classic_campaign_tile_resources(campaign_root: String) -> bool:
 	var manifest_value: Variant = JSON.parse_string(
 		FileAccess.get_file_as_string(campaign_root.path_join("campaign.json"))
@@ -284,6 +670,40 @@ func _load_classic_campaign_tile_resources(campaign_root: String) -> bool:
 		var tileset_name := str(name_value)
 		var logical_root := "Tilesets/%s" % tileset_name
 		if not _load_tile_resource_from_paths(
+			tileset_name,
+			store.resolve("%s/%s.json" % [logical_root, tileset_name]),
+			store.resolve("%s/%s.png" % [logical_root, tileset_name]),
+			store.resolve("%s/tile_templates.json" % logical_root)
+		):
+			return false
+	return true
+
+
+func _load_classic_campaign_tile_resources_async(
+	campaign_root: String
+) -> bool:
+	var manifest_value: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(campaign_root.path_join("campaign.json"))
+	)
+	if not (manifest_value is Dictionary):
+		push_error("Classic campaign manifest is invalid while loading tiles")
+		return false
+	var store = ClassicSharedAssetStoreScript.new()
+	if not store.load_for_campaign(campaign_root, manifest_value):
+		push_error(store.last_error)
+		return false
+	var names: Dictionary = {}
+	var local_tilesets := campaign_root.path_join("Tilesets")
+	for local_name: String in Utils.FileHandler.list_dirs_in_directory(local_tilesets):
+		names[local_name] = true
+	for shared_name: String in store.shared_tileset_names():
+		names[shared_name] = true
+	var sorted_names: Array = names.keys()
+	sorted_names.sort()
+	for name_value: Variant in sorted_names:
+		var tileset_name := str(name_value)
+		var logical_root := "Tilesets/%s" % tileset_name
+		if not await _load_tile_resource_from_paths_async(
 			tileset_name,
 			store.resolve("%s/%s.json" % [logical_root, tileset_name]),
 			store.resolve("%s/%s.png" % [logical_root, tileset_name]),
@@ -365,6 +785,77 @@ func _load_tile_resource_from_paths(
 		n_tile_dict["id"] = id
 		n_tile_dict["expansion"] = expansion
 		n_tileset.append(n_tile_dict)
+	tiles_book["%s.json" % ts_name] = n_tileset
+	return true
+
+
+func _load_tile_resource_from_paths_async(
+	ts_name: String,
+	definition_path: String,
+	texture_atlas_path: String,
+	templates_path: String
+) -> bool:
+	print("resource load tiles : ", ts_name)
+	for required_path: String in [
+		definition_path,
+		texture_atlas_path,
+		templates_path,
+	]:
+		if not FileAccess.file_exists(required_path):
+			push_error("Tileset '%s' is missing %s" % [ts_name, required_path])
+			return false
+	var n_ts_json_data: Dictionary = (
+		Utils.FileHandler.read_json_dictionary_from_txt(
+			Utils.FileHandler.read_txt_from_file(definition_path)
+		)
+	)
+	var templates_dict: Dictionary = (
+		Utils.FileHandler.read_json_dictionary_from_txt(
+			Utils.FileHandler.read_txt_from_file(templates_path)
+		)
+	)
+	if n_ts_json_data.is_empty() or templates_dict.is_empty():
+		push_error("Tileset '%s' has invalid JSON metadata" % ts_name)
+		return false
+	var texture_atlas := await _load_image_async(texture_atlas_path)
+	if texture_atlas == null:
+		push_error("Tileset '%s' atlas could not be decoded" % ts_name)
+		return false
+	var atlas_width := int(n_ts_json_data["columns"])
+	var tileset_name := str(n_ts_json_data["name"])
+	var json_tiles_array: Array = n_ts_json_data["tiles"]
+	var n_tileset: Array = []
+	var budget_start := Time.get_ticks_usec()
+	for id: int in range(int(n_ts_json_data["tilecount"])):
+		var t_dict: Dictionary = json_tiles_array[id]
+		var x_pos := id % atlas_width
+		var y_pos := floori(float(id) / float(atlas_width))
+		var rect := Rect2i(
+			x_pos * Utils.GRID_SIZE,
+			y_pos * Utils.GRID_SIZE,
+			Utils.GRID_SIZE,
+			Utils.GRID_SIZE
+		)
+		var image := texture_atlas.get_region(rect)
+		var texture := ImageTexture.create_from_image(image)
+		images_book[tileset_name + str(id)] = {"img": image, "tex": texture}
+		var n_tile_dict := {"texture": texture}
+		var tile_name := str(t_dict["properties"][0]["value"])
+		var tile_template_name := str(t_dict["properties"][1]["value"])
+		var expansion: Array = []
+		if t_dict["properties"].size() > 2:
+			expansion = t_dict["properties"][2]["value"]
+		var template_dict: Dictionary = templates_dict[tile_template_name]
+		for property: Variant in template_dict:
+			n_tile_dict[property] = template_dict[property]
+		n_tile_dict["name"] = tile_name
+		n_tile_dict["tileset_name"] = ts_name
+		n_tile_dict["id"] = id
+		n_tile_dict["expansion"] = expansion
+		n_tileset.append(n_tile_dict)
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
 	tiles_book["%s.json" % ts_name] = n_tileset
 	return true
 
@@ -480,6 +971,152 @@ func load_item_resources(
 	return true
 
 
+func load_item_resources_async(
+	path: String,
+	campaign_id := "",
+	preserve_existing_campaign_definitions := false,
+) -> bool:
+	print("Resources.load_item_resources(", path, ")")
+	var load_from_pack := path.contains("shared_assets")
+	if not path.begins_with("res://") and load_from_pack:
+		path = "res://" + path
+	var image_book_path := path + "img_pack.json"
+	var item_book_path := path + "stuff_book.json"
+	var worker_thread := Thread.new()
+	var worker_error := worker_thread.start(
+		_prepare_item_books_worker.bind(
+			image_book_path,
+			item_book_path,
+		),
+		Thread.PRIORITY_LOW,
+	)
+	if worker_error != OK:
+		push_error("Item book worker could not start: %s" % error_string(worker_error))
+		return false
+	while worker_thread.is_alive():
+		await get_tree().process_frame
+	var worker_value: Variant = worker_thread.wait_to_finish()
+	if not (worker_value is Dictionary) or not bool(worker_value.get("ok", false)):
+		push_error(
+			str(
+				worker_value.get("error", "Item books could not be prepared")
+				if worker_value is Dictionary
+				else "Item books could not be prepared"
+			)
+		)
+		return false
+	var image_pack: Dictionary = worker_value["images"]
+	var item_book: Dictionary = worker_value["items"]
+	if load_from_pack:
+		item_book = ClassicItemIdsScript.new().enrich_item_book(item_book)
+	item_book = ClassicItemBehaviorsScript.enrich_item_book(item_book)
+	if not _validate_item_image_book(image_pack, image_book_path):
+		return false
+	var source_scope := "shared" if load_from_pack else "campaign"
+	if source_scope == "campaign" and campaign_id.strip_edges().is_empty():
+		campaign_id = _item_campaign_id(path)
+	if source_scope == "campaign" and preserve_existing_campaign_definitions:
+		item_book = _without_existing_campaign_item_definitions(
+			item_book,
+			campaign_id,
+		)
+	var available_image_keys := {}
+	for loaded_image_key: Variant in images_book:
+		available_image_keys[loaded_image_key] = true
+	for local_image_key: Variant in image_pack:
+		available_image_keys[local_image_key] = true
+	if not await item_catalog.load_book_async(
+		item_book,
+		source_scope,
+		campaign_id,
+		item_book_path,
+		available_image_keys,
+		LOAD_FRAME_BUDGET_USEC,
+	):
+		_report_item_catalog_errors()
+		return false
+
+	var texture_atlas_path := path + "textureAtlas.png"
+	var texture_atlas := await _load_image_async(texture_atlas_path)
+	if texture_atlas == null:
+		push_error("%s: could not load item texture atlas" % texture_atlas_path)
+		return false
+	if texture_atlas == null or texture_atlas.is_empty():
+		push_error("%s: item texture atlas is empty" % texture_atlas_path)
+		return false
+
+	var staged_images := {}
+	var budget_start := Time.get_ticks_usec()
+	for image_key: String in image_pack:
+		var rect := Rect2(
+			int(image_pack[image_key]["0_ref_x"]) * 34 + 1,
+			int(image_pack[image_key]["0_ref_y"]) * 34 + 1,
+			32,
+			32,
+		)
+		var image := texture_atlas.get_region(rect)
+		staged_images[image_key] = {
+			"img": image,
+			"tex": ImageTexture.create_from_image(image),
+		}
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+	images_book.merge(staged_images, true)
+
+	var staged_item_book := {}
+	for item_key: String in item_book:
+		var new_item: Dictionary = generate_item_from_json_dict(item_book[item_key])
+		new_item["KEY"] = item_key
+		staged_item_book[item_key] = new_item
+		var definition_id := item_catalog.resolve_catalog_key(
+			source_scope,
+			campaign_id,
+			item_key,
+		)
+		if (
+			definition_id.is_empty()
+			or not item_catalog.bind_legacy_template(definition_id, new_item)
+		):
+			_report_item_catalog_errors()
+			return false
+		var definition := item_catalog.get_definition(definition_id)
+		if definition != null and not _register_item_custom_spell(definition):
+			return false
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+	items_book.merge(staged_item_book, true)
+	return true
+
+
+static func _prepare_item_books_worker(
+	image_book_path: String,
+	item_book_path: String,
+) -> Dictionary:
+	var image_value: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(image_book_path)
+	)
+	if not (image_value is Dictionary):
+		return {
+			"ok": false,
+			"error": "%s: root value must be a JSON object" % image_book_path,
+		}
+	var item_value: Variant = JSON.parse_string(
+		FileAccess.get_file_as_string(item_book_path)
+	)
+	if not (item_value is Dictionary):
+		return {
+			"ok": false,
+			"error": "%s: root value must be a JSON object" % item_book_path,
+		}
+	return {
+		"ok": true,
+		"images": image_value,
+		"items": item_value,
+	}
+
+
 func _shared_item_book_with_classic_ids(item_book: Dictionary) -> Dictionary:
 	return ClassicItemIdsScript.new().enrich_item_book(item_book)
 
@@ -537,6 +1174,12 @@ func ensure_shared_item_catalog_loaded() -> bool:
 	if item_catalog.get_definition("shared:Dagger") != null:
 		return true
 	return load_item_resources("res://shared_assets/items/")
+
+
+func ensure_shared_item_catalog_loaded_async() -> bool:
+	if item_catalog.get_definition("shared:Dagger") != null:
+		return true
+	return await load_item_resources_async("res://shared_assets/items/")
 
 
 func get_item_definition(instance: ItemInstance) -> ItemDefinition:
@@ -1199,6 +1842,117 @@ func load_bestiary_resources( path : String ) -> void:
 		#printerr("Resources load _bestiary l285 : n_crea_stuff_book['Vodalian'] :\n", n_crea_stuff_book["Vodalian"])
 		#pass
 
+
+func load_bestiary_resources_async(path: String) -> void:
+	var creature_script: GDScript = preload("res://Creature/Creature.gd")
+	var creature_template = creature_script.new()
+	var image_pack: Dictionary = (
+		Utils.FileHandler.read_json_dictionary_from_txt(
+			Utils.FileHandler.read_txt_from_file(path + "img_pack.json")
+		)
+	)
+	var texture_atlas_path := path + "textureAtlas.png"
+	var texture_atlas := await _load_image_async(texture_atlas_path)
+	if texture_atlas == null:
+		push_error("%s: could not load bestiary texture atlas" % texture_atlas_path)
+		return
+	var budget_start := Time.get_ticks_usec()
+	for image_key: Variant in image_pack:
+		var size := Vector2.ZERO
+		match str(image_pack[image_key]["size"]):
+			"32x32":
+				size = Vector2(32, 32)
+			"32x64":
+				size = Vector2(32, 64)
+			"64x32":
+				size = Vector2(64, 32)
+			"64x64":
+				size = Vector2(64, 64)
+		var rect := Rect2(
+			32 * int(image_pack[image_key]["0_ref_x"]),
+			32 * int(image_pack[image_key]["0_ref_y"]),
+			size.x,
+			size.y,
+		)
+		var image := texture_atlas.get_region(rect)
+		images_book[image_key] = {
+			"img": image,
+			"tex": ImageTexture.create_from_image(image),
+		}
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+	var creature_book: Dictionary = (
+		Utils.FileHandler.read_json_dictionary_from_txt(
+			Utils.FileHandler.read_txt_from_file(path + "stuff_book.json")
+		)
+	)
+	for creature_name: Variant in creature_book:
+		var source: Dictionary = creature_book[creature_name]
+		var new_creature_data: Dictionary = {
+			"stats": creature_template.stats.duplicate(),
+			"tools": {},
+		}
+		var stat_modifiers: Dictionary = source["stats"]
+		if stat_modifiers.has("traits"):
+			source["traits"] = stat_modifiers["traits"]
+			stat_modifiers.erase("traits")
+		for stat_name: Variant in stat_modifiers:
+			new_creature_data["stats"][stat_name] = stat_modifiers[stat_name]
+		if source.has("traits"):
+			new_creature_data["traits"] = source["traits"]
+		new_creature_data["data"] = source["data"]
+		new_creature_data["data"]["image"] = images_book[
+			new_creature_data["data"]["image"]
+		]["tex"]
+		if source.has("classicMonsterId"):
+			new_creature_data["classicMonsterId"] = int(source["classicMonsterId"])
+		if source.has("classicMonsterIds") and source["classicMonsterIds"] is Array:
+			new_creature_data["classicMonsterIds"] = (
+				source["classicMonsterIds"].duplicate()
+			)
+		for classic_field: String in [
+			"classicMonsterNameId",
+			"classicDeathMacro",
+			"classicTurnUndeadEligible",
+			"classicHitDice",
+			"classicMagicResistance",
+			"classicRegenerationPerRound",
+			"classicSpellScreenLevel",
+			"classicCanSummon",
+			"classicRunPercent",
+			"classicSurrenderPercent",
+			"classicWeaponItemId",
+			"classicMissileItemName",
+			"classicMissileItemSlot",
+			"classicRequiredWeaponKind",
+			"classicRequiredWeaponItemId",
+			"classicRequiredWeaponName",
+			"classicRequiredMagicPlus",
+		]:
+			if source.has(classic_field):
+				new_creature_data[classic_field] = source[classic_field]
+		for classic_field: String in [
+			"classicSpellSaves",
+			"classicSpellImmunities",
+		]:
+			if source.has(classic_field):
+				new_creature_data[classic_field] = source[classic_field].duplicate()
+		for classic_field: String in ["classicRecord", "classicMaterialization"]:
+			if source.has(classic_field):
+				new_creature_data[classic_field] = source[classic_field].duplicate(true)
+		new_creature_data["tools"] = source["tools"]
+		new_creature_data["ai"] = source["ai"]
+		new_creature_data["scripts"] = (
+			source["scripts"]
+			if source.has("scripts")
+			else {"default": "test_crea_script.gd"}
+		)
+		crea_book[creature_name] = new_creature_data
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+
 func generate_item_from_json_dict(json_dict : Dictionary) -> Dictionary :
 	# sets  item's sound image etc from its dict data
 	# need to load sounds first !
@@ -1432,42 +2186,113 @@ func generate_item_from_json_dict(json_dict : Dictionary) -> Dictionary :
 
 func load_sound_ressources( path : String ) -> void :
 	print("Resources.gd load_sound_ressources "+path)
-	var filenames : Array = Utils.FileHandler.list_files_in_directory(path)
-	var soundnames : Array = []
-	for s in filenames :
-		if s.ends_with(".ogg") or s.ends_with(".wav") or s.ends_with(".mp3") or s.ends_with(".import"):
-			soundnames.append(s)
-	print ("sounds in folder : ",soundnames)
-	for s in soundnames :
-		#print("sound path : ", path+s)
-		var loadedsound : AudioStream
-		# DOESNT WORK IN  OUTSIDE FOLDERS !
-		if path == "res://shared_assets/sounds/" :  #easy to load from inside res:// !
-			#print(path+s)
-			loadedsound = load(path+s.replace(".import",""))
-		else :
-			var snd_file : FileAccess = FileAccess.open(path+s, FileAccess.ModeFlags.READ)
-#			ogg_file.open(path+s, File.READ)
-			var bytes = snd_file.get_buffer(snd_file.get_length())
-			if s.ends_with("ogg") :
-				loadedsound = AudioStreamOggVorbis.new()
-				print("Resources OGG outside sharedassets is glitchy, "+s+" not loaded")
-			elif s.ends_with("mp3") :
-				loadedsound = AudioStreamMP3.new()
-				loadedsound.data = bytes
-			elif s.ends_with("wav") :
-#				if assert(stream.format == AudioStreamSample.FORMAT_8_BITS) :
-				print("Resources WAV outside sharedassets is glitchy, "+s+" not loaded")
-#				bytes = convert_wav_pcm8(bytes)
-#				loadedsound = AudioStreamWAV.new()
-#				loadedsound.data = bytes
-			elif s.ends_with("ogg") :
-				print("RESOURCE L577 : FIX OGG LOADER WORKS ???")
-				loadedsound = AudioStreamOggVorbis.load_from_file(path+s)
+	for sound_name: String in _sound_source_names(path):
+		_load_sound_resource(path, sound_name)
 
-			snd_file.close()
 
-		sounds_book[s.replace(".import","")] = loadedsound
+func load_sound_resources_async(path: String) -> void:
+	print("Resources.gd load_sound_ressources ", path)
+	var budget_start := Time.get_ticks_usec()
+	for sound_name: String in _sound_source_names(path):
+		var stream := await _load_audio_stream_async(path + sound_name)
+		if stream != null:
+			sounds_book[sound_name] = stream
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+
+
+func _sound_source_names(path: String) -> Array[String]:
+	var sound_names: Array[String] = []
+	for filename_value: Variant in Utils.FileHandler.list_files_in_directory(path):
+		var filename := str(filename_value)
+		var lower_name := filename.to_lower()
+		if (
+			lower_name.ends_with(".ogg")
+			or lower_name.ends_with(".wav")
+			or lower_name.ends_with(".mp3")
+		):
+			sound_names.append(filename)
+	sound_names.sort()
+	return sound_names
+
+
+func _load_sound_resource(path: String, sound_name: String) -> void:
+	var loaded_sound: AudioStream
+	if path == "res://shared_assets/sounds/":
+		loaded_sound = load(path + sound_name)
+	else:
+		var sound_file := FileAccess.open(
+			path + sound_name,
+			FileAccess.ModeFlags.READ,
+		)
+		if sound_file == null:
+			return
+		var bytes := sound_file.get_buffer(sound_file.get_length())
+		sound_file.close()
+		var lower_name := sound_name.to_lower()
+		if lower_name.ends_with(".ogg"):
+			loaded_sound = AudioStreamOggVorbis.load_from_buffer(bytes)
+		elif lower_name.ends_with(".mp3"):
+			var mp3_stream := AudioStreamMP3.new()
+			mp3_stream.data = bytes
+			loaded_sound = mp3_stream
+		elif lower_name.ends_with(".wav"):
+			loaded_sound = AudioStreamWAV.load_from_buffer(bytes)
+	if loaded_sound != null:
+		sounds_book[sound_name] = loaded_sound
+
+
+func _load_imported_image_async(path: String) -> Image:
+	var request_error := ResourceLoader.load_threaded_request(path, "Image")
+	if request_error != OK:
+		return load(path) as Image
+	while true:
+		var status := ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_LOADED:
+			return ResourceLoader.load_threaded_get(path) as Image
+		if status == ResourceLoader.THREAD_LOAD_FAILED:
+			return null
+		await get_tree().process_frame
+	return null
+
+
+func _load_image_async(path: String) -> Image:
+	if path.begins_with("res://"):
+		return await _load_imported_image_async(path)
+	var worker_thread := Thread.new()
+	var worker_error := worker_thread.start(
+		_read_file_bytes_worker.bind(path),
+		Thread.PRIORITY_LOW,
+	)
+	if worker_error != OK:
+		return null
+	while worker_thread.is_alive():
+		await get_tree().process_frame
+	var bytes: PackedByteArray = worker_thread.wait_to_finish()
+	if bytes.is_empty():
+		return null
+	var image := Image.new()
+	var lower_path := path.to_lower()
+	var decode_error := ERR_FILE_UNRECOGNIZED
+	if lower_path.ends_with(".png"):
+		decode_error = image.load_png_from_buffer(bytes)
+	elif lower_path.ends_with(".jpg") or lower_path.ends_with(".jpeg"):
+		decode_error = image.load_jpg_from_buffer(bytes)
+	elif lower_path.ends_with(".webp"):
+		decode_error = image.load_webp_from_buffer(bytes)
+	if decode_error != OK:
+		return null
+	return image
+
+
+static func _read_file_bytes_worker(path: String) -> PackedByteArray:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return PackedByteArray()
+	var bytes := file.get_buffer(file.get_length())
+	file.close()
+	return bytes
 
 
 
@@ -1519,6 +2344,76 @@ func load_music_resources(path : String) :
 #	pass
 #	print("MSUIC LOADED")
 #	print(musics_book)
+
+
+func load_music_resources_async(path: String) -> void:
+	print("Resources.gd load_music_resources ", path)
+	var budget_start := Time.get_ticks_usec()
+	for subfolder_value: Variant in Utils.FileHandler.list_dirs_in_directory(path):
+		var subfolder := str(subfolder_value)
+		if not musics_types_book.has(subfolder):
+			musics_types_book[subfolder] = {}
+		var subfolder_path := path.path_join(subfolder)
+		for filename_value: Variant in (
+			Utils.FileHandler.list_files_in_directory(subfolder_path)
+		):
+			var filename := str(filename_value)
+			var lower_name := filename.to_lower()
+			var music: Dictionary = {"path": subfolder_path.path_join(filename)}
+			if lower_name.ends_with(".ogg") or lower_name.ends_with(".mp3"):
+				var stream := await _load_audio_stream_async(music["path"])
+				if stream == null:
+					continue
+				music["type"] = "ogg" if lower_name.ends_with(".ogg") else "mp3"
+				music["sound"] = stream
+			elif _is_tracker_format(filename):
+				music["type"] = "mod"
+			else:
+				continue
+			musics_types_book[subfolder][filename] = music
+			musics_book[filename] = music
+			if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+				await get_tree().process_frame
+				budget_start = Time.get_ticks_usec()
+
+
+func _load_audio_stream_async(path: String) -> AudioStream:
+	var resource_path := ProjectSettings.localize_path(path)
+	if resource_path.begins_with("res://") and ResourceLoader.exists(resource_path):
+		var request_error := ResourceLoader.load_threaded_request(
+			resource_path,
+			"AudioStream",
+		)
+		if request_error == OK:
+			while true:
+				var status := ResourceLoader.load_threaded_get_status(resource_path)
+				if status == ResourceLoader.THREAD_LOAD_LOADED:
+					return ResourceLoader.load_threaded_get(resource_path) as AudioStream
+				if status == ResourceLoader.THREAD_LOAD_FAILED:
+					break
+				await get_tree().process_frame
+	var worker_thread := Thread.new()
+	var worker_error := worker_thread.start(
+		_read_file_bytes_worker.bind(path),
+		Thread.PRIORITY_LOW,
+	)
+	if worker_error != OK:
+		return null
+	while worker_thread.is_alive():
+		await get_tree().process_frame
+	var bytes: PackedByteArray = worker_thread.wait_to_finish()
+	if bytes.is_empty():
+		return null
+	var lower_path := path.to_lower()
+	if lower_path.ends_with(".ogg"):
+		return AudioStreamOggVorbis.load_from_buffer(bytes)
+	if lower_path.ends_with(".mp3"):
+		var stream := AudioStreamMP3.new()
+		stream.data = bytes
+		return stream
+	if lower_path.ends_with(".wav"):
+		return AudioStreamWAV.load_from_buffer(bytes)
+	return null
 
 func _is_tracker_format(filename: String) -> bool:
 	# Check if the file extension matches any OpenMPT supported tracker format
@@ -1587,9 +2482,38 @@ func load_spell_resources(path : String) :
 			"name": instance.name,
 			"source": instance.generate_json_string(),
 			"script": instance,
+			"scriptResource": script,
 		}
 		var resource_key := _store_spell_resource(spell_entry)
 		print("  loaded spell class ", filename, " as '", resource_key, "'")
+
+
+func load_spell_resources_async(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	if path == SHARED_SPELL_PATH:
+		await ensure_shared_spell_cache_loaded_async()
+		return
+	var budget_start := Time.get_ticks_usec()
+	for filename_value: Variant in Utils.FileHandler.list_files_in_directory(path):
+		var filename := str(filename_value)
+		if not filename.ends_with(".gd"):
+			continue
+		var script := load(path + filename) as GDScript
+		if script == null or not script.can_instantiate():
+			continue
+		var instance: Variant = script.new()
+		if not (instance is Spell) or instance.name == "":
+			continue
+		_store_spell_resource({
+			"name": instance.name,
+			"source": instance.generate_json_string(),
+			"script": instance,
+			"scriptResource": script,
+		})
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
 
 
 func _load_shared_spell_resources() -> void:
@@ -1630,11 +2554,39 @@ func _cache_shared_spell_script(spell_path: String, script: GDScript) -> void:
 		"name": instance.name,
 		"source": instance.generate_json_string(),
 		"script": instance,
+		"scriptResource": script,
 	}
 	_store_spell_resource_in_book(
 		spell_entry,
 		_shared_spell_cache
 	)
+
+
+func materialize_saved_spell(spell_data: Dictionary) -> Spell:
+	var source := str(spell_data.get("source", ""))
+	var spell_name := str(spell_data.get("name", ""))
+	for book: Dictionary in [_shared_spell_cache, spells_book]:
+		var entry_value: Variant = book.get(spell_name)
+		if not (entry_value is Dictionary):
+			continue
+		var entry: Dictionary = entry_value
+		if str(entry.get("source", "")) != source:
+			continue
+		var script_value: Variant = entry.get("scriptResource")
+		if script_value is GDScript and script_value.can_instantiate():
+			return script_value.new() as Spell
+	if source.is_empty():
+		return null
+	var source_digest := source.sha256_text()
+	var cached_script: Variant = _saved_spell_script_cache.get(source_digest)
+	if not (cached_script is GDScript):
+		var script := GDScript.new()
+		script.set_source_code(source)
+		if script.reload() != OK or not script.can_instantiate():
+			return null
+		_saved_spell_script_cache[source_digest] = script
+		cached_script = script
+	return cached_script.new() as Spell
 
 
 func _store_spell_resource(spell_entry: Dictionary) -> String:
@@ -1784,6 +2736,121 @@ func load_map_ressources( path : String , _name : String) -> void :
 	map_info_book[mapname] = newmapinfo
 	print("Resources done load map resources : ", _name)
 	return
+
+
+func load_map_resources_async(path: String, map_resource_name: String) -> bool:
+	print("Resources load_map_ressources ", path, map_resource_name)
+	var worker_thread := Thread.new()
+	var worker_error := worker_thread.start(
+		_read_map_documents_worker.bind(path),
+		Thread.PRIORITY_LOW,
+	)
+	if worker_error != OK:
+		push_error("Map worker could not start: %s" % error_string(worker_error))
+		return false
+	while worker_thread.is_alive():
+		await get_tree().process_frame
+	var documents_value: Variant = worker_thread.wait_to_finish()
+	if not (documents_value is Dictionary):
+		push_error("Map '%s' worker returned invalid data" % map_resource_name)
+		return false
+	var documents: Dictionary = documents_value
+	if not bool(documents.get("ok", false)):
+		push_error(str(documents.get("error", "Map documents could not be read")))
+		return false
+	var map_data_document: Dictionary = documents["things"]
+	var map_info: Dictionary = documents["info"]
+	var map_script_areas: Dictionary = documents["scriptAreas"]
+	var size_y := int(map_data_document["height"])
+	var size_x := int(map_data_document["width"])
+	var map_name := str(map_info["name"])
+	var map_type := str(map_info["map_type"])
+	var map_music_type := str(map_info["music_type"])
+	var outdoor_riding := bool(map_info["outdoor_riding"])
+	var darkness_level := int(map_info["darkness_level"])
+	var display_explored_only := bool(map_info["display_explored_only"])
+	var used_tilesets: Array = map_data_document["tilesets"]
+	var first_ids: Dictionary = {}
+	for used_tileset: Variant in used_tilesets:
+		first_ids[used_tileset["source"]] = used_tileset["firstgid"]
+
+	var budget_start := Time.get_ticks_usec()
+	var native_map_data: Array = []
+	for x_index: int in range(size_x):
+		var column: Array = []
+		for _y_index: int in range(size_y):
+			column.append([])
+		native_map_data.append(column)
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+	var explored_tiles: Array = []
+	for _y_index: int in range(size_y):
+		var row: Array = []
+		for _x_index: int in range(size_x):
+			row.append(0)
+		explored_tiles.append(row)
+		if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+			await get_tree().process_frame
+			budget_start = Time.get_ticks_usec()
+
+	for layer_value: Variant in map_data_document["layers"]:
+		var layer: Dictionary = layer_value
+		var tile_number := 0
+		for tile_value: Variant in layer["chunks"][0]["data"]:
+			var tile_global_id := int(tile_value)
+			if tile_global_id != 0:
+				var used_tileset_name := str(used_tilesets[0]["source"])
+				for used_tileset: Variant in used_tilesets:
+					if int(used_tileset["firstgid"]) > tile_global_id:
+						break
+					used_tileset_name = str(used_tileset["source"])
+				var tile_id := (
+					tile_global_id - int(first_ids[used_tileset_name])
+				)
+				var y := floori(float(tile_number) / float(size_x))
+				var x := tile_number % size_x
+				native_map_data[x][y].append(
+					tiles_book[used_tileset_name][tile_id]
+				)
+			tile_number += 1
+			if Time.get_ticks_usec() - budget_start >= LOAD_FRAME_BUDGET_USEC:
+				await get_tree().process_frame
+				budget_start = Time.get_ticks_usec()
+	maps_book[map_name] = [
+		native_map_data,
+		map_script_areas,
+		null,
+		map_type,
+		map_music_type,
+		outdoor_riding,
+		darkness_level,
+		display_explored_only,
+		explored_tiles,
+	]
+	map_info_book[map_name] = map_info
+	print("Resources done load map resources : ", map_resource_name)
+	return true
+
+
+static func _read_map_documents_worker(path: String) -> Dictionary:
+	var result := {"ok": true}
+	for entry: Dictionary in [
+		{"key": "things", "file": "map_things.json"},
+		{"key": "info", "file": "map_info.json"},
+		{"key": "scriptAreas", "file": "map_scriptareas.json"},
+	]:
+		var file_path := path + str(entry["file"])
+		var value: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(file_path)
+		)
+		if not (value is Dictionary):
+			return {
+				"ok": false,
+				"error": "%s does not contain a JSON object" % file_path,
+			}
+		result[str(entry["key"])] = value
+	return result
 
 
 func load_special_encounter_resources(campaign : String) :

@@ -106,6 +106,15 @@ func _load_installed_item_definitions() -> Dictionary:
 	var campaign_id := str(install.bundle.manifest.get("id", "")).strip_edges()
 	if campaign_id.is_empty():
 		return _error("Classic campaign manifest has no item catalog identity")
+	if resources.has_method("is_campaign_package_active") and bool(
+		resources.call(
+			"is_campaign_package_active",
+			str(install.campaign_name),
+			str(install.bundle.package_hash()),
+			campaign_id,
+		)
+	):
+		return {"status": "ok", "cacheStatus": "memory"}
 	if not resources.load_item_resources(item_directory, campaign_id, true):
 		return _error("Classic campaign item definitions could not be loaded")
 	return {"status": "ok"}

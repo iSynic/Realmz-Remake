@@ -335,7 +335,7 @@ func _shops_data_for_save() -> Dictionary:
 
 
 func on_load_button_pressed() :
-	load_game(selected_scenario_name, selected_save_name)
+	await load_game(selected_scenario_name, selected_save_name)
 
 func disable_create_new_save(dis : bool) :
 	create_save_button.visible = not dis
@@ -344,7 +344,12 @@ func disable_create_new_save(dis : bool) :
 
 
 func load_game(campaignname : String, savename : String) :
-	var prevCampaign : String = GameGlobal.currentcampaign+''
+	UI.begin_loading("Loading %s" % campaignname)
+	LoadPerformanceTrace.begin_named(&"campaign_launch.first_playable_frame", {
+		"campaign": campaignname,
+		"continuation": true,
+	})
+	await get_tree().process_frame
 	# GameGlobal.init_globals_before_game_start....
 	var save_path : String = Paths.profilesfolderpath + GameGlobal.currentprofile + "/Saves/"+ campaignname + "/"+ savename
 	print("load_game save_path : ", save_path)
@@ -360,6 +365,12 @@ func load_game(campaignname : String, savename : String) :
 		)
 		preview_panel.notesTextEdit.text = validation_message
 		push_error(validation_message)
+		UI.end_loading()
+		LoadPerformanceTrace.end_named(
+			&"campaign_launch.first_playable_frame",
+			false,
+			{"campaign": campaignname, "error": validation_message}
+		)
 		return
 	# Do not change the active profile until the Classic save and install agree.
 	GameGlobal.allow_next_battle_loot = true
@@ -406,9 +417,17 @@ func load_game(campaignname : String, savename : String) :
 	GameGlobal.init_globals_before_game_start(globals_dict)
 	# PlayerCharacter restores exact campaign item IDs during initialization.
 	# Load that catalog before deserializing the saved party.
-	print("campaignname currentcampaign : ", campaignname, '!=',prevCampaign+"? ",campaignname != prevCampaign )
-	if campaignname != prevCampaign :
-		NodeAccess.__Resources().load_campaign_ressources(campaignname)
+	var resources = NodeAccess.__Resources()
+	if not await resources.activate_campaign_resources_async(campaignname):
+		var resource_error := "Campaign resources could not be loaded."
+		preview_panel.notesTextEdit.text = resource_error
+		UI.end_loading()
+		LoadPerformanceTrace.end_named(
+			&"campaign_launch.first_playable_frame",
+			false,
+			{"campaign": campaignname, "error": "campaign_resources_failed"}
+		)
+		return
 	# load the player characters
 	var pcs_names_array : Array = data_dict["pc_order"]
 	GameGlobal.player_characters.clear()
@@ -422,7 +441,6 @@ func load_game(campaignname : String, savename : String) :
 	#StateMachine.transition_to("Exploration/ExWalking", {"load_campaign_msg" : {"initialize_campaign" : false}} )
 	#map exploration, done after loading resources
 	var exploration_data : Dictionary = Utils.FileHandler.read_json_dic_from_file(save_path+"/map_exploration.json")
-	var resources = NodeAccess.__Resources()
 	var maps_book = resources.maps_book
 	print("load_game maps_book : ", maps_book.keys())
 	for mapname in exploration_data.keys() :

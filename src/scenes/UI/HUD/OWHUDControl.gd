@@ -350,6 +350,15 @@ func _sync_action_dock_focus_with_overlays() -> void:
 	if not overlay_visible and is_instance_valid(_last_action_focus):
 		_last_action_focus.call_deferred(&"grab_focus")
 
+
+func restore_gameplay_focus() -> void:
+	_sync_action_dock_focus_with_overlays()
+	var focus_target := _last_action_focus
+	if not is_instance_valid(focus_target):
+		focus_target = campButton
+	if is_instance_valid(focus_target) and focus_target.focus_mode != FOCUS_NONE:
+		focus_target.call_deferred(&"grab_focus")
+
 func _on_blocking_overlay_visibility_changed() -> void:
 	_sync_action_dock_focus_with_overlays()
 	_sync_party_actor_selection()

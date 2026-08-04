@@ -501,6 +501,18 @@ func _test_override_precedence_and_legacy_factory() -> void:
 		25,
 		"active campaign definition carries campaign data",
 	)
+	catalog.activate_campaign("")
+	_expect_equal(
+		catalog.resolve_active_catalog_key("Override Item"),
+		shared_id,
+		"deactivating a campaign restores shared item precedence",
+	)
+	catalog.activate_campaign("scenario-override")
+	_expect_equal(
+		catalog.resolve_active_catalog_key("Override Item"),
+		campaign_id,
+		"reactivating a campaign restores only its item override",
+	)
 	_expect_equal(
 		catalog.get_definition(campaign_id).hooks().get(
 			"sources", {}

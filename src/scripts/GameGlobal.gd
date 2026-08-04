@@ -26,9 +26,6 @@ const CLASSIC_CAMPAIGN_SESSION_PATH := (
 const CLASSIC_STOCK_CHARACTER_ROSTER_PATH := (
 	"res://scripts/classic_runtime/classic_stock_character_roster.gd"
 )
-const CLASSIC_NATIVE_CONTEXT_BUILDER_PATH := (
-	"res://scripts/classic_runtime/classic_native_context_builder.gd"
-)
 const SCENARIO_GODOT_SERVICES_PATH := (
 	"res://scripts/scenario_runtime/godot/scenario_godot_services.gd"
 )
@@ -98,9 +95,6 @@ var ClassicCampaignSessionScript: GDScript:
 var ClassicStockCharacterRosterScript: GDScript:
 	get:
 		return _lazy_resource(CLASSIC_STOCK_CHARACTER_ROSTER_PATH) as GDScript
-var ClassicNativeContextBuilderScript: GDScript:
-	get:
-		return _lazy_resource(CLASSIC_NATIVE_CONTEXT_BUILDER_PATH) as GDScript
 var ScenarioGodotServicesScript: GDScript:
 	get:
 		return _lazy_resource(SCENARIO_GODOT_SERVICES_PATH) as GDScript
@@ -340,16 +334,15 @@ func set_current_profile_async(profilename: String) -> bool:
 		return false
 	# The shared catalog owns definitions used while character saves are restored.
 	var resources: CampaignResources = NodeAccess.__Resources()
-	if resources != null and not resources.ensure_shared_item_catalog_loaded():
+	if resources != null and not await (
+		resources.ensure_shared_item_catalog_loaded_async()
+	):
 		push_error("Shared item definitions could not be loaded before profile characters.")
 		profile_ready.emit(profilename, false)
 		return false
 	_ensure_stock_roster_for_profile()
 	await get_tree().process_frame
 	var loaded := await load_profile_characters_async(generation)
-	if loaded and generation == _profile_load_generation:
-		var context_builder = ClassicNativeContextBuilderScript.new()
-		await context_builder.warm_shared_cache_async(get_tree())
 	if generation == _profile_load_generation:
 		profile_ready.emit(profilename, loaded)
 	return loaded
@@ -395,7 +388,7 @@ func load_profile_characters_async(generation := -1) -> bool:
 	for character_name: Variant in names:
 		if generation >= 0 and generation != _profile_load_generation:
 			return false
-		load_character_to_profile(str(character_name))
+		load_character_to_profile_async(str(character_name))
 		if LoadPerformanceTrace.is_frame_budget_exhausted(frame_started):
 			await get_tree().process_frame
 			frame_started = Time.get_ticks_usec()
@@ -415,6 +408,28 @@ func load_character_to_profile(c : String) :
 	var newchar = Utils.FileHandler.load_character(path)
 #	print("loaded char ", newchar.name)
 	profile_characters_list.append(newchar)
+
+
+func load_character_to_profile_async(character_name: String) -> void:
+	var path := (
+		Paths.profilesfolderpath
+		+ Paths.currentProfileFolderName
+		+ "/Characters/"
+		+ character_name
+	)
+	print("GameGlobal load_character_to_profile : ", path)
+	var character: PlayerCharacter = Utils.FileHandler.load_character(path, true)
+	profile_characters_list.append(character)
+
+
+func materialize_profile_spells() -> void:
+	for character: PlayerCharacter in profile_characters_list:
+		character.materialize_saved_spells()
+
+
+func materialize_profile_spells_async() -> void:
+	for character: PlayerCharacter in profile_characters_list:
+		await character.materialize_saved_spells_async(get_tree())
 
 func set_hd_mode(new_hd_mode: bool) -> void:
 	hd_mode = new_hd_mode
@@ -2459,7 +2474,7 @@ func end_battle(
 				##GameState._state = eGameStates.unchecked
 				##GameState._combat_state = eCombatStates.unchecked
 				GameGlobal.player_characters.clear()
-				cmp_resources.clear_ressources()
+				cmp_resources.deactivate_campaign_resources()
 				UI.show_only(UI.main_menu)
 				UI.main_menu.newCampaignPanel.hide()
 				return

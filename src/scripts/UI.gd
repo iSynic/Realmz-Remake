@@ -14,6 +14,12 @@ extends Node
 const GAMEPLAY_HUD_PATH := "res://scenes/UI/HUD/OWHUDControl.tscn"
 
 @onready var main_menu : CanvasItem = $MainMenuControl
+@onready var loading_overlay: Control = $LoadingOverlay
+@onready var loading_title: Label = $LoadingOverlay/Panel/Margin/VBox/Title
+@onready var loading_stage: Label = $LoadingOverlay/Panel/Margin/VBox/Stage
+@onready var loading_progress: ProgressBar = (
+	$LoadingOverlay/Panel/Margin/VBox/Progress
+)
 var _ow_hud: Control
 var ow_hud: Control:
 	get:
@@ -82,6 +88,35 @@ func ensure_gameplay_hud() -> Control:
 		get_tree().root.size_changed.connect(resize_callable)
 	_ow_hud.call("_on_viewport_size_changed")
 	return _ow_hud
+
+
+func begin_loading(title: String) -> void:
+	loading_title.text = title
+	loading_stage.text = "Preparing the campaign…"
+	loading_progress.min_value = 0.0
+	loading_progress.max_value = 1.0
+	loading_progress.value = 0.0
+	loading_overlay.show()
+	loading_overlay.move_to_front()
+	loading_overlay.grab_focus()
+
+
+func update_loading(stage: String, completed: int, total: int) -> void:
+	if not loading_overlay.visible:
+		return
+	loading_stage.text = stage
+	loading_progress.max_value = max(total, 1)
+	loading_progress.value = clamp(completed, 0, max(total, 1))
+
+
+func end_loading() -> void:
+	loading_overlay.hide()
+	if (
+		is_instance_valid(_ow_hud)
+		and _ow_hud.visible
+		and _ow_hud.has_method("restore_gameplay_focus")
+	):
+		_ow_hud.call("restore_gameplay_focus")
 
 
 # Hide all user interface #

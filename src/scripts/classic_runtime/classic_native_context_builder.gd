@@ -44,46 +44,66 @@ func warm_shared_cache_async(
 	var normalized_shared := _normalized_directory(shared_directory)
 	if _has_shared_cache(normalized_shared):
 		return
-	_diagnostics.clear()
-	_sources.clear()
+	var worker_thread := Thread.new()
+	var worker_error := worker_thread.start(
+		_build_shared_file_context_worker.bind(normalized_shared),
+		Thread.PRIORITY_LOW,
+	)
+	if worker_error != OK:
+		return
+	while worker_thread.is_alive():
+		await tree.process_frame
+	if _has_shared_cache(normalized_shared):
+		worker_thread.wait_to_finish()
+		return
+	var worker_value: Variant = worker_thread.wait_to_finish()
+	if not (worker_value is Dictionary):
+		return
+	var worker_result: Dictionary = worker_value
+	var context: Dictionary = worker_result.get("context", _empty_context())
+	_diagnostics = worker_result.get("diagnostics", []).duplicate(true)
+	_sources = worker_result.get("sources", []).duplicate(true)
+	await _merge_spell_directory_async(
+		normalized_shared,
+		"spells",
+		"shared",
+		context["spells"],
+		tree,
+	)
+	_store_shared_cache(context, normalized_shared)
+
+
+static func _build_shared_file_context_worker(
+	normalized_shared: String
+) -> Dictionary:
+	var builder := ClassicNativeContextBuilder.new()
 	var context := _empty_context()
-	_merge_resource_book(
+	builder._merge_resource_book(
 		normalized_shared,
 		"items/stuff_book.json",
 		"shared",
 		"items",
 		context["items"],
-		true
+		true,
 	)
-	await tree.process_frame
-	if _has_shared_cache(normalized_shared):
-		return
-	_merge_resource_book(
+	builder._merge_resource_book(
 		normalized_shared,
 		"Bestiary/stuff_book.json",
 		"shared",
 		"bestiary",
-		context["bestiary"]
+		context["bestiary"],
 	)
-	await tree.process_frame
-	if _has_shared_cache(normalized_shared):
-		return
-	_merge_spell_directory(
-		normalized_shared,
-		"spells",
-		"shared",
-		context["spells"]
-	)
-	await tree.process_frame
-	if _has_shared_cache(normalized_shared):
-		return
-	_merge_sound_directory(
+	builder._merge_sound_directory(
 		normalized_shared,
 		"sounds",
 		"shared",
-		context["sounds"]
+		context["sounds"],
 	)
-	_store_shared_cache(context, normalized_shared)
+	return {
+		"context": context,
+		"diagnostics": builder._diagnostics.duplicate(true),
+		"sources": builder._sources.duplicate(true),
+	}
 
 
 func build_campaign_file_context_worker(campaign_directory: String) -> Dictionary:
@@ -368,6 +388,32 @@ func _merge_spell_directory(
 		_display_path(scope, relative_path),
 		exists,
 		source_entries.size()
+	))
+
+
+func _merge_spell_directory_async(
+	base_directory: String,
+	relative_path: String,
+	scope: String,
+	destination: Dictionary,
+	tree: SceneTree,
+) -> void:
+	var path := base_directory.path_join(relative_path)
+	var exists := _directory_exists(path)
+	var source_entries: Dictionary = {}
+	if exists:
+		await SpellResourceCatalogScript.merge_directory_async(
+			path,
+			source_entries,
+			tree,
+		)
+		destination.merge(source_entries, true)
+	_sources.append(_source_row(
+		scope,
+		"spells",
+		_display_path(scope, relative_path),
+		exists,
+		source_entries.size(),
 	))
 
 

@@ -147,6 +147,15 @@ func _load_initial_profile_after_first_frame(
 		"profile": profile_from_config,
 		"character_count": GameGlobal.profile_characters_list.size(),
 	})
+	if loaded:
+		call_deferred("_warm_shared_resources_after_profile")
+
+
+func _warm_shared_resources_after_profile() -> void:
+	await get_tree().process_frame
+	var resources: CampaignResources = NodeAccess.__Resources()
+	if resources != null:
+		await resources.ensure_shared_resources_loaded_async()
 
 
 func _set_profile_busy(busy: bool) -> void:

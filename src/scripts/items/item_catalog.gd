@@ -111,6 +111,21 @@ func active_campaign_id() -> String:
 	return _active_campaign_id
 
 
+func activate_campaign(campaign_id: String) -> void:
+	_active_campaign_id = campaign_id.strip_edges()
+	_active_by_key = _shared_by_key.duplicate()
+	if _active_campaign_id.is_empty():
+		return
+	var prefix := "%s\n" % _active_campaign_id
+	for campaign_key_value: Variant in _campaign_by_key:
+		var campaign_key := str(campaign_key_value)
+		if not campaign_key.begins_with(prefix):
+			continue
+		_active_by_key[campaign_key.trim_prefix(prefix)] = (
+			_campaign_by_key[campaign_key_value]
+		)
+
+
 func has_issued_instance_id(instance_id: String) -> bool:
 	return _issued_instance_ids.has(instance_id)
 
@@ -357,6 +372,182 @@ func load_book(
 					)
 				else:
 					campaign_index[item_id] = definition.definition_id
+	if not last_errors.is_empty():
+		return false
+
+	_definitions = staged_definitions
+	_shared_by_key = staged_shared_by_key
+	_campaign_by_key = staged_campaign_by_key
+	_active_by_key = staged_active_by_key
+	_classic_shared = staged_classic_shared
+	_classic_by_campaign = staged_classic_by_campaign
+	_active_campaign_id = staged_active_campaign_id
+	return true
+
+
+func load_book_async(
+	book_value: Variant,
+	source_scope: String,
+	campaign_id: String,
+	source_path: String,
+	image_keys: Dictionary = {},
+	frame_budget_usec := 8000,
+) -> bool:
+	last_errors.clear()
+	if source_scope not in SOURCE_SCOPES:
+		_error(source_path, "", "source.scope", "must be shared or campaign")
+		return false
+	if source_scope == "campaign" and campaign_id.strip_edges().is_empty():
+		_error(source_path, "", "source.campaignId", "must not be empty")
+		return false
+	if not (book_value is Dictionary):
+		_error(source_path, "", "", "item book must be a JSON object")
+		return false
+	var tree := Engine.get_main_loop() as SceneTree
+	var budget_start := Time.get_ticks_usec()
+	var book: Dictionary = book_value
+	var normalized_definitions: Array[ItemDefinition] = []
+	var batch_ids := {}
+	var batch_classic_ids := {}
+	for catalog_key_value: Variant in book:
+		if not (catalog_key_value is String):
+			_error(
+				source_path,
+				str(catalog_key_value),
+				"",
+				"catalog key must be a string",
+			)
+			continue
+		var catalog_key := str(catalog_key_value)
+		var definition := _normalize_definition(
+			catalog_key,
+			book[catalog_key_value],
+			source_scope,
+			campaign_id,
+			source_path,
+			image_keys,
+		)
+		if definition != null:
+			if batch_ids.has(definition.definition_id):
+				_error(
+					source_path,
+					catalog_key,
+					"definitionId",
+					"duplicates %s in this item book" % definition.definition_id,
+				)
+			else:
+				batch_ids[definition.definition_id] = catalog_key
+				for item_id: int in definition.classic_item_ids():
+					var classic_key := "%s:%d" % [
+						campaign_id if source_scope == "campaign" else "",
+						item_id,
+					]
+					if batch_classic_ids.has(classic_key):
+						_error(
+							source_path,
+							catalog_key,
+							"classic.itemIds",
+							"Classic item ID %d also belongs to %s" % [
+								item_id,
+								batch_classic_ids[classic_key],
+							],
+						)
+					else:
+						batch_classic_ids[classic_key] = catalog_key
+				normalized_definitions.append(definition)
+		if (
+			tree != null
+			and Time.get_ticks_usec() - budget_start >= frame_budget_usec
+		):
+			await tree.process_frame
+			budget_start = Time.get_ticks_usec()
+	if not last_errors.is_empty():
+		return false
+
+	var staged_definitions := _definitions.duplicate()
+	var staged_shared_by_key := _shared_by_key.duplicate()
+	var staged_campaign_by_key := _campaign_by_key.duplicate()
+	var staged_active_by_key := _active_by_key.duplicate()
+	var staged_classic_shared := _classic_shared.duplicate()
+	var staged_classic_by_campaign := _classic_by_campaign.duplicate(true)
+	var staged_active_campaign_id := _active_campaign_id
+	if source_scope == "campaign":
+		staged_active_campaign_id = campaign_id
+
+	for definition: ItemDefinition in normalized_definitions:
+		var existing: ItemDefinition = staged_definitions.get(
+			definition.definition_id
+		)
+		if existing != null and (
+			existing.catalog_key != definition.catalog_key
+			or existing.source().get("path") != definition.source().get("path")
+		):
+			_error(
+				source_path,
+				definition.catalog_key,
+				"definitionId",
+				"%s is already owned by %s" % [
+					definition.definition_id,
+					existing.source().get("path", "another source"),
+				],
+			)
+			continue
+		staged_definitions[definition.definition_id] = definition
+		if source_scope == "shared":
+			staged_shared_by_key[definition.catalog_key] = definition.definition_id
+			var campaign_key := _campaign_key(
+				staged_active_campaign_id,
+				definition.catalog_key,
+			)
+			if (
+				staged_active_campaign_id.is_empty()
+				or not staged_campaign_by_key.has(campaign_key)
+			):
+				staged_active_by_key[definition.catalog_key] = definition.definition_id
+		else:
+			var campaign_key := _campaign_key(campaign_id, definition.catalog_key)
+			staged_campaign_by_key[campaign_key] = definition.definition_id
+			staged_active_by_key[definition.catalog_key] = definition.definition_id
+		for item_id: int in definition.classic_item_ids():
+			if source_scope == "shared":
+				var owner := str(staged_classic_shared.get(item_id, ""))
+				if not owner.is_empty() and owner != definition.definition_id:
+					_error(
+						source_path,
+						definition.catalog_key,
+						"classic.itemIds",
+						"Classic item ID %d is already owned by %s" % [
+							item_id,
+							owner,
+						],
+					)
+				else:
+					staged_classic_shared[item_id] = definition.definition_id
+			else:
+				if not staged_classic_by_campaign.has(campaign_id):
+					staged_classic_by_campaign[campaign_id] = {}
+				var campaign_index: Dictionary = (
+					staged_classic_by_campaign[campaign_id]
+				)
+				var owner := str(campaign_index.get(item_id, ""))
+				if not owner.is_empty() and owner != definition.definition_id:
+					_error(
+						source_path,
+						definition.catalog_key,
+						"classic.itemIds",
+						"Classic item ID %d is already owned by %s" % [
+							item_id,
+							owner,
+						],
+					)
+				else:
+					campaign_index[item_id] = definition.definition_id
+		if (
+			tree != null
+			and Time.get_ticks_usec() - budget_start >= frame_budget_usec
+		):
+			await tree.process_frame
+			budget_start = Time.get_ticks_usec()
 	if not last_errors.is_empty():
 		return false
 

@@ -128,9 +128,17 @@ var classic_can_regenerate_initialized := false
 var classic_creation_resources_initialized := false
 var classic_source_character: Dictionary = {}
 var _batching_character_creation_levels := false
+var _saved_spells_need_materialization := false
 
 
-func _init(data : Dictionary,new_icon : Texture,new_portrait : Texture,new_classgd : GDScript,new_racegd : GDScript):
+func _init(
+	data: Dictionary,
+	new_icon: Texture,
+	new_portrait: Texture,
+	new_classgd: GDScript,
+	new_racegd: GDScript,
+	defer_spell_materialization := false,
+):
 #	print("PlayerCharacterGD super.init data :")
 #	print(data)
 	if not ("name" in data) :
@@ -283,14 +291,9 @@ func _init(data : Dictionary,new_icon : Texture,new_portrait : Texture,new_class
 
 	if data.has("spells") :
 		spells = data["spells"]
-		for slevel in spells :
-			for spelldict in slevel :
-				var spellscript : GDScript = GDScript.new()
-				var spellsource = spelldict["source"]
-				spellscript.set_source_code(spellsource)
-				var _err_newscript_reload = spellscript.reload()
-				var newscript = spellscript.new()
-				spelldict["script"] = newscript
+		_saved_spells_need_materialization = true
+		if not defer_spell_materialization:
+			materialize_saved_spells()
 	else :
 		spells = []
 
@@ -365,6 +368,54 @@ func _init(data : Dictionary,new_icon : Texture,new_portrait : Texture,new_class
 #					add_trait(newscript.new(trait_dict["saved_variables"]) )
 #				else :
 #					add_trait(newscript.new() )
+
+
+func materialize_saved_spells() -> void:
+	if not _saved_spells_need_materialization:
+		return
+	for spell_level_value: Variant in spells:
+		if not (spell_level_value is Array):
+			continue
+		for spell_data_value: Variant in spell_level_value:
+			if spell_data_value is Dictionary:
+				_materialize_saved_spell_entry(spell_data_value)
+	_saved_spells_need_materialization = false
+
+
+func materialize_saved_spells_async(
+	tree: SceneTree,
+	frame_budget_usec := 8000,
+) -> void:
+	if not _saved_spells_need_materialization:
+		return
+	var budget_start := Time.get_ticks_usec()
+	for spell_level_value: Variant in spells:
+		if not (spell_level_value is Array):
+			continue
+		for spell_data_value: Variant in spell_level_value:
+			if not (spell_data_value is Dictionary):
+				continue
+			_materialize_saved_spell_entry(spell_data_value)
+			if Time.get_ticks_usec() - budget_start >= frame_budget_usec:
+				await tree.process_frame
+				budget_start = Time.get_ticks_usec()
+	_saved_spells_need_materialization = false
+
+
+func _materialize_saved_spell_entry(spell_data: Dictionary) -> void:
+	var materialized_spell: Spell
+	var spell_resources := NodeAccess.__Resources()
+	if (
+		spell_resources != null
+		and spell_resources.has_method("materialize_saved_spell")
+	):
+		materialized_spell = spell_resources.materialize_saved_spell(spell_data)
+	if materialized_spell == null:
+		var spell_script := GDScript.new()
+		spell_script.set_source_code(str(spell_data.get("source", "")))
+		if spell_script.reload() == OK:
+			materialized_spell = spell_script.new() as Spell
+	spell_data["script"] = materialized_spell
 
 
 func resolve_classic_learned_spell_identities(

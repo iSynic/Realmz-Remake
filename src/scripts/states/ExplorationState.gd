@@ -45,9 +45,30 @@ func enter(_msg : Dictionary = {}) -> void:
 				{"campaign": campaign, "error": "invalid_campaign_manifest"}
 			)
 			StateMachine.transition_to("Inactive", {})
+			_return_to_campaign_selection(
+				campaign,
+				"The selected campaign manifest is no longer valid."
+			)
 			return
 		GameGlobal.campaign_global_script = ClassicCampaignGlobalScript.new()
-		GameGlobal.cmp_resources.load_campaign_ressources( campaign )
+		if not await GameGlobal.cmp_resources.activate_campaign_resources_async(
+			campaign
+		):
+			LoadPerformanceTrace.end_phase(map_hud_trace, false, {
+				"campaign": campaign,
+				"error": "campaign_resources_failed",
+			})
+			LoadPerformanceTrace.end_named(
+				&"campaign_launch.first_playable_frame",
+				false,
+				{"campaign": campaign, "error": "campaign_resources_failed"}
+			)
+			StateMachine.transition_to("Inactive", {})
+			_return_to_campaign_selection(
+				campaign,
+				"Campaign resources could not be loaded."
+			)
+			return
 		for pc: PlayerCharacter in GameGlobal.player_characters:
 			pc.resolve_classic_learned_spell_identities(
 				GameGlobal.cmp_resources.spells_book,
@@ -84,6 +105,10 @@ func enter(_msg : Dictionary = {}) -> void:
 				}
 			)
 			StateMachine.transition_to("Inactive", {})
+			_return_to_campaign_selection(
+				campaign,
+				str(classic_start.get("message", "Campaign session could not start."))
+			)
 			return
 		map.explore_tiles_from_tilepos(Vector2(map.owcharacter.tile_position_x,map.owcharacter.tile_position_y))
 		map.visible = true
@@ -109,11 +134,23 @@ func _mark_first_playable_frame(campaign: String) -> void:
 			{"campaign": campaign, "error": "exploration_not_active"}
 		)
 		return
+	UI.end_loading()
 	LoadPerformanceTrace.end_named(
 		&"campaign_launch.first_playable_frame",
 		true,
 		{"campaign": campaign}
 	)
+
+
+func _return_to_campaign_selection(campaign: String, message: String) -> void:
+	GameGlobal.stop_classic_campaign_runtime()
+	GameGlobal.cmp_resources.deactivate_campaign_resources()
+	UI.end_loading()
+	UI.show_only(UI.main_menu)
+	var panel: Variant = UI.main_menu.newCampaignPanel
+	if panel != null and panel.has_method("recover_launch_failure"):
+		panel.recover_launch_failure(message)
+	push_error("Campaign '%s' launch failed: %s" % [campaign, message])
 
 
 func _state_process(_delta: float) -> void:
