@@ -154,6 +154,22 @@ inactive preserved definitions, execution activity, footprint categories, and
 content-hash duplication. Store a report outside the source tree when comparing
 revisions; the command and checked fixtures are the maintained source of truth.
 
+For routine readiness and fallback ownership checks, skip the unrelated file,
+compression, and duplicate-content scans:
+
+```powershell
+Godot_v4.7.1-stable_win64_console.exe --headless --path src --script `
+  res://scripts/classic_runtime/tests/report_classic_campaign_corpus.gd -- `
+  --readiness-only `
+  --summary-output=res://scripts/classic_runtime/CLASSIC_FIDELITY_FALLBACK_AUDIT.md
+```
+
+This mode checks every active fallback code against
+`fidelity_fallback_catalog.json` and checks the declared 13-campaign baseline.
+An uncataloged active fallback or unexplained baseline change fails the command.
+Update the catalog and generated summary only when the ownership, evidence, and
+diagnostic change are understood; do not commit the raw multi-megabyte report.
+
 ### 4. Install through the package boundary
 
 Close the game, then install the complete export:

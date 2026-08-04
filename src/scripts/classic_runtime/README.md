@@ -604,6 +604,14 @@ not generated reports or machine-specific walkthrough logs. The representative
 acceptance runners under `playtest/` cover campaign lifecycle, City of Bywater
 presentation and battle flow, scenario routes, and custom-monster combat.
 
+Use `--readiness-only` for the faster compatibility audit. That mode skips file
+footprint, compression, and duplicate-content work, validates active fallback
+codes against `fidelity_fallback_catalog.json`, and can refresh the checked
+`CLASSIC_FIDELITY_FALLBACK_AUDIT.md` with `--summary-output=<path>`. It fails on
+uncataloged active codes or an unexplained change from the declared corpus
+baseline; the full runtime still performs only the package checks needed for a
+safe launch.
+
 After replacing or regenerating any built-in campaign package, finalize the
 shared stock tilesets before testing or building:
 

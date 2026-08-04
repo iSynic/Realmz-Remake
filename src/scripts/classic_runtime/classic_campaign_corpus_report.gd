@@ -5,7 +5,7 @@ const CampaignInstallScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_install.gd"
 )
 
-const SCHEMA_VERSION := 2
+const SCHEMA_VERSION := 3
 const REPORT_KIND := "classic-built-in-campaign-readiness-footprint"
 
 
@@ -15,6 +15,9 @@ func inspect(campaigns_directory: String, options := {}) -> Dictionary:
 	var include_compressed_estimate := bool(
 		options.get("includeCompressedEstimate", true)
 	)
+	var readiness_only := bool(options.get("readinessOnly", false))
+	if readiness_only:
+		include_compressed_estimate = false
 	var campaign_names := _classic_campaign_names(normalized_root)
 	var campaigns: Array = []
 	var footprint_totals := _empty_footprint()
@@ -39,13 +42,15 @@ func inspect(campaigns_directory: String, options := {}) -> Dictionary:
 		var selection := install.selection_rules()
 		var readiness: Dictionary = install.readiness_report.duplicate(true)
 		var preparation: Dictionary = install.native_context_report.duplicate(true)
-		var campaign_footprint := _inspect_campaign_files(
-			normalized_root.path_join(campaign_name),
-			campaign_name,
-			include_compressed_estimate,
-			hash_index
-		)
-		_merge_footprint(footprint_totals, campaign_footprint)
+		var campaign_footprint := _empty_footprint()
+		if not readiness_only:
+			campaign_footprint = _inspect_campaign_files(
+				normalized_root.path_join(campaign_name),
+				campaign_name,
+				include_compressed_estimate,
+				hash_index
+			)
+			_merge_footprint(footprint_totals, campaign_footprint)
 		var selection_ready := loaded and bool(selection.get("valid", false))
 		if selection_ready:
 			totals["readyCampaigns"] += 1
@@ -92,12 +97,15 @@ func inspect(campaigns_directory: String, options := {}) -> Dictionary:
 	var shared_store_directory := normalized_root.get_base_dir().path_join(
 		"ClassicAssets"
 	)
-	var shared_store_footprint := _inspect_shared_store_files(
-		shared_store_directory,
-		include_compressed_estimate
-	)
-	_merge_footprint(footprint_totals, shared_store_footprint)
-	var duplication := _build_duplication_report(hash_index)
+	var shared_store_footprint := _empty_footprint()
+	var duplication := _empty_duplication_report()
+	if not readiness_only:
+		shared_store_footprint = _inspect_shared_store_files(
+			shared_store_directory,
+			include_compressed_estimate
+		)
+		_merge_footprint(footprint_totals, shared_store_footprint)
+		duplication = _build_duplication_report(hash_index)
 	var campaign_count_matches := (
 		expected_campaigns <= 0
 		or campaign_names.size() == expected_campaigns
@@ -114,6 +122,7 @@ func inspect(campaigns_directory: String, options := {}) -> Dictionary:
 	return {
 		"schemaVersion": SCHEMA_VERSION,
 		"kind": REPORT_KIND,
+		"mode": "readiness-only" if readiness_only else "readiness-and-footprint",
 		"campaignsDirectory": _portable_directory(normalized_root),
 		"expectedCampaigns": expected_campaigns,
 		"complete": complete,
@@ -361,6 +370,16 @@ static func _empty_footprint() -> Dictionary:
 		"compressedEstimateBytes": 0,
 		"categories": {},
 		"extensions": {},
+	}
+
+
+static func _empty_duplication_report() -> Dictionary:
+	return {
+		"groupCount": 0,
+		"duplicateBytes": 0,
+		"crossCampaignDuplicateBytes": 0,
+		"byCategory": {},
+		"groups": [],
 	}
 
 

@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "kind": "classic-fidelity-fallback-catalog",
+  "baseline": {
+    "campaigns": 13,
+    "readyCampaigns": 13,
+    "progressionBlockers": 0,
+    "fidelityFallbacks": 2470
+  },
+  "codes": {
+    "classic-synchronous-sound": {
+      "disposition": "intentional compatibility choice",
+      "owner": "F:/Realmz Remake",
+      "priority": "P3",
+      "requiredEvidence": "A source action with a negative sound ID and a runtime test proving that script execution waits for playback completion.",
+      "userAssistanceNeeded": false,
+      "notes": "Informational source behavior, not a fidelity fallback."
+    },
+    "inactive-custom-spell-definition": {
+      "disposition": "inactive content",
+      "owner": "F:/Realmz - Providence",
+      "priority": "P3",
+      "requiredEvidence": "A source-backed consumer reference or reachable runtime route for the preserved custom spell definition.",
+      "userAssistanceNeeded": false,
+      "notes": "Definitions remain preserved until an active consumer is proven."
+    },
+    "inactive-macro-target": {
+      "disposition": "inactive content",
+      "owner": "F:/Realmz - Providence",
+      "priority": "P3",
+      "requiredEvidence": "A reachable source call path proving that the unmarked Data ED3 target is callable in Classic.",
+      "userAssistanceNeeded": false,
+      "notes": "The producer preserves the reference without making unreachable code callable."
+    },
+    "inactive-scenario-rule-table": {
+      "disposition": "intentional compatibility choice",
+      "owner": "F:/Realmz - Providence",
+      "priority": "P3",
+      "requiredEvidence": "Classic load-profile control flow showing whether the scenario-local race or caste table replaces the selected shared table.",
+      "userAssistanceNeeded": false,
+      "notes": "The shared rule table remains authoritative for these campaigns."
+    },
+    "invalid-complex-spell-failure-sentinel": {
+      "disposition": "intentional compatibility choice",
+      "owner": "F:/Realmz - Providence",
+      "priority": "P3",
+      "requiredEvidence": "Classic selection-range evidence and a fixture showing that the invalid spell ID resolves to the default failure result.",
+      "userAssistanceNeeded": false,
+      "notes": "The preserved invalid sentinel already matches the observed Classic failure path."
+    },
+    "invalid-scenario-spell-item-fallback": {
+      "disposition": "producer/import gap",
+      "owner": "F:/Realmz - Providence",
+      "priority": "P1",
+      "requiredEvidence": "The packed Data NI field layout, the original item record, and a Classic use or inspection comparison for each impossible spell ID.",
+      "userAssistanceNeeded": false,
+      "notes": "The item is preserved but deliberately inert until its packed identity is explained."
+    },
+    "missing-macro-target": {
+      "disposition": "source-research need",
+      "owner": "F:/Realmz source and compatibility research",
+      "priority": "P1",
+      "requiredEvidence": "The originating source record, bounds behavior for the missing Data ED3 index, and a Classic gameplay or debugger observation at the call site.",
+      "userAssistanceNeeded": false,
+      "notes": "Remake currently uses a deterministic no-op instead of emulating an undefined record read."
+    },
+    "missing-message": {
+      "disposition": "source-research need",
+      "owner": "F:/Realmz source and compatibility research",
+      "priority": "P2",
+      "requiredEvidence": "The source action, the complete message-table inventory, and a Classic comparison showing whether the reference is silent, invalid, or supplied externally.",
+      "userAssistanceNeeded": false,
+      "notes": "The missing text affects presentation unless source control flow proves a behavioral dependency."
+    },
+    "native-item-fidelity-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Per-field Classic source semantics, an imported item fixture, and focused runtime tests for identification, equipping, restrictions, curses, and special behavior.",
+      "userAssistanceNeeded": false,
+      "notes": "Identity is native, but one or more ordinary item fields are not yet materialized."
+    },
+    "native-monster-fidelity-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Per-field Classic source semantics, native monster fixtures, and combat tests covering each fallback field without changing unrelated monster behavior.",
+      "userAssistanceNeeded": false,
+      "notes": "This is the largest active behavior-loss group and should be split by fallback field before implementation."
+    },
+    "unresolved-classic-picture-resource": {
+      "disposition": "missing Classic resource",
+      "owner": "F:/Realmz Classic asset inventory",
+      "priority": "P2",
+      "requiredEvidence": "A licensed or user-owned Classic resource inventory containing the exact picture ID and a source record proving the intended display site.",
+      "userAssistanceNeeded": false,
+      "notes": "The picture remains unchanged when the optional external resource is absent."
+    },
+    "unresolved-classic-sound-resource": {
+      "disposition": "missing Classic resource",
+      "owner": "F:/Realmz Classic asset inventory",
+      "priority": "P2",
+      "requiredEvidence": "A licensed or user-owned Classic sound inventory containing the exact sound ID and a source record proving playback and wait behavior.",
+      "userAssistanceNeeded": false,
+      "notes": "The action remains a silent no-op when the optional external resource is absent."
+    }
+  }
+}

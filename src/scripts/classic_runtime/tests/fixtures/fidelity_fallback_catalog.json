@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "classic-fidelity-fallback-catalog-test",
+  "baseline": {
+    "campaigns": 1,
+    "readyCampaigns": 1,
+    "progressionBlockers": 0,
+    "fidelityFallbacks": 1
+  },
+  "codes": {
+    "fixture-active-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "fixture",
+      "priority": "P1",
+      "requiredEvidence": "A bounded fixture proves the diagnostic contract.",
+      "userAssistanceNeeded": false
+    }
+  }
+}

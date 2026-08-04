@@ -113,6 +113,9 @@ const NativeContextBuilderScript = preload(
 const CampaignCorpusReportScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_corpus_report.gd"
 )
+const FidelityFallbackAuditScript = preload(
+	"res://scripts/classic_runtime/classic_fidelity_fallback_audit.gd"
+)
 const CampaignAdmissionScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_admission.gd"
 )
@@ -4974,6 +4977,78 @@ func _test_classic_native_context_and_corpus_report() -> void:
 	_expect(
 		int(corpus_ready_install.get("footprint", {}).get("files", 0)) > 0,
 		"campaign corpus report measures the installed campaign footprint"
+	)
+	var readiness_only_corpus: Dictionary = CampaignCorpusReportScript.new().inspect(
+		campaigns_directory,
+		{
+			"expectedCampaigns": 2,
+			"readinessOnly": true,
+		}
+	)
+	_expect_equal(
+		readiness_only_corpus.get("mode"),
+		"readiness-only",
+		"campaign corpus supports a readiness-only audit mode"
+	)
+	_expect_equal(
+		readiness_only_corpus.get("totals", {}).get("files"),
+		0,
+		"readiness-only corpus skips file-footprint inspection"
+	)
+	_expect_equal(
+		readiness_only_corpus.get("duplication", {}).get("groupCount"),
+		0,
+		"readiness-only corpus skips duplicate-content hashing"
+	)
+	_expect_equal(
+		readiness_only_corpus.get("totals", {}).get("diagnostics"),
+		corpus.get("totals", {}).get("diagnostics"),
+		"readiness-only corpus preserves readiness diagnostics"
+	)
+	var synthetic_fallback_report := {
+		"totals": {
+			"campaigns": 1,
+			"readyCampaigns": 1,
+			"progressionBlockers": 0,
+			"fidelityFallbacks": 1,
+		},
+		"campaigns": [{
+			"directory": "Fixture Campaign",
+			"readiness": {"diagnostics": [{
+				"classification": "fidelity-fallback",
+				"activity": "active",
+				"code": "fixture-active-fallback",
+				"source": "Data ED3",
+				"recordId": "Data ED3:macro:1",
+				"slot": 2,
+			}]},
+		}],
+	}
+	var fallback_audit: Dictionary = FidelityFallbackAuditScript.new().inspect(
+		synthetic_fallback_report,
+		"res://scripts/classic_runtime/tests/fixtures/fidelity_fallback_catalog.json",
+	)
+	_expect(
+		bool(fallback_audit.get("catalogComplete", false)),
+		"fallback audit accepts a cataloged active diagnostic code"
+	)
+	_expect(
+		bool(fallback_audit.get("baselineMatches", false)),
+		"fallback audit checks its declared corpus baseline"
+	)
+	var uncataloged_report: Dictionary = synthetic_fallback_report.duplicate(true)
+	uncataloged_report["campaigns"][0]["readiness"]["diagnostics"].append({
+		"classification": "fidelity-fallback",
+		"activity": "active",
+		"code": "fixture-uncataloged-active",
+	})
+	var uncataloged_audit: Dictionary = FidelityFallbackAuditScript.new().inspect(
+		uncataloged_report,
+		"res://scripts/classic_runtime/tests/fixtures/fidelity_fallback_catalog.json",
+	)
+	_expect(
+		not bool(uncataloged_audit.get("catalogComplete", true)),
+		"fallback audit rejects an uncataloged active diagnostic code"
 	)
 	_expect_equal(
 		CampaignPackageInstallerScript.new()._remove_directory(empty_root),
