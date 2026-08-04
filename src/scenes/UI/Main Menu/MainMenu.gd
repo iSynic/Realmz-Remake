@@ -34,6 +34,7 @@ var _new_character_panel: NinePatchRect
 var _loadgame_window: Window
 var _loadgame_ctrl: SaveLoadCtrl
 var _deferred_requests_started := false
+var _deferred_scene_cache: Dictionary = {}
 var _profile_generation := 0
 
 # These properties preserve the presentation facade used by tests and gameplay.
@@ -194,14 +195,18 @@ func _preload_secondary_scenes_after_first_frame() -> void:
 			push_warning("Could not queue deferred UI scene: %s" % scene_path)
 			continue
 		while is_inside_tree():
+			if _deferred_scene_cache.has(scene_path):
+				break
 			var status := ResourceLoader.load_threaded_get_status(scene_path)
 			if status == ResourceLoader.THREAD_LOAD_LOADED:
 				# Finalize one request before starting the next. The panels share
 				# dependencies, and concurrent text-scene loads can race in headless runs.
-				ResourceLoader.load_threaded_get(scene_path)
+				_cache_threaded_scene(scene_path)
 				break
 			if status == ResourceLoader.THREAD_LOAD_FAILED:
 				push_warning("Deferred UI scene failed to load: %s" % scene_path)
+				break
+			if status != ResourceLoader.THREAD_LOAD_IN_PROGRESS:
 				break
 			await get_tree().process_frame
 
@@ -257,11 +262,25 @@ func _create_load_window(scene: PackedScene) -> void:
 
 
 func _loaded_or_sync(scene_path: String) -> PackedScene:
+	if _deferred_scene_cache.has(scene_path):
+		return _deferred_scene_cache[scene_path] as PackedScene
 	if _deferred_requests_started:
 		var status := ResourceLoader.load_threaded_get_status(scene_path)
 		if status == ResourceLoader.THREAD_LOAD_LOADED:
-			return ResourceLoader.load_threaded_get(scene_path) as PackedScene
-	return load(scene_path) as PackedScene
+			return _cache_threaded_scene(scene_path)
+	var scene := load(scene_path) as PackedScene
+	if scene != null:
+		_deferred_scene_cache[scene_path] = scene
+	return scene
+
+
+func _cache_threaded_scene(scene_path: String) -> PackedScene:
+	if _deferred_scene_cache.has(scene_path):
+		return _deferred_scene_cache[scene_path] as PackedScene
+	var scene := ResourceLoader.load_threaded_get(scene_path) as PackedScene
+	if scene != null:
+		_deferred_scene_cache[scene_path] = scene
+	return scene
 
 
 func ensure_new_campaign_panel() -> NinePatchRect:
@@ -289,16 +308,22 @@ func ensure_load_window() -> Window:
 
 
 func _await_deferred_scene(scene_path: String) -> PackedScene:
+	if _deferred_scene_cache.has(scene_path):
+		return _deferred_scene_cache[scene_path] as PackedScene
 	if not _deferred_requests_started:
 		return _loaded_or_sync(scene_path)
 	while is_inside_tree():
+		if _deferred_scene_cache.has(scene_path):
+			return _deferred_scene_cache[scene_path] as PackedScene
 		var status := ResourceLoader.load_threaded_get_status(scene_path)
 		if status == ResourceLoader.THREAD_LOAD_LOADED:
-			return ResourceLoader.load_threaded_get(scene_path) as PackedScene
+			return _cache_threaded_scene(scene_path)
 		if status == ResourceLoader.THREAD_LOAD_FAILED:
 			break
+		if status != ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			break
 		await get_tree().process_frame
-	return load(scene_path) as PackedScene
+	return _loaded_or_sync(scene_path)
 
 
 func ensure_new_campaign_panel_async() -> NinePatchRect:
