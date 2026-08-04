@@ -20,6 +20,7 @@ border_color = Color(0.5, 0.42, 0.32, 0.7)
 custom_minimum_size = Vector2(512, 192)
 offset_right = 512.0
 offset_bottom = 522.0
+texture_filter = 1
 texture = ExtResource("1")
 patch_margin_left = 10
 patch_margin_top = 10

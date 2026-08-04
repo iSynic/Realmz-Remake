@@ -457,6 +457,7 @@ offset_left = -10.0
 offset_top = -63.0
 offset_right = 210.0
 offset_bottom = -50.0
+texture_filter = 1
 texture = ExtResource("9_7ke52")
 patch_margin_left = 10
 patch_margin_top = 10

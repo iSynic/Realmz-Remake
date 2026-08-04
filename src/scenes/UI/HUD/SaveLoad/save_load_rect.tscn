@@ -19,6 +19,7 @@ offset_right = -320.0
 grow_horizontal = 2
 grow_vertical = 2
 size_flags_horizontal = 4
+texture_filter = 1
 texture = ExtResource("1_6h1d8")
 patch_margin_left = 10
 patch_margin_top = 10

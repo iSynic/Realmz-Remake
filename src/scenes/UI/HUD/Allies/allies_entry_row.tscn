@@ -44,6 +44,7 @@ theme_override_constants/separation = 8
 custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
 mouse_filter = 2
+texture_filter = 1
 texture = ExtResource("2_stone")
 patch_margin_left = 8
 patch_margin_top = 8

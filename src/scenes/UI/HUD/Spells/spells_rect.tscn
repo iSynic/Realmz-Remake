@@ -45,6 +45,7 @@ anchor_bottom = 1.0
 offset_left = -20.0
 grow_horizontal = 0
 grow_vertical = 2
+texture_filter = 1
 texture = ExtResource("1_xn72t")
 patch_margin_left = 10
 patch_margin_top = 10

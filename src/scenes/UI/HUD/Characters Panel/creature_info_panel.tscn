@@ -10,6 +10,7 @@
 [node name="CreatureInfoPanel" type="NinePatchRect" node_paths=PackedStringArray("portrait_texrect", "name_label", "subtitle_label", "hp_label", "sp_label", "stats_grid", "resists_grid", "tags_header", "tags_label", "special_grid", "abil_spacer", "abilities_header", "abilities_label", "description_header_label", "descr_label", "close_button")]
 size_flags_horizontal = 3
 size_flags_vertical = 3
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11
@@ -59,6 +60,7 @@ theme_override_constants/separation = 10
 [node name="PortraitFrame" type="NinePatchRect" parent="OuterMargin/InfoVBox/HeaderRow"]
 custom_minimum_size = Vector2(72, 72)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11
@@ -145,6 +147,7 @@ theme_override_constants/separation = 8
 [node name="StatsPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BodyRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11
@@ -186,6 +189,7 @@ columns = 4
 [node name="ResistPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BodyRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11
@@ -233,6 +237,7 @@ theme_override_constants/separation = 8
 [node name="TagsAbilPanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BottomRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11
@@ -300,6 +305,7 @@ autowrap_mode = 3
 [node name="LorePanel" type="NinePatchRect" parent="OuterMargin/InfoVBox/BottomRow"]
 layout_mode = 2
 size_flags_horizontal = 3
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11

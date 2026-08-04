@@ -53,6 +53,7 @@ offset = Vector2(2, 0)
 [node name="MinimapsListRect" type="NinePatchRect" parent="BoxContainer"]
 custom_minimum_size = Vector2(0, 64)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("1_i8cbn")
 patch_margin_left = 10
 patch_margin_top = 10

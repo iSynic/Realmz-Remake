@@ -9,6 +9,7 @@
 [node name="BestiaryRect" type="NinePatchRect" node_paths=PackedStringArray("entrycontainer", "search_lineedit", "info_panel")]
 offset_right = 832.0
 offset_bottom = 648.0
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11
@@ -41,6 +42,7 @@ theme_override_constants/separation = 8
 [node name="ListRect" type="NinePatchRect" parent="OuterMargin/HBox"]
 custom_minimum_size = Vector2(288, 0)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("1_stone")
 patch_margin_left = 11
 patch_margin_top = 11

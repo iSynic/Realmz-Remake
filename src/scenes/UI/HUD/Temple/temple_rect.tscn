@@ -32,6 +32,7 @@ region_rect = Rect2(75, 0, 25, 50)
 custom_minimum_size = Vector2(400, 0)
 offset_right = 400.0
 offset_bottom = 612.0
+texture_filter = 1
 texture = ExtResource("1_73m1k")
 patch_margin_left = 10
 patch_margin_top = 10
@@ -128,6 +129,7 @@ theme_override_styles/normal = SubResource("StyleBoxTexture_8fbht")
 [node name="CharPanel" type="NinePatchRect" parent="VBoxContainer/CharaHBoxContainer"]
 custom_minimum_size = Vector2(256, 0)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("1_73m1k")
 patch_margin_left = 11
 patch_margin_top = 11
@@ -190,6 +192,7 @@ layout_mode = 2
 [node name="MoneyRect" type="NinePatchRect" parent="VBoxContainer"]
 custom_minimum_size = Vector2(0, 40)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("1_73m1k")
 patch_margin_left = 10
 patch_margin_top = 10

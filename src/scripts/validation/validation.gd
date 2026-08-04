@@ -2,6 +2,7 @@ class_name ValidationManager
  
 const validations = [
 	preload("res://scripts/validation/resource_uid_validation.gd"),
+	preload("res://scripts/validation/stone_nine_patch_filter_validation.gd"),
 ]
 
 func run_all_validations() -> bool:
