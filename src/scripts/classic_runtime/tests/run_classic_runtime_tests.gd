@@ -7808,6 +7808,45 @@ func _test_classic_monster_generation() -> void:
 	_expect_equal(hardest_battle.get("magicResistance"), 26, "battle magic resistance scales only inside Classic's ordinary range")
 	_expect_equal(hardest_battle.get("spellSaves"), [21, 22, 23, 24, 25, 26], "battle saves use Classic's ten-point difficulty step")
 	_expect_equal(hardest_battle.get("experience"), 259, "battle reward consumes the rolled maximum stamina")
+	var random_weapon_record: Dictionary = record.duplicate(true)
+	random_weapon_record["weapon"] = -2
+	var boundary_battle: Dictionary = MonsterGenerationScript.generate(
+		random_weapon_record,
+		{
+			"mode": "battle",
+			"weaponRoll": 85,
+			"staminaRolls": [1, 1],
+			"armorAdjustment": 0,
+			"agilityAdjustment": 0,
+			"spellPointAdjustment": 0,
+		}
+	)
+	_expect_equal(
+		boundary_battle.get("weaponItemId"),
+		137,
+		"battle setup keeps Classic's later random-weapon boundary match"
+	)
+	var boundary_summon: Dictionary = MonsterGenerationScript.generate(
+		random_weapon_record,
+		{
+			"mode": "summon",
+			"weaponRoll": 85,
+			"staminaRolls": [1, 1],
+			"armorAdjustment": 0,
+			"agilityAdjustment": 0,
+			"spellPointAdjustment": 0,
+		}
+	)
+	_expect_equal(
+		boundary_summon.get("weaponItemId"),
+		125,
+		"direct Classic spawns return the first random-weapon boundary match"
+	)
+	_expect_equal(
+		MonsterGenerationScript.random_weapon_ids(-9),
+		[1, 31, 75, 44],
+		"Classic random-weapon selectors expose every possible item identity"
+	)
 
 	var easiest_battle: Dictionary = MonsterGenerationScript.generate(
 		record,
@@ -9298,6 +9337,52 @@ func _test_classic_bestiary_materializer() -> void:
 		),
 		"native inventory adaptation for a separate active weapon remains explicit"
 	)
+	var random_weapon_inventory: Dictionary = materializer._native_inventory(
+		{
+			"items": [-2, 117, 0, 0, 0, 0],
+			"weapon": -2,
+			"missilePercent": 0,
+		},
+		{
+			"Mace": {"equippable": 1},
+			"Club": {"equippable": 1},
+			"Flail": {"equippable": 1},
+			"Morning Star": {"equippable": 1},
+			"Warhammer": {"equippable": 1},
+			"Staff of Fireballs +1": {"equippable": 0},
+		},
+		[],
+		{
+			65: "Mace",
+			37: "Club",
+			125: "Flail",
+			137: "Morning Star",
+			138: "Warhammer",
+			117: "Staff of Fireballs +1",
+		}
+	)
+	_expect_equal(
+		random_weapon_inventory.get("entries"),
+		[["Staff of Fireballs +1", 0]],
+		"the random selector replaces carried slot zero without hiding later loot"
+	)
+	_expect_equal(
+		random_weapon_inventory.get("randomWeaponChoices"),
+		{
+			"37": "Club",
+			"65": "Mace",
+			"125": "Flail",
+			"137": "Morning Star",
+			"138": "Warhammer",
+		},
+		"random Classic weapons retain every source-backed native choice"
+	)
+	_expect(
+		not random_weapon_inventory.get("unsupportedFields", []).has(
+			"weapon.randomSelector"
+		),
+		"a fully resolved Classic random-weapon table is launchable"
+	)
 	var armed_attack_record: Dictionary = inventory_bundle.get_monster(1).duplicate(true)
 	armed_attack_record["attacks"][0][3] = 11
 	_expect(
@@ -9524,6 +9609,21 @@ func _test_classic_bestiary_materializer() -> void:
 		not MonsterWeaponRulesScript.can_hit({}, exact_defender, wrong_weapon),
 		"wrong native weapon identity fails the Classic gate"
 	)
+	var exact_failure: Dictionary = MonsterWeaponRulesScript.evaluate_hit(
+		{},
+		exact_defender,
+		wrong_weapon
+	)
+	_expect_equal(
+		exact_failure.get("reason"),
+		"item",
+		"an exact Classic weapon failure exposes its specific feedback reason"
+	)
+	_expect_equal(
+		exact_failure.get("message"),
+		" needs Dagger to harm ",
+		"an exact Classic weapon failure names the required item"
+	)
 	var blunt_result: Dictionary = materializer._native_weapon_requirements(
 		{"distance": -1},
 		{},
@@ -9550,6 +9650,24 @@ func _test_classic_bestiary_materializer() -> void:
 			{"extra_data": {"classicWeaponKind": "sharp"}}
 		),
 		"wrong Classic weapon classification fails the native gate"
+	)
+	_expect_equal(
+		MonsterWeaponRulesScript.evaluate_hit(
+			{},
+			{"classic_required_weapon_kind": "blunt"},
+			{"extra_data": {"classicWeaponKind": "sharp"}}
+		).get("message"),
+		" needs a blunt weapon to harm ",
+		"Classic blunt and sharp failures provide source-specific feedback"
+	)
+	_expect_equal(
+		MonsterWeaponRulesScript.evaluate_hit(
+			{},
+			{"classic_required_magic_plus": 2},
+			{"extra_data": {"classicMagicPlus": 1}}
+		).get("message"),
+		" needs a +2 or better weapon to harm ",
+		"Classic magic-plus failures report the required enchantment"
 	)
 	_expect(
 		MonsterWeaponRulesScript.can_hit(
@@ -9828,10 +9946,23 @@ func _test_classic_bestiary_materializer() -> void:
 		"Classic Monster 1", {}
 	).get("classicMaterialization", {}).get("fidelityFallbacks", [])
 	_expect(
-		unresolved_fields.has("items[0]") \
-			and not unresolved_fields.has("weapon.randomSelector") \
-			and unresolved_fallbacks.has("weapon.randomSelector"),
-		"unresolved item IDs block while preserved random weapon tables remain bounded fallbacks"
+		not unresolved_fields.has("items[0]"),
+		"random weapon selection replaces Classic carried slot zero before item resolution"
+	)
+	_expect(
+		not unresolved_fields.has("weapon.randomSelector"),
+		"resolvable random weapon candidates no longer block materialization"
+	)
+	_expect(
+		not unresolved_fallbacks.has("weapon.randomSelector"),
+		"random weapon tables are no longer preserved as bounded fallbacks"
+	)
+	_expect_equal(
+		unresolved_inventory_book.get(
+			"Classic Monster 1", {}
+		).get("classicRandomWeaponChoices", {}).size(),
+		5,
+		"the complete Classic random weapon table remains available at spawn time"
 	)
 
 	var unsupported_root := test_root.path_join("unsupported")

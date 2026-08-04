@@ -41,6 +41,20 @@ const EXPERIENCE_BY_HIT_DICE := [
 	[5200, 70],
 	[5700, 75],
 ]
+# combatsetup.c selects from these inclusive percentage ranges when a monster's
+# weapon field is negative. Battle setup keeps the last match at an overlapping
+# boundary; summons and other direct spawns return the first match.
+const RANDOM_WEAPONS_BY_SELECTOR := {
+	-1: [[0, 50, 10], [51, 60, 20], [61, 70, 71], [71, 95, 75], [96, 100, 24]],
+	-2: [[0, 35, 65], [36, 70, 37], [71, 85, 125], [85, 94, 137], [95, 100, 138]],
+	-3: [[0, 40, 120], [41, 60, 37], [61, 90, 125], [91, 95, 65], [96, 100, 138]],
+	-4: [[0, 40, 81], [41, 80, 92], [81, 85, 81], [86, 93, 92], [94, 100, 136]],
+	-5: [[0, 35, 81], [36, 70, 75], [71, 90, 81], [91, 95, 75], [96, 100, 136]],
+	-6: [[0, 20, 37], [21, 40, 65], [41, 60, 75], [61, 80, 120], [81, 100, 120]],
+	-7: [[0, 15, 140], [16, 30, 142], [31, 45, 120], [46, 75, 140], [76, 100, 120]],
+	-8: [[0, 25, 92], [26, 50, 81], [51, 75, 120], [76, 90, 120], [91, 100, 120]],
+	-9: [[0, 20, 1], [21, 40, 31], [41, 65, 75], [66, 90, 44], [91, 100, 31]],
+}
 static var _sound_names_by_id: Dictionary = {}
 
 
@@ -96,6 +110,14 @@ static func generate(record: Dictionary, context := {}) -> Dictionary:
 	var armor := int(record.get("armor", 0))
 	var agility := int(record.get("agility", 0))
 	var spell_points := int(record.get("spellPoints", 0))
+	var weapon_selector := int(record.get("weapon", 0))
+	var weapon_item_id := weapon_selector
+	if weapon_selector < 0:
+		weapon_item_id = random_weapon_id(
+			weapon_selector,
+			context.get("weaponRoll"),
+			mode == MODE_BATTLE
+		)
 	if mode != MODE_ALLY:
 		armor += _roll(context.get("armorAdjustment"), -1, 1)
 		agility += _roll(context.get("agilityAdjustment"), -1, 1)
@@ -149,7 +171,44 @@ static func generate(record: Dictionary, context := {}) -> Dictionary:
 		"magicResistance": magic_resistance,
 		"spellSaves": spell_saves,
 		"experience": experience(record, stamina),
+		"weaponItemId": weapon_item_id,
 	}
+
+
+static func random_weapon_id(
+	selector: int,
+	roll: Variant = null,
+	prefer_last_match := false
+) -> int:
+	var rows: Variant = RANDOM_WEAPONS_BY_SELECTOR.get(selector, [])
+	if not (rows is Array) or rows.is_empty():
+		return 0
+	var actual_roll := _roll(roll, 1, 100)
+	var result := 0
+	for row_value: Variant in rows:
+		if not (row_value is Array) or row_value.size() < 3:
+			continue
+		var row: Array = row_value
+		if actual_roll < int(row[0]) or actual_roll > int(row[1]):
+			continue
+		result = int(row[2])
+		if not prefer_last_match:
+			return result
+	return result
+
+
+static func random_weapon_ids(selector: int) -> Array[int]:
+	var result: Array[int] = []
+	var rows: Variant = RANDOM_WEAPONS_BY_SELECTOR.get(selector, [])
+	if not (rows is Array):
+		return result
+	for row_value: Variant in rows:
+		if not (row_value is Array) or row_value.size() < 3:
+			continue
+		var item_id := int(row_value[2])
+		if not result.has(item_id):
+			result.append(item_id)
+	return result
 
 
 static func experience(record: Dictionary, stamina: int) -> int:

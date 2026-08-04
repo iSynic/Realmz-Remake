@@ -1092,7 +1092,11 @@ func initialize_from_bestiary_dict(creaname: String, generation_context := {}) :
 	stats["curTP"] = stats["maxTP"]
 	#inv/money
 	money = cdata["tools"]["money"]
-	for i_name_eq_arr in cdata["tools"]["inventory"] :
+	var source_inventory: Array = cdata["tools"]["inventory"].duplicate(true)
+	var random_weapon_entry := _classic_random_weapon_entry(cdata)
+	if not random_weapon_entry.is_empty():
+		source_inventory.push_front(random_weapon_entry)
+	for i_name_eq_arr in source_inventory :
 		# [item name, should equip, optional drops on defeat]
 		var item_added: ItemInstance = resources.create_item_instance(
 			str(i_name_eq_arr[0])
@@ -1227,6 +1231,22 @@ func _apply_classic_monster_generation(
 		_classic_integer_array(record.get("spellImmunities", []), 6)
 	)
 	set_meta("classic_monster_generation", generated.duplicate(true))
+
+
+func _classic_random_weapon_entry(cdata: Dictionary) -> Array:
+	var choices: Variant = cdata.get("classicRandomWeaponChoices", {})
+	if not (choices is Dictionary) or choices.is_empty():
+		return []
+	var generated: Variant = get_meta("classic_monster_generation", {})
+	if not (generated is Dictionary):
+		return []
+	var item_id := int(generated.get("weaponItemId", 0))
+	var item_name := str(choices.get(str(item_id), ""))
+	if item_name.is_empty():
+		return []
+	# The selected weapon replaces Classic carried slot zero, is equipped, and
+	# remains ordinary monster loot.
+	return [item_name, 1, true, 0]
 
 
 func _classic_integer_array(value: Variant, array_size: int) -> Array[int]:

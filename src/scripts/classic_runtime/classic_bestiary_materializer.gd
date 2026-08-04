@@ -82,7 +82,7 @@ const ELEMENT_BY_SPECIAL_ATTACK := {
 const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
-const MATERIALIZATION_VERSION := 7
+const MATERIALIZATION_VERSION := 8
 
 var last_error := ""
 
@@ -412,6 +412,14 @@ func _native_monster(
 		},
 		"scripts": {"default": "test_crea_script.gd"},
 	}
+	var random_weapon_choices: Variant = native_inventory.get(
+		"randomWeaponChoices",
+		{}
+	)
+	if random_weapon_choices is Dictionary and not random_weapon_choices.is_empty():
+		native_monster["classicRandomWeaponChoices"] = (
+			random_weapon_choices.duplicate(true)
+		)
 	for field_name: String in native_requirements.get("fields", {}):
 		native_monster[field_name] = native_requirements["fields"][field_name]
 	for field_name: String in native_missile_item.get("fields", {}):
@@ -459,8 +467,6 @@ func _native_weapon_requirements(
 		unsupported_fields.append("magicToHit")
 	elif required_magic_plus > 0:
 		fields["classicRequiredMagicPlus"] = required_magic_plus
-	if not fields.is_empty():
-		fidelity_fallbacks.append("weaponRequirementsUseNativeMissFeedback")
 	return {
 		"fields": fields,
 		"unsupportedFields": unsupported_fields,
@@ -513,10 +519,41 @@ func _native_inventory(
 	var weapon_id := int(record.get("weapon", 0))
 	var equipped_weapon := false
 	var carried_weapon := false
+	var random_weapon_choices := {}
 	if weapon_id < 0:
-		unsupported_fields.append("weapon.randomSelector")
+		for random_item_id: int in MonsterGenerationScript.random_weapon_ids(
+			weapon_id
+		):
+			var random_item_key := _item_resource_key(
+				random_item_id,
+				item_book,
+				item_texts,
+				item_mapping
+			)
+			var random_item: Variant = item_book.get(random_item_key, {})
+			var random_materialization: Variant = random_item.get(
+				"classicMaterialization",
+				{}
+			) if random_item is Dictionary else {}
+			if random_item_key.is_empty() \
+					or not (random_item is Dictionary) \
+					or int(random_item.get("equippable", 0)) == 0 \
+					or (
+						random_materialization is Dictionary
+						and str(random_materialization.get("status", "")) == "blocked"
+					):
+				unsupported_fields.append("weapon.randomSelector")
+				random_weapon_choices.clear()
+				break
+			random_weapon_choices[str(random_item_id)] = random_item_key
+		if random_weapon_choices.is_empty() \
+				and not unsupported_fields.has("weapon.randomSelector"):
+			unsupported_fields.append("weapon.randomSelector")
 	for item_index: int in range(item_ids.size()):
 		var raw_item_id: int = item_ids[item_index]
+		# Classic overwrites carried slot zero with the selected random weapon.
+		if weapon_id < 0 and item_index == 0:
+			continue
 		if raw_item_id == 0:
 			continue
 		var item_id: int = abs(raw_item_id)
@@ -586,6 +623,7 @@ func _native_inventory(
 		unsupported_fields.append("weapon")
 	return {
 		"entries": entries,
+		"randomWeaponChoices": random_weapon_choices,
 		"unsupportedFields": unsupported_fields,
 		"fidelityFallbacks": fidelity_fallbacks,
 	}

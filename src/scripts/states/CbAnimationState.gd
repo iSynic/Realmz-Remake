@@ -25,6 +25,9 @@ const CLASSIC_MONSTER_DECISION_SCRIPT = preload(
 const CLASSIC_MONSTER_GENERATION_SCRIPT = preload(
 	"res://scripts/classic_runtime/classic_monster_generation.gd"
 )
+const CLASSIC_MONSTER_WEAPON_RULES_SCRIPT = preload(
+	"res://scripts/classic_runtime/classic_monster_weapon_rules.gd"
+)
 const CLASSIC_HELPLESS_SCRIPT = preload(
 	"res://scripts/classic_runtime/classic_helpless.gd"
 )
@@ -964,7 +967,26 @@ func perform_melee_attack(msg : Dictionary) -> Array:
 	else :
 		SfxPlayer.stream = NodeAccess.__Resources().sounds_book["Attack Miss.wav"]
 		SfxPlayer.play()
-		UI.ow_hud.creatureRect.logrect.log_melee_attack_miss(attackercb,defendercb, accuracy)
+		var requirement_result: Dictionary = (
+			CLASSIC_MONSTER_WEAPON_RULES_SCRIPT.evaluate_hit(
+				attackercb.creature,
+				defendercb.creature,
+				compatibility_weapon
+			)
+		)
+		if not bool(requirement_result.get("allowed", true)):
+			UI.ow_hud.creatureRect.logrect.log_other_text(
+				attackercb.creature,
+				str(requirement_result.get("message", " cannot harm ")),
+				defendercb.creature,
+				".",
+			)
+		else:
+			UI.ow_hud.creatureRect.logrect.log_melee_attack_miss(
+				attackercb,
+				defendercb,
+				accuracy
+			)
 	
 	if attackercb.creature.doing_on_death_action :
 		attackercb.creature.doing_on_death_action = false

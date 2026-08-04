@@ -7,6 +7,36 @@ static func can_hit(
 	defender: Variant,
 	weapon: Dictionary
 ) -> bool:
+	return bool(evaluate_hit(attacker, defender, weapon).get("allowed", false))
+
+
+static func evaluate_hit(
+	attacker: Variant,
+	defender: Variant,
+	weapon: Dictionary
+) -> Dictionary:
+	var required_magic_plus := int(_metadata(
+		defender,
+		"classic_required_magic_plus",
+		0
+	))
+	if required_magic_plus > 0:
+		var weapon_magic_plus := 0
+		var extra_data: Variant = weapon.get("extra_data", {})
+		if extra_data is Dictionary:
+			weapon_magic_plus = int(extra_data.get("classicMagicPlus", 0))
+		# Classic lets an unarmed attacker substitute one magic-plus point per
+		# eight character levels.
+		if _is_unarmed(weapon):
+			weapon_magic_plus = floori(int(_value(attacker, "level", 0)) / 8.0)
+		if weapon_magic_plus < required_magic_plus:
+			return {
+				"allowed": false,
+				"reason": "magic-plus",
+				"requiredMagicPlus": required_magic_plus,
+				"message": " needs a +%d or better weapon to harm " % required_magic_plus,
+			}
+
 	var required_name := str(_metadata(
 		defender,
 		"classic_required_weapon_name",
@@ -21,7 +51,16 @@ static func can_hit(
 		var weapon_ids := _classic_item_ids(weapon)
 		if str(weapon.get("name", "")) != required_name \
 				and not weapon_ids.has(required_id):
-			return false
+			return {
+				"allowed": false,
+				"reason": "item",
+				"requiredItemId": required_id,
+				"requiredItemName": required_name,
+				"message": " needs %s to harm " % (
+					required_name if not required_name.is_empty()
+					else "the required weapon"
+				),
+			}
 
 	var required_kind := str(_metadata(
 		defender,
@@ -32,24 +71,13 @@ static func can_hit(
 		var weapon_extra_data: Variant = weapon.get("extra_data", {})
 		if not (weapon_extra_data is Dictionary) \
 				or str(weapon_extra_data.get("classicWeaponKind", "")) != required_kind:
-			return false
-
-	var required_magic_plus := int(_metadata(
-		defender,
-		"classic_required_magic_plus",
-		0
-	))
-	if required_magic_plus <= 0:
-		return true
-	var weapon_magic_plus := 0
-	var extra_data: Variant = weapon.get("extra_data", {})
-	if extra_data is Dictionary:
-		weapon_magic_plus = int(extra_data.get("classicMagicPlus", 0))
-	# Classic lets an unarmed attacker substitute one magic-plus point per
-	# eight character levels.
-	if _is_unarmed(weapon):
-		weapon_magic_plus = floori(int(_value(attacker, "level", 0)) / 8.0)
-	return weapon_magic_plus >= required_magic_plus
+			return {
+				"allowed": false,
+				"reason": "kind",
+				"requiredKind": required_kind,
+				"message": " needs a %s weapon to harm " % required_kind,
+			}
+	return {"allowed": true, "reason": ""}
 
 
 static func _classic_item_ids(weapon: Dictionary) -> Array[int]:
