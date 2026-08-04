@@ -292,6 +292,9 @@ static func armed_attack_sound_name(
 				""
 			))
 	if weapon is Dictionary:
+		var record_value: Variant = weapon.get("classicRecord", {})
+		if classic_record.is_empty() and record_value is Dictionary:
+			classic_record = record_value
 		var extra_data: Variant = weapon.get("extra_data", {})
 		if weapon_kind.is_empty() and extra_data is Dictionary:
 			weapon_kind = str(extra_data.get("classicWeaponKind", ""))

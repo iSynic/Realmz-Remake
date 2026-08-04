@@ -4088,8 +4088,13 @@ func _test_custom_monster_battle_fixture() -> void:
 	)
 	_expect_equal(
 		arcanist.get("tools", {}).get("inventory"),
-		[["Dagger", 1.0]],
-		"custom caster preserves carried and equipped loot"
+		[["Dagger", 0.0]],
+		"custom caster preserves its carried loot without equipping it"
+	)
+	_expect_equal(
+		arcanist.get("classicActiveWeaponName"),
+		"Dagger",
+		"custom caster preserves its separate Classic active weapon"
 	)
 	_expect_equal(
 		arcanist.get("classicDeathMacro"),
@@ -7065,6 +7070,25 @@ func _test_classic_item_materializer() -> void:
 	weapon_record["specificRace"] = 1
 	weapon_record["specificCaste"] = 1
 	var weapon: Dictionary = materializer._native_item(weapon_record, [])
+	var zero_die_weapon_record := weapon_record.duplicate(true)
+	zero_die_weapon_record["vSmall"] = 0
+	zero_die_weapon_record["vLarge"] = 3
+	zero_die_weapon_record["damage"] = 0
+	var zero_die_weapon: Dictionary = materializer._native_item(
+		zero_die_weapon_record,
+		[]
+	)
+	_expect_equal(
+		zero_die_weapon.get("weapon_dmg", {}).get("Physical"),
+		[0, 0],
+		"a Classic zero-sided active weapon retains its valid zero base damage"
+	)
+	_expect(
+		not zero_die_weapon.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		).has("vSmall"),
+		"a zero-sided Classic active weapon is not rejected as malformed"
+	)
 	_expect_equal(
 		weapon.get("type"),
 		"Dagger",
@@ -9374,8 +9398,13 @@ func _test_classic_bestiary_materializer() -> void:
 	var inventory_monster: Dictionary = inventory_book.get("Classic Monster 1", {})
 	_expect_equal(
 		inventory_monster.get("tools", {}).get("inventory"),
-		[["Dagger", 1.0], ["Classic Item 901", 0.0]],
-		"monster inventory prefers stable campaign identity and equips its active weapon"
+		[["Dagger", 0.0], ["Classic Item 901", 0.0]],
+		"monster inventory preserves both carried items without equipping them"
+	)
+	_expect_equal(
+		inventory_monster.get("classicActiveWeaponName"),
+		"Dagger",
+		"monster active weapon uses its stable campaign identity"
 	)
 	_expect_equal(
 		inventory_monster.get("classicWeaponItemId"),
@@ -9412,8 +9441,13 @@ func _test_classic_bestiary_materializer() -> void:
 	)
 	_expect_equal(
 		separate_weapon_inventory.get("entries"),
-		[["Quarter Staff +1", 0], ["Quarter Staff", 1, false]],
-		"active Classic weapon remains separate from the six carried loot slots"
+		[["Quarter Staff +1", 0]],
+		"active Classic weapon is not projected into the six carried loot slots"
+	)
+	_expect_equal(
+		separate_weapon_inventory.get("activeWeaponName"),
+		"Quarter Staff",
+		"active Classic weapon retains a separate transient combat identity"
 	)
 	_expect_equal(
 		separate_weapon_inventory.get("unsupportedFields"),
@@ -9433,19 +9467,17 @@ func _test_classic_bestiary_materializer() -> void:
 	_expect_equal(
 		non_equippable_weapon_inventory.get("entries"),
 		[["Rod of Shattering", 0]],
-		"a non-equippable Classic weapon remains carried without an invalid equip attempt"
+		"a non-equippable Classic active weapon remains ordinary carried loot"
 	)
-	_expect(
-		non_equippable_weapon_inventory.get("unsupportedFields", []).has(
-			"weapon.nonEquippable"
-		),
-		"the non-equippable active-weapon mismatch remains explicit"
+	_expect_equal(
+		non_equippable_weapon_inventory.get("activeWeaponName"),
+		"Rod of Shattering",
+		"Classic can use an active weapon without equipping its Remake item type"
 	)
-	_expect(
-		separate_weapon_inventory.get("fidelityFallbacks", []).has(
-			"separateActiveWeaponInventoryEntry"
-		),
-		"native inventory adaptation for a separate active weapon remains explicit"
+	_expect_equal(
+		separate_weapon_inventory.get("fidelityFallbacks"),
+		[],
+		"a resolved transient active weapon needs no fidelity fallback"
 	)
 	var random_weapon_inventory: Dictionary = materializer._native_inventory(
 		{

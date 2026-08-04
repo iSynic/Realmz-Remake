@@ -12,7 +12,7 @@ const ITEM_BOOK_PATH := "Items/stuff_book.json"
 const ITEM_IMAGE_BOOK_PATH := "Items/img_pack.json"
 const ITEM_ATLAS_PATH := "Items/textureAtlas.png"
 const SHARED_ITEM_BOOK_PATH := "res://shared_assets/items/stuff_book.json"
-const MATERIALIZATION_VERSION := 6
+const MATERIALIZATION_VERSION := 7
 const ITEM_ATLAS_CELL_SIZE := 34
 const ITEM_IMAGE_SIZE := 32
 const ITEM_IMAGE_INSET := 1
@@ -499,11 +499,11 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 				},
 			}
 	else:
-		if small_damage < 1:
+		if small_damage < 0:
 			unsupported_fields.append("vSmall")
-		var damage := {}
-		if small_damage > 0:
-			damage["Physical"] = [1, small_damage]
+		var damage := {
+			"Physical": [1, small_damage] if small_damage > 0 else [0, 0],
+		}
 		for field_name: String in ELEMENT_BY_CLASSIC_FIELD:
 			var element_damage := int(record.get(field_name, 0))
 			if element_damage < 0:
@@ -513,16 +513,15 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 				if not fidelity_fallbacks.has("elementalWeaponDamageMitigation"):
 					# Native resistance replaces Classic's separate save and protection rolls.
 					fidelity_fallbacks.append("elementalWeaponDamageMitigation")
-		if not damage.is_empty():
-			fields["weapon_dmg"] = damage
-			fields["melee_atk_anim_icon"] = "ATK_WPN"
-			fields["extra_data"] = {
-				"classicMagicPlus": magic_plus,
-				"classicWeaponDamage": {
-					"small": small_damage,
-					"large": large_damage,
-				},
-			}
+		fields["weapon_dmg"] = damage
+		fields["melee_atk_anim_icon"] = "ATK_WPN"
+		fields["extra_data"] = {
+			"classicMagicPlus": magic_plus,
+			"classicWeaponDamage": {
+				"small": small_damage,
+				"large": large_damage,
+			},
+		}
 		if magic_plus < 0:
 			unsupported_fields.append("damage")
 		elif magic_plus > 0:

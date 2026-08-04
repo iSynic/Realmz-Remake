@@ -82,7 +82,7 @@ const ELEMENT_BY_SPECIAL_ATTACK := {
 const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
-const MATERIALIZATION_VERSION := 11
+const MATERIALIZATION_VERSION := 12
 
 var last_error := ""
 
@@ -412,6 +412,9 @@ func _native_monster(
 		},
 		"scripts": {"default": "test_crea_script.gd"},
 	}
+	var active_weapon_name := str(native_inventory.get("activeWeaponName", ""))
+	if not active_weapon_name.is_empty():
+		native_monster["classicActiveWeaponName"] = active_weapon_name
 	var random_weapon_choices: Variant = native_inventory.get(
 		"randomWeaponChoices",
 		{}
@@ -517,8 +520,7 @@ func _native_inventory(
 	var fidelity_fallbacks: Array[String] = []
 	var item_ids := _integer_array(record.get("items", []), 6)
 	var weapon_id := int(record.get("weapon", 0))
-	var equipped_weapon := false
-	var carried_weapon := false
+	var active_weapon_name := ""
 	var random_weapon_choices := {}
 	if weapon_id < 0:
 		for random_item_id: int in MonsterGenerationScript.random_weapon_ids(
@@ -557,8 +559,6 @@ func _native_inventory(
 		if raw_item_id == 0:
 			continue
 		var item_id: int = abs(raw_item_id)
-		if weapon_id > 0 and abs(weapon_id) == item_id:
-			carried_weapon = true
 		var item_key := _item_resource_key(
 			item_id,
 			item_book,
@@ -568,33 +568,21 @@ func _native_inventory(
 		if item_key.is_empty():
 			unsupported_fields.append("items[%d]" % item_index)
 			continue
-		var should_equip: bool = (
-			weapon_id > 0
-			and not equipped_weapon
-			and abs(weapon_id) == item_id
-		)
 		var native_item: Dictionary = item_book.get(item_key, {})
 		var materialization: Variant = native_item.get("classicMaterialization", {})
 		if materialization is Dictionary \
 				and str(materialization.get("status", "")) == "blocked":
 			unsupported_fields.append("items[%d].nativeFields" % item_index)
-		if should_equip and int(native_item.get("equippable", 0)) == 0:
-			unsupported_fields.append("weapon.nonEquippable")
-		var native_entry: Array = [
-			item_key,
-			1 if should_equip and int(native_item.get("equippable", 0)) != 0 else 0,
-		]
+		var native_entry: Array = [item_key, 0]
 		if int(record.get("missilePercent", 0)) != 0 and item_index == 1:
 			native_entry.append(true)
 			native_entry.append(item_index)
 		entries.append(native_entry)
-		if should_equip:
-			equipped_weapon = true
 		if raw_item_id < 0 and not fidelity_fallbacks.has("itemDetectionMarkers"):
 			# Classic uses the sign bit to mark magic detected on a monster item.
 			# Remake can still carry and drop the item, but has no equivalent marker.
 			fidelity_fallbacks.append("itemDetectionMarkers")
-	if weapon_id > 0 and not carried_weapon:
+	if weapon_id > 0:
 		var weapon_key := _item_resource_key(
 			weapon_id,
 			item_book,
@@ -604,6 +592,7 @@ func _native_inventory(
 		if weapon_key.is_empty():
 			unsupported_fields.append("weapon")
 		else:
+			active_weapon_name = weapon_key
 			var native_weapon: Dictionary = item_book.get(weapon_key, {})
 			var materialization: Variant = native_weapon.get(
 				"classicMaterialization", {}
@@ -611,18 +600,9 @@ func _native_inventory(
 			if materialization is Dictionary \
 					and str(materialization.get("status", "")) == "blocked":
 				unsupported_fields.append("weapon.nativeFields")
-			if int(native_weapon.get("equippable", 0)) == 0:
-				unsupported_fields.append("weapon.nonEquippable")
-			else:
-				# Realmz keeps a positive active weapon separate from the six
-				# carried-item slots, so this native equipment entry is not loot.
-				entries.append([weapon_key, 1, false])
-				equipped_weapon = true
-				fidelity_fallbacks.append("separateActiveWeaponInventoryEntry")
-	elif weapon_id > 0 and not equipped_weapon:
-		unsupported_fields.append("weapon")
 	return {
 		"entries": entries,
+		"activeWeaponName": active_weapon_name,
 		"randomWeaponChoices": random_weapon_choices,
 		"unsupportedFields": unsupported_fields,
 		"fidelityFallbacks": fidelity_fallbacks,

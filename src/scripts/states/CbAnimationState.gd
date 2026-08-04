@@ -903,8 +903,7 @@ func perform_melee_attack(msg : Dictionary) -> Array:
 		var weapon_sound := weapon_definition.sound_key \
 			if weapon_definition != null else str(weapon.get("sound", "")) \
 			if weapon is Dictionary else ""
-		if weapon_definition != null \
-				and attacker.creature.has_meta("classic_monster_generation"):
+		if attacker.creature.has_meta("classic_monster_generation"):
 			weapon_sound = CLASSIC_MONSTER_GENERATION_SCRIPT.armed_attack_sound_name(
 				weapon_definition,
 				weapon

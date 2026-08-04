@@ -187,6 +187,7 @@ var level : int = 0 # Except for Players, this is only indicative of a Creature'
 
 var abilities : Array = [] #Melee attack, magic, items etc
 var item_inventory: Array[ItemInstance] = []
+var classic_active_weapon_view: Dictionary = {}
 var _scenario_passive_hook_depth := 0
 # Retain the old property name as an alias for campaign scripts, but expose the
 # authoritative instances rather than a parallel dictionary model.
@@ -1092,6 +1093,22 @@ func initialize_from_bestiary_dict(creaname: String, generation_context := {}) :
 	stats["curTP"] = stats["maxTP"]
 	#inv/money
 	money = cdata["tools"]["money"]
+	classic_active_weapon_view.clear()
+	var classic_active_weapon_name := str(cdata.get("classicActiveWeaponName", ""))
+	if not classic_active_weapon_name.is_empty():
+		var classic_active_weapon := resources.create_item_instance(
+			classic_active_weapon_name
+		)
+		if classic_active_weapon != null:
+			classic_active_weapon_view = resources.legacy_item_view_for_adapter(
+				classic_active_weapon
+			)
+			classic_active_weapon_view["classicMonsterActiveWeapon"] = true
+		else:
+			push_warning(
+				"Bestiary creature %s references unavailable active weapon %s"
+				% [name, classic_active_weapon_name]
+			)
 	var source_inventory: Array = cdata["tools"]["inventory"].duplicate(true)
 	var random_weapon_entry := _classic_random_weapon_entry(cdata)
 	if not random_weapon_entry.is_empty():
@@ -1582,7 +1599,9 @@ func mark_classic_attack_attempt() -> void:
 
 func get_melee_weapon_for_next_attack() -> Variant:
 	var active_weapon: Variant = ITEM_NO_MELEE_WEAPON
-	if not current_melee_weapon_instances.is_empty():
+	if is_classic_monster_record() and not classic_active_weapon_view.is_empty():
+		active_weapon = classic_active_weapon_view
+	elif not current_melee_weapon_instances.is_empty():
 		active_weapon = current_melee_weapon_instances[0]
 	if not is_classic_monster_record():
 		if active_weapon is Dictionary \

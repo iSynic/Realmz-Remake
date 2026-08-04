@@ -2657,6 +2657,7 @@ func calculate_melee_accuracy(attacker : Creature, defender : Creature, weapon: 
 		accuracy = float(hook_result.get("value", 0.0))
 	else :
 		accuracy = attacker.get_stat("AccuracyMelee")  #checks traits too
+		accuracy += _classic_active_weapon_accuracy_bonus(compatibility_weapon)
 		evasion = _classic_melee_evasion(defender)
 		accuracy = clampf(0.5+0.05*(accuracy-evasion), 0.0, 1.0)
 	accuracy = clampf(
@@ -2720,6 +2721,28 @@ func _classic_melee_evasion(defender: Variant) -> float:
 	if defender is Object and defender.has_meta("classic_armor"):
 		return float(defender.get_meta("classic_armor")) / 5.0
 	return float(defender.get_stat("EvasionMelee"))
+
+
+func _classic_active_weapon_accuracy_bonus(weapon: Dictionary) -> int:
+	if not bool(weapon.get("classicMonsterActiveWeapon", false)):
+		return 0
+	var extra_data: Variant = weapon.get("extra_data", {})
+	if not (extra_data is Dictionary):
+		return 0
+	var magic_plus := int(extra_data.get("classicMagicPlus", 0))
+	var record: Variant = weapon.get("classicRecord", {})
+	if record is Dictionary and int(record.get("special1", 0)) == 121:
+		magic_plus *= 2
+	return magic_plus
+
+
+func _classic_active_weapon_damage_bonus(weapon: Variant) -> int:
+	if not (weapon is Dictionary) \
+			or not bool(weapon.get("classicMonsterActiveWeapon", false)):
+		return 0
+	var extra_data: Variant = weapon.get("extra_data", {})
+	return int(extra_data.get("classicMagicPlus", 0)) \
+		if extra_data is Dictionary else 0
 
 
 func calculate_melee_damage(attacker : Creature, defender : Creature, weapon: Variant, is_crit : bool, crit_mult : float, should_check_script : bool = true) -> Dictionary :
@@ -2820,7 +2843,21 @@ func calculate_melee_damage(attacker : Creature, defender : Creature, weapon: Va
 	for t in damage_detail :
 		damage_total+=damage_detail[t]
 
-	var physical_damage_bonus : int = attacker.get_stat("Bonus_Physical_dmg") * sign(damage_total)
+	var classic_active_bonus := _classic_active_weapon_damage_bonus(weapon)
+	var physical_damage_bonus : int
+	if classic_active_bonus != 0 or (
+			weapon is Dictionary
+			and bool(weapon.get("classicMonsterActiveWeapon", false))
+	):
+		# Classic adds both the monster damage bonus and the active item's magic
+		# plus even when that weapon has a zero-sided damage die.
+		physical_damage_bonus = (
+			int(attacker.get_stat("Bonus_Physical_dmg")) + classic_active_bonus
+		)
+	else:
+		physical_damage_bonus = (
+			int(attacker.get_stat("Bonus_Physical_dmg")) * sign(damage_total)
+		)
 	damage_detail["Bonus_dmg"] = physical_damage_bonus
 	damage_total += physical_damage_bonus
 	damage_detail["total"]=int(damage_total)
