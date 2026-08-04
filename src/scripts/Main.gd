@@ -10,6 +10,8 @@ const ScenarioPreviewHostScript = preload(
 #onready var _gameState # child from main # Now Autoloaded
 
 func _ready():
+	LoadPerformanceTrace.end_named(&"startup.main_scene")
+	LoadPerformanceTrace.begin_named(&"startup.menu_ready")
 	var preview_host := ScenarioPreviewHostScript.new()
 	if preview_host.start_from_command_line():
 		add_child(preview_host)
@@ -42,6 +44,13 @@ func _ready():
 
 	NodeAccess.__Map()._on_viewport_size_changed()
 	UI.show_only(UI.main_menu)
+	_mark_menu_ready_after_render()
+
+
+func _mark_menu_ready_after_render() -> void:
+	await get_tree().process_frame
+	if is_inside_tree():
+		LoadPerformanceTrace.end_named(&"startup.menu_ready")
 	
 ## THE MAIN LOOP GAME ARCHITECTURE #
 #func _process(delta: float):	

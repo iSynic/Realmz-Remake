@@ -26,10 +26,23 @@ func exit() :
 func enter(_msg : Dictionary = {}) -> void:
 	if _msg.has("campaign_start") or  _msg.has("campaign_continue") :
 		var campaign : String = GameGlobal.currentcampaign
+		var map_hud_trace := LoadPerformanceTrace.begin_phase(
+			&"campaign_launch.map_hud",
+			{"campaign": campaign}
+		)
 		var classic_campaign := GameGlobal.is_classic_campaign(campaign)
 		if not classic_campaign:
 			push_error(
 				"Campaign '%s' cannot start without a valid realmz-remake-scenario manifest" % campaign
+			)
+			LoadPerformanceTrace.end_phase(map_hud_trace, false, {
+				"campaign": campaign,
+				"error": "invalid_campaign_manifest",
+			})
+			LoadPerformanceTrace.end_named(
+				&"campaign_launch.first_playable_frame",
+				false,
+				{"campaign": campaign, "error": "invalid_campaign_manifest"}
 			)
 			StateMachine.transition_to("Inactive", {})
 			return
@@ -56,17 +69,51 @@ func enter(_msg : Dictionary = {}) -> void:
 				"message",
 				"unknown error"
 			))
+			LoadPerformanceTrace.end_phase(map_hud_trace, false, {
+				"campaign": campaign,
+				"error": str(classic_start.get("message", "session_start_failed")),
+			})
+			LoadPerformanceTrace.end_named(
+				&"campaign_launch.first_playable_frame",
+				false,
+				{
+					"campaign": campaign,
+					"error": str(classic_start.get(
+						"message", "session_start_failed"
+					)),
+				}
+			)
 			StateMachine.transition_to("Inactive", {})
 			return
 		map.explore_tiles_from_tilepos(Vector2(map.owcharacter.tile_position_x,map.owcharacter.tile_position_y))
 		map.visible = true
 		UI.show_only(UI.ow_hud)
 		UI.ow_hud.initialize()
+		LoadPerformanceTrace.end_phase(map_hud_trace, true, {
+			"campaign": campaign,
+		})
+		_mark_first_playable_frame(campaign)
 		# A restored command is replayed only after its Godot map and HUD exist.
 		GameGlobal.call_deferred("resume_current_classic_continuation")
 		print("ExplorationState campaign_start or campaign_continue done")
 		for pc in GameGlobal.player_characters :
 			pc.cur_campaign = campaign
+
+
+func _mark_first_playable_frame(campaign: String) -> void:
+	await get_tree().process_frame
+	if not is_inside_tree() or state_machine.state != self:
+		LoadPerformanceTrace.end_named(
+			&"campaign_launch.first_playable_frame",
+			false,
+			{"campaign": campaign, "error": "exploration_not_active"}
+		)
+		return
+	LoadPerformanceTrace.end_named(
+		&"campaign_launch.first_playable_frame",
+		true,
+		{"campaign": campaign}
+	)
 
 
 func _state_process(_delta: float) -> void:

@@ -25,6 +25,7 @@ config/windows_native_icon="res://application_icons/AppIcon_Windows.ico"
 
 [autoload]
 
+LoadPerformanceTrace="*res://scripts/performance/load_performance_trace.gd"
 GameGlobal="*res://scripts/GameGlobal.gd"
 Utils="*res://scripts/Utils.gd"
 Paths="*res://scripts/Paths.gd"

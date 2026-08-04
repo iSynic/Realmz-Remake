@@ -110,6 +110,10 @@ func clear_ressources() -> void:
 	load_music_resources(Paths.datafolderpath+'Music/')
 
 func load_campaign_ressources( campaign : String = "") ->void :
+	var trace_token := LoadPerformanceTrace.begin_phase(
+		&"campaign_launch.campaign_resources",
+		{"campaign": campaign}
+	)
 	print("RESOURCES load_campaign_ressources")
 	clear_ressources()
 	load_tile_resources("res://shared_assets/tiles/")
@@ -157,6 +161,10 @@ func load_campaign_ressources( campaign : String = "") ->void :
 		for mn in mapnames :
 			load_map_ressources(mapspath + mn + '/', mn)
 	_restore_deferred_character_inventories()
+	LoadPerformanceTrace.end_phase(trace_token, true, {
+		"campaign": campaign,
+		"cache_status": "cold",
+	})
 
 
 func _restore_deferred_character_inventories() -> void:

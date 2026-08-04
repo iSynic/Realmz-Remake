@@ -93,6 +93,9 @@ func _load_initial_profile_after_first_frame(
 	await get_tree().process_frame
 	if not is_inside_tree():
 		return
+	LoadPerformanceTrace.begin_named(&"startup.profile", {
+		"profile": profilefromcfg,
+	})
 #	var dir = Directory.new()
 	if DirAccess.dir_exists_absolute(Paths.profilesfolderpath+"/" + profilefromcfg) :
 #	if dir.dir_exists(Paths.profilesfolderpath+"/" + profilefromcfg) :
@@ -107,6 +110,10 @@ func _load_initial_profile_after_first_frame(
 			ScreenUtils.set_window_scale(self, 2.0)
 	initial_profile_ready = true
 	initial_profile_loaded.emit()
+	LoadPerformanceTrace.end_named(&"startup.profile", true, {
+		"profile": profilefromcfg,
+		"character_count": GameGlobal.player_characters.size(),
+	})
 
 	#print("Mainmenu _ready over")
 

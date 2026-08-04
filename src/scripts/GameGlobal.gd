@@ -1297,7 +1297,15 @@ func start_current_classic_campaign(
 	saved_payload: Dictionary = {},
 	legacy_location: Dictionary = {}
 ) -> Dictionary:
+	var trace_token := LoadPerformanceTrace.begin_phase(
+		&"campaign_launch.session",
+		{"campaign": currentcampaign}
+	)
 	if not is_classic_campaign(currentcampaign):
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"campaign": currentcampaign,
+			"error": "not_classic_campaign",
+		})
 		return {"handled": false}
 	stop_classic_campaign_runtime()
 	var session = ClassicCampaignSessionScript.new()
@@ -1311,6 +1319,10 @@ func start_current_classic_campaign(
 	)
 	if str(load_result.get("status", "")) == "error":
 		session.queue_free()
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"campaign": currentcampaign,
+			"error": str(load_result.get("message", "load_failed")),
+		})
 		return {
 			"handled": true,
 			"status": "error",
@@ -1331,6 +1343,10 @@ func start_current_classic_campaign(
 		}
 	if str(restore_result.get("status", "")) == "error":
 		stop_classic_campaign_runtime()
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"campaign": currentcampaign,
+			"error": str(restore_result.get("message", "restore_failed")),
+		})
 		return {
 			"handled": true,
 			"status": "error",
@@ -1339,6 +1355,10 @@ func start_current_classic_campaign(
 	var character_rules_result: Dictionary = session.apply_character_rules(player_characters)
 	if str(character_rules_result.get("status", "")) == "error":
 		stop_classic_campaign_runtime()
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"campaign": currentcampaign,
+			"error": str(character_rules_result.get("message", "rules_failed")),
+		})
 		return {
 			"handled": true,
 			"status": "error",
@@ -1353,6 +1373,15 @@ func start_current_classic_campaign(
 	start_result["restored"] = restored
 	if str(start_result.get("status", "")) == "error":
 		stop_classic_campaign_runtime()
+	LoadPerformanceTrace.end_phase(
+		trace_token,
+		str(start_result.get("status", "")) != "error",
+		{
+			"campaign": currentcampaign,
+			"restored": restored,
+			"error": str(start_result.get("message", "")),
+		}
+	)
 	return start_result
 
 

@@ -210,11 +210,20 @@ func _normalized_directory(path: String) -> String:
 
 
 func _on_campaign_selected(idx : int) -> void :
+	var prepare_trace := LoadPerformanceTrace.begin_phase(&"campaign.prepare", {
+		"campaign": str(campaignsItemList.get_item_metadata(idx).get(
+			"campaignName", ""
+		)) if campaignsItemList.get_item_metadata(idx) is Dictionary else "",
+		"cache_status": "memory_or_miss",
+	})
 	set_ready(false, [])
 	selected_campaign_index = idx
 	createCharacterButton.disabled = true
 	var metadata: Variant = campaignsItemList.get_item_metadata(idx)
 	if not (metadata is Dictionary):
+		LoadPerformanceTrace.end_phase(prepare_trace, false, {
+			"error": "missing_campaign_metadata",
+		})
 		return
 	selectedCampaign = str(metadata.get("campaignName", ""))
 	selectedcampaign_onselect = metadata.get("selectionRules")
@@ -223,6 +232,10 @@ func _on_campaign_selected(idx : int) -> void :
 			selectedCampaign
 			+ "\nThis campaign is already in use by another party.\nDelete that game first."
 		)
+		LoadPerformanceTrace.end_phase(prepare_trace, false, {
+			"campaign": selectedCampaign,
+			"error": "campaign_busy",
+		})
 		return
 	if (
 		selectedcampaign_onselect is Dictionary
@@ -270,13 +283,26 @@ func _on_campaign_selected(idx : int) -> void :
 		selectedCampaignNameLabel.text = selectedCampaign
 		selectedCampaignDescrLabel.text = GameGlobal.get_campaign_description(selectedCampaign)
 	#reset the character picking panel
+	var picker_trace := LoadPerformanceTrace.begin_phase(&"campaign.party_picker", {
+		"campaign": selectedCampaign,
+	})
 	charPickRect.fill()
+	LoadPerformanceTrace.end_phase(picker_trace, true, {
+		"campaign": selectedCampaign,
+		"character_count": characterfoldernameslist.size(),
+	})
+	LoadPerformanceTrace.end_phase(prepare_trace, true, {
+		"campaign": selectedCampaign,
+	})
 
 func _on_StartButton_pressed() -> void :
 	if selectedcampaign_onselect is Dictionary and not bool(
 		selectedcampaign_onselect.get("valid", false)
 	):
 		return
+	LoadPerformanceTrace.begin_named(&"campaign_launch.first_playable_frame", {
+		"campaign": selectedCampaign,
+	})
 	GameGlobal.set_current_campaign(
 		selectedCampaign,
 		selectedcampaign_onselect,
@@ -338,6 +364,7 @@ func _on_StartButton_pressed() -> void :
 
 
 func fill() -> void :
+	var catalog_trace := LoadPerformanceTrace.begin_phase(&"campaign.catalog")
 	selectedCampaign = ""
 	selected_campaign_index = -1
 	selectedcampaign_onselect = null
@@ -379,6 +406,9 @@ func fill() -> void :
 			"busy": busy,
 		})
 
+	LoadPerformanceTrace.end_phase(catalog_trace, true, {
+		"campaign_count": campaignsItemList.item_count,
+	})
 	return
 
 
