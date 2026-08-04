@@ -24,6 +24,9 @@ const ConditionRulesScript = preload(
 const CustomSpellSupportScript = preload(
 	"res://scripts/classic_runtime/classic_custom_spell_support.gd"
 )
+const OnHitConditionScript = preload(
+	"res://scripts/classic_runtime/classic_item_on_hit_condition.gd"
+)
 
 static var _spell_mapping: Dictionary = {}
 static var _spell_catalog: Dictionary = {}
@@ -57,6 +60,7 @@ static func enrich_definition_source(
 	var record: Variant = source.get("classicRecord", {})
 	if record is Dictionary and not record.is_empty():
 		_apply_stored_spell(result, record, handled_fields, custom_spell_overrides)
+		_apply_on_hit_condition(result, record, handled_fields)
 		_apply_equipped_condition(result, record, handled_fields)
 		_apply_special_ability_modifiers(result, record, handled_fields)
 	_update_materialization(result, handled_fields)
@@ -89,6 +93,13 @@ static func handles_special_field(record: Dictionary, field_name: String) -> boo
 	var condition := equipped_condition_behavior(record)
 	if not condition.is_empty() and field_name in ["special1", "special2"]:
 		return true
+	var on_hit_condition := OnHitConditionScript.descriptor(record)
+	if not on_hit_condition.is_empty():
+		if field_name in ["special1", "special2", "special3", "special5"]:
+			return true
+		if field_name == "special4" \
+				and str(on_hit_condition.get("mode", "automatic")) != "automatic":
+			return true
 	var ability_modifiers := special_ability_modifiers(record)
 	if field_name == "special3" and ability_modifiers.has("special3"):
 		return true
@@ -269,6 +280,23 @@ static func _apply_equipped_condition(
 	result["traits"] = traits
 	handled_fields.append("special1")
 	handled_fields.append("special2")
+
+
+static func _apply_on_hit_condition(
+	result: Dictionary,
+	record: Dictionary,
+	handled_fields: Array[String]
+) -> void:
+	var behavior := OnHitConditionScript.descriptor(record)
+	if behavior.is_empty():
+		return
+	var extra_data: Dictionary = result.get("extra_data", {}).duplicate(true) \
+		if result.get("extra_data", {}) is Dictionary else {}
+	extra_data["classicOnHitCondition"] = behavior
+	result["extra_data"] = extra_data
+	handled_fields.append_array(["special1", "special2", "special3", "special5"])
+	if str(behavior.get("mode", "automatic")) != "automatic":
+		handled_fields.append("special4")
 
 
 static func _apply_special_ability_modifiers(

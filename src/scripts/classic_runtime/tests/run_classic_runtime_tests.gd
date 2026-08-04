@@ -137,6 +137,9 @@ const MapMaterializerScript = preload(
 const ItemMaterializerScript = preload(
 	"res://scripts/classic_runtime/classic_item_materializer.gd"
 )
+const ItemOnHitConditionScript = preload(
+	"res://scripts/classic_runtime/classic_item_on_hit_condition.gd"
+)
 const BestiaryMaterializerScript = preload(
 	"res://scripts/classic_runtime/classic_bestiary_materializer.gd"
 )
@@ -7753,6 +7756,102 @@ func _test_classic_item_materializer() -> void:
 		condition_item.get("traits"),
 		[["p_classic_tangled.gd", [1]]],
 		"equipped Classic conditions use the permanent source-backed trait"
+	)
+	var on_hit_record := weapon_record.duplicate(true)
+	on_hit_record["special1"] = -10
+	on_hit_record["special2"] = 2
+	on_hit_record["special3"] = 29
+	on_hit_record["special4"] = 25
+	on_hit_record["special5"] = 6
+	var on_hit_item: Dictionary = materializer._native_item(on_hit_record, [])
+	_expect_equal(
+		on_hit_item.get("extra_data", {}).get("classicOnHitCondition"),
+		{
+			"conditionCode": 29,
+			"conditionIndex": 9,
+			"conditionName": "Poisoned",
+			"duration": 6,
+			"mode": "percent",
+			"chance": 25,
+		},
+		"Classic condition weapons preserve their exact percentage descriptor"
+	)
+	_expect_equal(
+		on_hit_item.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		),
+		[],
+		"source-backed Classic on-hit conditions materialize completely"
+	)
+	var percent_target := ConditionTestCharacter.new("Percent target")
+	var percent_applied: Dictionary = ItemOnHitConditionScript.apply_from_weapon(
+		percent_target,
+		on_hit_item,
+		25
+	)
+	_expect(
+		bool(percent_applied.get("applied", false)),
+		"Classic percentage condition includes its source boundary roll"
+	)
+	_expect_equal(
+		CharacterConditionRulesScript.condition_value(percent_target, 9),
+		6,
+		"Classic percentage condition adds its source duration"
+	)
+	var percent_missed: Dictionary = ItemOnHitConditionScript.apply_from_weapon(
+		percent_target,
+		on_hit_item,
+		26
+	)
+	_expect(
+		not bool(percent_missed.get("applied", false)),
+		"Classic percentage condition rejects the first roll above its chance"
+	)
+	_expect_equal(
+		CharacterConditionRulesScript.condition_value(percent_target, 9),
+		6,
+		"a failed Classic condition roll leaves the current duration unchanged"
+	)
+	var save_record := on_hit_record.duplicate(true)
+	save_record["special2"] = 1
+	save_record["special4"] = 4
+	var save_behavior: Dictionary = ItemOnHitConditionScript.descriptor(save_record)
+	_expect_equal(
+		save_behavior.get("saveIndex"),
+		4,
+		"Classic condition weapon DRV retains its exact save index"
+	)
+	var save_target := ConditionTestCharacter.new("Save target", 0, 60.0)
+	var saved_result: Dictionary = ItemOnHitConditionScript.apply(
+		save_target,
+		save_behavior,
+		60
+	)
+	_expect(
+		bool(saved_result.get("saved", false))
+			and not bool(saved_result.get("applied", false)),
+		"Classic condition weapon save succeeds at the source boundary"
+	)
+	var failed_save_result: Dictionary = ItemOnHitConditionScript.apply(
+		save_target,
+		save_behavior,
+		61
+	)
+	_expect(
+		bool(failed_save_result.get("applied", false)),
+		"Classic condition weapon applies after a failed DRV"
+	)
+	var permanent_target := ConditionTestCharacter.new("Permanent target")
+	CharacterConditionRulesScript.set_condition_value(permanent_target, 9, -1)
+	var permanent_result: Dictionary = ItemOnHitConditionScript.apply_from_weapon(
+		permanent_target,
+		on_hit_item,
+		1
+	)
+	_expect(
+		bool(permanent_result.get("blockedByPermanentCondition", false))
+			and not bool(permanent_result.get("applied", false)),
+		"Classic permanent conditions block temporary weapon additions"
 	)
 	var ability_record := armor_record.duplicate(true)
 	ability_record["special3"] = 5

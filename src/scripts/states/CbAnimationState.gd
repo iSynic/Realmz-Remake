@@ -31,6 +31,9 @@ const CLASSIC_MONSTER_WEAPON_RULES_SCRIPT = preload(
 const CLASSIC_HELPLESS_SCRIPT = preload(
 	"res://scripts/classic_runtime/classic_helpless.gd"
 )
+const CLASSIC_ITEM_ON_HIT_CONDITION_SCRIPT = preload(
+	"res://scripts/classic_runtime/classic_item_on_hit_condition.gd"
+)
 
 var cur_action : Dictionary
 
@@ -959,6 +962,26 @@ func perform_melee_attack(msg : Dictionary) -> Array:
 			push_error(str(classic_special.get(
 				"message", "Classic monster special attack failed"
 			)))
+		var item_condition := CLASSIC_ITEM_ON_HIT_CONDITION_SCRIPT.apply_from_weapon(
+			defender.creature,
+			special_weapon,
+			-1,
+			GameGlobal.classic_party_charm_resistance_bonus(defender.creature),
+			Callable(GameGlobal, "apply_scenario_rule_modifier")
+		)
+		if str(item_condition.get("status", "ok")) == "error":
+			push_error(str(item_condition.get(
+				"message", "Classic item on-hit condition failed"
+			)))
+		elif bool(item_condition.get("applied", false)):
+			UI.ow_hud.creatureRect.logrect.log_other_text(
+				attacker.creature,
+				"'s attack inflicted %s on " % str(
+					item_condition.get("conditionName", "a condition")
+				),
+				defender.creature,
+				"",
+			)
 		defender.creature.change_cur_hp(-damage_detail["total"])
 		if weapon_instance != null:
 			var resolved_traits: Dictionary = item_resources.item_trait_bindings(
