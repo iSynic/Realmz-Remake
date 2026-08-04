@@ -3,6 +3,9 @@ extends Control
 const NEW_CAMPAIGN_SCENE := "res://scenes/UI/Main Menu/new_campaign_panel.tscn"
 const NEW_CHARACTER_SCENE := "res://scenes/UI/Main Menu/new_character_panel.tscn"
 const SAVE_LOAD_SCENE := "res://scenes/UI/HUD/SaveLoad/save_load_rect.tscn"
+const NativeContextBuilderScript = preload(
+	"res://scripts/classic_runtime/classic_native_context_builder.gd"
+)
 const DEFERRED_SCENES: Array[String] = [
 	NEW_CAMPAIGN_SCENE,
 	NEW_CHARACTER_SCENE,
@@ -149,6 +152,7 @@ func _load_initial_profile_after_first_frame(
 	})
 	if loaded:
 		call_deferred("_warm_shared_resources_after_profile")
+		call_deferred("_warm_native_context_after_profile")
 
 
 func _warm_shared_resources_after_profile() -> void:
@@ -156,6 +160,14 @@ func _warm_shared_resources_after_profile() -> void:
 	var resources: CampaignResources = NodeAccess.__Resources()
 	if resources != null:
 		await resources.ensure_shared_resources_loaded_async()
+
+
+func _warm_native_context_after_profile() -> void:
+	await get_tree().process_frame
+	if not is_inside_tree():
+		return
+	var context_builder = NativeContextBuilderScript.new()
+	await context_builder.warm_shared_cache_async(get_tree())
 
 
 func _set_profile_busy(busy: bool) -> void:
@@ -176,32 +188,22 @@ func _preload_secondary_scenes_after_first_frame() -> void:
 	):
 		return
 	_deferred_requests_started = true
-	var pending: Array[String] = []
 	for scene_path: String in DEFERRED_SCENES:
 		var error := ResourceLoader.load_threaded_request(scene_path, "PackedScene")
-		if error == OK:
-			pending.append(scene_path)
-		else:
+		if error != OK:
 			push_warning("Could not queue deferred UI scene: %s" % scene_path)
-	while not pending.is_empty() and is_inside_tree():
-		var instantiated := false
-		for scene_path: String in pending.duplicate():
-			var status := ResourceLoader.load_threaded_get_status(scene_path)
-			if status == ResourceLoader.THREAD_LOAD_FAILED:
-				pending.erase(scene_path)
-				push_warning("Deferred UI scene failed to load: %s" % scene_path)
-				continue
-			if status != ResourceLoader.THREAD_LOAD_LOADED:
-				continue
-			var scene := ResourceLoader.load_threaded_get(scene_path) as PackedScene
-			pending.erase(scene_path)
-			_instantiate_deferred_scene(scene_path, scene)
-			instantiated = true
-			break
-		# Instantiating at most one hidden scene per frame prevents a burst of work.
-		await get_tree().process_frame
-		if not instantiated:
 			continue
+		while is_inside_tree():
+			var status := ResourceLoader.load_threaded_get_status(scene_path)
+			if status == ResourceLoader.THREAD_LOAD_LOADED:
+				# Finalize one request before starting the next. The panels share
+				# dependencies, and concurrent text-scene loads can race in headless runs.
+				ResourceLoader.load_threaded_get(scene_path)
+				break
+			if status == ResourceLoader.THREAD_LOAD_FAILED:
+				push_warning("Deferred UI scene failed to load: %s" % scene_path)
+				break
+			await get_tree().process_frame
 
 
 func _warm_campaign_catalog_after_first_frame() -> void:
