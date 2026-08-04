@@ -111,7 +111,15 @@ func _is_stock_missile_record(record: Dictionary) -> bool:
 	var special := absi(int(record.get("special", 0)))
 	var damage_type := absi(int(record.get("damageType", 0)))
 	if special == 0:
-		if damage_type != 9 or int(record.get("cannot", 0)) != 3:
+		var is_ordinary_missile := (
+			damage_type == 9 and int(record.get("cannot", 0)) == 3
+		)
+		var is_flask_of_oil := (
+			spell_id == 4409
+			and damage_type == 1
+			and int(record.get("cannot", 0)) == 1
+		)
+		if not is_ordinary_missile and not is_flask_of_oil:
 			return false
 	elif special == 10:
 		# Dart of Poison has the Poison special but no authored duration.

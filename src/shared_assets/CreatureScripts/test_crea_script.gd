@@ -140,7 +140,10 @@ static func decide_action(crea : Creature) -> Array :
 				)
 				var item_spell_name: String = item_spell_use[0]
 				selectedSpell = NodeAccess.__Resources().spells_book[item_spell_name]["script"]
-				selectedplvl = item_spell_use[1]
+				# Realmz chooses a fresh power from 1..7 for every monster missile,
+				# independently of the stored item power (combat.c `missle:`).
+				selectedplvl = randi_range(1, 7) \
+					if is_classic_monster else item_spell_use[1]
 				ignore_cost = true
 				used_an_item = true
 			if want_use_spell :

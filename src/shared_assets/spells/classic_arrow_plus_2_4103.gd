@@ -2,21 +2,21 @@ extends "res://scripts/classic_runtime/classic_core_missile_spell.gd"
 
 
 func _init() -> void:
-	name = "Boulder"
+	name = "Arrow +2"
 	in_field = false
 	in_combat = true
 	classic_spell_class = 9
 	classic_target_type = 1
-	classic_spell_ids = [4114]
+	classic_spell_ids = [4103]
 	classic_spell_save_index = -1
 	classic_spell_save_mode = "none"
 	configure_stock_missile_spell({
-		"packedSpellId": 4114,
-		"displayName": "Boulder",
-		"range1": 12,
+		"packedSpellId": 4103,
+		"displayName": "Arrow +2",
+		"range1": 20,
 		"range2": 0,
 		"queueIcon": 0,
-		"toHitBonus": 0,
+		"toHitBonus": 10,
 		"saveBonus": 0,
 		"fixedTargetNum": 1,
 		"canRotate": 0,
@@ -24,18 +24,18 @@ func _init() -> void:
 		"cannot": 3,
 		"resistAdjust": 0,
 		"cost": 0,
-		"damage1": 2,
-		"damage2": 12,
+		"damage1": 3,
+		"damage2": 8,
 		"powerDamage1": 0,
 		"powerDamage2": 0,
 		"duration1": 0,
 		"duration2": 0,
 		"powerDuration1": 0,
 		"powerDuration2": 0,
-		"spellLook1": 5,
+		"spellLook1": 1,
 		"spellLook2": 5,
-		"sound1": 50,
-		"sound2": 32,
+		"sound1": 25,
+		"sound2": 19,
 		"targetType": 1,
 		"size": 0,
 		"special": 0,
@@ -45,8 +45,8 @@ func _init() -> void:
 		"inCamp": 0,
 		"sourceRecord": {
 			"sourceFile": "Data S",
-			"recordIndex": 328,
-			"byteOffset": 9840,
+			"recordIndex": 317,
+			"byteOffset": 9510,
 			"byteLength": 30,
 		},
 	})

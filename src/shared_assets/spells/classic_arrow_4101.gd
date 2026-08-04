@@ -3,6 +3,8 @@ extends "res://scripts/classic_runtime/classic_core_missile_spell.gd"
 
 func _init() -> void:
 	name = "Arrow"
+	in_field = false
+	in_combat = true
 	classic_spell_class = 9
 	classic_target_type = 1
 	classic_spell_ids = [4101]
