@@ -1310,7 +1310,13 @@ func item_trait_bindings(
 
 func item_spell_use(instance: ItemInstance, use_kind: String) -> Array:
 	var definition := get_item_definition(instance)
-	return definition.spell_use(use_kind) if definition != null else []
+	if definition == null:
+		return []
+	var descriptor := definition.spell_use(use_kind)
+	if descriptor.size() >= 2 \
+			and bool(definition.extra_data_value("classicRandomSpellPower", false)):
+		descriptor[1] = randi_range(1, 7)
+	return descriptor
 
 
 func item_custom_spell_script(instance: ItemInstance) -> GDScript:

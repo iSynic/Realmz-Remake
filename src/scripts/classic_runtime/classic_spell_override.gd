@@ -1,10 +1,6 @@
 class_name ClassicSpellOverride
 extends Spell
 
-const MagicResistanceScript = preload(
-	"res://scripts/classic_runtime/classic_magic_resistance.gd"
-)
-
 # Classic spell rows are data, not scripts. This adapter exposes the subset
 # with no special opcode through Remake's ordinary Spell interface.
 
@@ -20,6 +16,7 @@ var classic_in_camp := false
 var classic_size := 0
 var classic_spell_look_ids: Array[int] = []
 var classic_sound_ids: Array[int] = []
+var classic_item_magic_plus := 0
 var _cost := 0
 var _range_low := 0
 var _range_per_power := 0
@@ -111,7 +108,7 @@ func configure(record: Dictionary) -> void:
 	in_field = classic_in_camp
 	rot = bool(record.get("canRotate", 0))
 	resist = RESIST_TYPE.IGNORE_DODGE \
-		if MagicResistanceScript.custom_spell_uses_resistance(self) \
+		if _uses_magic_resistance() \
 		else RESIST_TYPE.IGNORE_MRES_DODGE
 	classic_spell_save_index = classic_damage_type \
 		if classic_damage_type in range(1, 8) and classic_cannot <= 1 else -1
@@ -121,6 +118,14 @@ func configure(record: Dictionary) -> void:
 
 func is_generically_executable() -> bool:
 	return classic_special == 0
+
+
+func _uses_magic_resistance() -> bool:
+	# Keep construction independent of classic_magic_resistance.gd: that
+	# service preloads this adapter and catalog discovery instantiates spells.
+	return absi(classic_spell_class) != 9 \
+		and classic_cannot != 1 \
+		and classic_cannot <= 2
 
 
 func get_range(power: int, _caster) -> int:
@@ -139,11 +144,11 @@ func get_target_number(power: int, _caster) -> int:
 
 
 func get_min_damage(power: int, _caster) -> int:
-	return _damage_low + max(0, power) * _power_damage_low
+	return _damage_low + max(0, power) * _power_damage_low + _item_damage_bonus()
 
 
 func get_max_damage(power: int, _caster) -> int:
-	return _damage_high + max(0, power) * _power_damage_high
+	return _damage_high + max(0, power) * _power_damage_high + _item_damage_bonus()
 
 
 func get_damage_roll(power: int, _caster) -> int:
@@ -151,7 +156,19 @@ func get_damage_roll(power: int, _caster) -> int:
 	for _level: int in range(max(0, power)):
 		if _power_damage_low != 0:
 			result += randi_range(_power_damage_low, _power_damage_high)
-	return result
+	return result + _item_damage_bonus()
+
+
+func set_classic_item_magic_plus(value: int) -> void:
+	classic_item_magic_plus = maxi(0, value)
+
+
+func classic_effective_to_hit_bonus() -> int:
+	return classic_to_hit_bonus + 5 * _item_damage_bonus()
+
+
+func _item_damage_bonus() -> int:
+	return classic_item_magic_plus if classic_damage_type == 9 else 0
 
 
 func get_min_duration(power: int, _caster) -> int:

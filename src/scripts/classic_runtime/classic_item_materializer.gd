@@ -12,7 +12,7 @@ const ITEM_BOOK_PATH := "Items/stuff_book.json"
 const ITEM_IMAGE_BOOK_PATH := "Items/img_pack.json"
 const ITEM_ATLAS_PATH := "Items/textureAtlas.png"
 const SHARED_ITEM_BOOK_PATH := "res://shared_assets/items/stuff_book.json"
-const MATERIALIZATION_VERSION := 4
+const MATERIALIZATION_VERSION := 6
 const ITEM_ATLAS_CELL_SIZE := 34
 const ITEM_IMAGE_SIZE := 32
 const ITEM_IMAGE_INSET := 1
@@ -263,7 +263,12 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 		)
 		if not last_error.is_empty():
 			return {"status": "error", "message": last_error}
-		var native_item := _native_item(record, item_texts, runtime_image_key)
+		var native_item := _native_item(
+			record,
+			item_texts,
+			runtime_image_key,
+			bundle.get("spell_overrides_by_id")
+		)
 		var existing_key: Variant = _book_item_key_by_id(item_book, item_id)
 		if existing_key != null:
 			var existing_item: Variant = item_book[existing_key]
@@ -306,7 +311,8 @@ func materialize(bundle: Object, campaign_directory: String) -> Dictionary:
 func _native_item(
 	record: Dictionary,
 	item_texts: Array,
-	runtime_image_key := ""
+	runtime_image_key := "",
+	custom_spell_overrides := {}
 ) -> Dictionary:
 	var item_id: int = abs(int(record.get("itemId", 0)))
 	var item_text := _item_text(item_texts, item_id)
@@ -379,7 +385,10 @@ func _native_item(
 	}
 	for field_name: String in native_fields.get("fields", {}):
 		native_item[field_name] = native_fields["fields"][field_name]
-	return ItemBehaviorsScript.enrich_definition_source(native_item)
+	return ItemBehaviorsScript.enrich_definition_source(
+		native_item,
+		custom_spell_overrides
+	)
 
 
 func _native_item_icon(
@@ -471,11 +480,24 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 	var small_damage := int(record.get("vSmall", 0))
 	var large_damage := int(record.get("vLarge", 0))
 	var magic_plus := int(record.get("damage", 0))
-	if classic_type != 2:
+	if classic_type not in [2, 10, 15]:
 		if small_damage != 0:
 			unsupported_fields.append("vSmall")
 		if magic_plus != 0:
 			unsupported_fields.append("damage")
+	elif classic_type in [10, 15]:
+		if small_damage < 0:
+			unsupported_fields.append("vSmall")
+		if magic_plus < 0:
+			unsupported_fields.append("damage")
+		if small_damage > 0 or large_damage > 0 or magic_plus > 0:
+			fields["extra_data"] = {
+				"classicMagicPlus": maxi(0, magic_plus),
+				"classicWeaponDamage": {
+					"small": maxi(0, small_damage),
+					"large": maxi(0, large_damage),
+				},
+			}
 	else:
 		if small_damage < 1:
 			unsupported_fields.append("vSmall")
@@ -522,9 +544,10 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 	var tag_bonus_damage := {}
 	for field_name: String in TARGET_TAG_BY_CLASSIC_FIELD:
 		var bonus_damage := int(record.get(field_name, 0))
-		if bonus_damage < 0 or (bonus_damage > 0 and classic_type != 2):
+		if bonus_damage < 0 \
+				or (bonus_damage > 0 and classic_type not in [2, 15]):
 			unsupported_fields.append(field_name)
-		elif bonus_damage > 0:
+		elif bonus_damage > 0 and classic_type == 2:
 			tag_bonus_damage[TARGET_TAG_BY_CLASSIC_FIELD[field_name]] = {
 				"Physical": [1, bonus_damage],
 			}

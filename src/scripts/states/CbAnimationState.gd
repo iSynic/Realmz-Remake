@@ -324,6 +324,7 @@ func enter(_msg : Dictionary = {}) -> void:
 						UI.ow_hud.updateCharPanelDisplay()
 						continue
 				
+				_set_classic_item_spell_bonus(a_spell, used_item)
 				UI.ow_hud.creatureRect.logrect.log_spell_cast(a_castercrea, a_spell ,a_power , '')
 				
 				if not a_from_terrain:
@@ -367,6 +368,7 @@ func enter(_msg : Dictionary = {}) -> void:
 						SfxPlayer.play()
 				await play_spell_resolution(a_spell.proj_hit, a_castercrea, a_effected_tiles, a_effected_creas)
 				if current_entry != entry_serial:
+					_set_classic_item_spell_bonus(a_spell, null)
 					return
 				print("CbAnim l 196 just played anim for spell "+a_spell.name)
 				_consume_spell_item_charges(a_castercrea, used_item)
@@ -377,8 +379,10 @@ func enter(_msg : Dictionary = {}) -> void:
 				)
 				await after_spell_anim_finished(a_castercrea,a_spell,a_power,a_main_targeted_tile,a_effected_tiles, a_effected_creas, a_add_terrain)
 				if current_entry != entry_serial:
+					_set_classic_item_spell_bonus(a_spell, null)
 					return
 				CLASSIC_SPELL_REFLECTION_SCRIPT.end_resolution(a_spell)
+				_set_classic_item_spell_bonus(a_spell, null)
 				#call_deferred("after_spell_anim_finished", a_caster,a_spell,a_power,a_main_targeted_tile,a_effected_tiles, a_effected_creas, a_add_terrain)
 				
 				
@@ -1026,6 +1030,20 @@ func perform_melee_attack(msg : Dictionary) -> Array:
 			attackercb.creature.please_remove_from_combat = true
 	
 	return [continue_action, returned_action_queue]
+
+
+func _set_classic_item_spell_bonus(spell: Variant, used_item: Variant) -> void:
+	if not (spell is Object) \
+			or not spell.has_method("set_classic_item_magic_plus"):
+		return
+	var magic_plus := 0
+	if used_item is ItemInstance:
+		var resources := NodeAccess.__Resources()
+		var definition := resources.get_item_definition(used_item) \
+			if resources != null else null
+		if definition != null:
+			magic_plus = int(definition.extra_data_value("classicMagicPlus", 0))
+	spell.call("set_classic_item_magic_plus", magic_plus)
 
 
 func _consume_spell_item_charges(caster: Creature, used_item: Variant) -> void:

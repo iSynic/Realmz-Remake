@@ -2229,6 +2229,21 @@ func classify_complex_item(item: Variant, scenario_items: Array) -> Dictionary:
 			}
 
 	var definition := _item_definition(item)
+	var encounter_spell: Variant = definition.extra_data_value(
+		"classicEncounterSpellUse",
+		{}
+	) if definition != null else item.get(
+		"extra_data",
+		{}
+	).get("classicEncounterSpellUse", {}) if item is Dictionary else {}
+	if encounter_spell is Dictionary and not encounter_spell.is_empty():
+		var raw_power := int(encounter_spell.get("power", 0))
+		return {
+			"mode": "spell-item",
+			"spellName": str(encounter_spell.get("resourceKey", "")),
+			"spellId": int(encounter_spell.get("spellId", 0)),
+			"spellPower": _classic_item_spell_power(raw_power),
+		}
 	for spell_kind: String in ["field", "combat"]:
 		var spell_value: Variant = definition.spell_use(spell_kind) \
 			if definition != null else item.get(

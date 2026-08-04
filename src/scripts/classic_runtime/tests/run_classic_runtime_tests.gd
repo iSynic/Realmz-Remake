@@ -7633,6 +7633,94 @@ func _test_classic_item_materializer() -> void:
 		).has("special2"),
 		"resolved Classic stored spells no longer block materialization"
 	)
+	var ranged_spell_record := weapon_record.duplicate(true)
+	ranged_spell_record["type"] = -15
+	ranged_spell_record["vSmall"] = 6
+	ranged_spell_record["damage"] = 2
+	ranged_spell_record["special1"] = -2
+	ranged_spell_record["special2"] = 5112
+	var ranged_spell_item: Dictionary = materializer._native_item(
+		ranged_spell_record,
+		[],
+		"",
+		{
+			5112: {
+				"displayName": "Split Beam Violator",
+				"packedSpellId": 5112,
+				"spellClass": 9,
+				"damageType": 9,
+				"special": 0,
+				"targetType": 1,
+				"inCombat": true,
+			},
+		}
+	)
+	_expect_equal(
+		ranged_spell_item.get("_on_combat_use_spell"),
+		["Split Beam Violator", 2],
+		"campaign spell overrides materialize ranged item attacks by exact ID"
+	)
+	_expect_equal(
+		ranged_spell_item.get("extra_data", {}).get("classicMagicPlus"),
+		2,
+		"ranged item magic plus remains available to missile resolution"
+	)
+	_expect_equal(
+		ranged_spell_item.get("classicMaterialization", {}).get(
+			"unsupportedFields",
+			[]
+		),
+		[],
+		"source-backed ranged item spell fields materialize completely"
+	)
+	var item_missile_spell := ClassicSpellOverride.new()
+	item_missile_spell.configure({
+		"displayName": "Item Missile",
+		"packedSpellId": 5112,
+		"spellClass": 9,
+		"damageType": 9,
+		"damage1": 2,
+		"damage2": 4,
+		"toHitBonus": 10,
+		"special": 0,
+		"targetType": 1,
+		"inCombat": true,
+	})
+	item_missile_spell.set_classic_item_magic_plus(3)
+	_expect_equal(
+		item_missile_spell.get_min_damage(1, null),
+		5,
+		"Classic missile items add their magic plus to minimum damage"
+	)
+	_expect_equal(
+		item_missile_spell.get_max_damage(1, null),
+		7,
+		"Classic missile items add their magic plus to maximum damage"
+	)
+	_expect_equal(
+		item_missile_spell.classic_effective_to_hit_bonus(),
+		25,
+		"Classic missile items add five hit points per magic plus"
+	)
+	var encounter_spell_record := armor_record.duplicate(true)
+	encounter_spell_record["special1"] = -7
+	encounter_spell_record["special2"] = 1201
+	var encounter_spell_item: Dictionary = materializer._native_item(
+		encounter_spell_record,
+		[]
+	)
+	_expect_equal(
+		encounter_spell_item.get("extra_data", {}).get(
+			"classicEncounterSpellUse"
+		),
+		{
+			"resourceKey": "Dig Hole",
+			"spellId": 1201,
+			"power": 7,
+			"randomPower": false,
+		},
+		"encounter-only Classic spells remain unavailable to ordinary field use"
+	)
 	var condition_record := armor_record.duplicate(true)
 	condition_record["special1"] = 22
 	condition_record["special2"] = -1
@@ -7660,6 +7748,20 @@ func _test_classic_item_materializer() -> void:
 		),
 		[],
 		"source-backed Classic equipment abilities materialize completely"
+	)
+	var negative_ability_record := armor_record.duplicate(true)
+	negative_ability_record["special3"] = -1
+	negative_ability_record["special5"] = 1
+	var negative_ability_item: Dictionary = materializer._native_item(
+		negative_ability_record,
+		[]
+	)
+	_expect_equal(
+		negative_ability_item.get("extra_data", {}).get(
+			"classicSpecialAbilityModifiers"
+		),
+		{"0": 1},
+		"negative Classic special codes retain race-ability modifiers"
 	)
 	var readiness: Dictionary = ReadinessScript.new().inspect(bundle, {"items": item_book})
 	_expect(
@@ -11103,12 +11205,12 @@ func _test_classic_campaign_package_installer() -> void:
 		"special monster installation reloads through the normal campaign loader"
 	)
 	_expect(
-		_readiness_has_reference_diagnostic(
+		not _readiness_has_reference_diagnostic(
 			installed_special_monster.readiness_report,
 			"classic-monster-special-attack-fallback",
 			1
 		),
-		"special monster installation reports its bounded fidelity fallback"
+		"source-backed aging attacks no longer report a fidelity fallback"
 	)
 	_expect_equal(
 		installed_special_monster.readiness_report.get(
@@ -12345,9 +12447,10 @@ func _test_classic_character_rule_profile() -> void:
 		),
 		"Classic item restriction rejects the wrong active caste class"
 	)
-	var identity_only_character := CampaignRuleCharacter.new()
-	identity_only_character.race = "Human"
-	identity_only_character.character_class = "Fighter"
+	var identity_only_character := CampaignRuleCharacter.new({
+		"classicRaceId": 1,
+		"classicCasteId": 1,
+	})
 	var identity_only_item := {
 		"classicItemId": 156,
 		"classicRecord": {"specificRace": 2},
@@ -36019,6 +36122,31 @@ func _test_complex_response_modes() -> void:
 	_expect(
 		not adapter.is_complex_scroll_item(spell_staff, scenario_items),
 		"spell-bearing staves remain on Classic's item-response path"
+	)
+	var encounter_spell_item := {
+		"name": "Teleport Party Broach",
+		"extra_data": {
+			"classicEncounterSpellUse": {
+				"resourceKey": "Teleport Party",
+				"spellId": 2609,
+				"power": 7,
+				"randomPower": false,
+			},
+		},
+	}
+	var encounter_spell_mode: Dictionary = adapter.classify_complex_item(
+		encounter_spell_item,
+		[]
+	)
+	_expect_equal(
+		encounter_spell_mode,
+		{
+			"mode": "spell-item",
+			"spellName": "Teleport Party",
+			"spellId": 2609,
+			"spellPower": 7,
+		},
+		"encounter-only item spells use their exact Classic response identity"
 	)
 	var fireball = load("res://shared_assets/spells/fireball.gd").new()
 	var spell_mapping: Dictionary = SpellIdsScript.new().mappings

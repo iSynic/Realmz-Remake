@@ -8,6 +8,9 @@ const TORCH_SOUND := "spell launch 2.wav"
 const TORCH_SPECIAL_FIELDS := ["special1", "special2"]
 const EQUIPMENT_TYPES := [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19]
 const SHARED_SPELL_DIRECTORY := "res://shared_assets/spells/"
+const CORE_SPELL_INVENTORY_PATH := (
+	"res://scripts/classic_runtime/classic_core_spell_inventory.json"
+)
 const SpellIdentityScript = preload(
 	"res://scripts/classic_runtime/classic_spell_identity.gd"
 )
@@ -18,10 +21,15 @@ const SpellIdsScript = preload("res://scripts/spells_id_divinity.gd")
 const ConditionRulesScript = preload(
 	"res://scripts/classic_runtime/classic_character_condition_rules.gd"
 )
+const CustomSpellSupportScript = preload(
+	"res://scripts/classic_runtime/classic_custom_spell_support.gd"
+)
 
 static var _spell_mapping: Dictionary = {}
 static var _spell_catalog: Dictionary = {}
 static var _spell_catalog_loaded := false
+static var _core_spell_records: Dictionary = {}
+static var _core_spell_records_loaded := false
 
 
 static func enrich_item_book(item_book: Dictionary) -> Dictionary:
@@ -33,7 +41,10 @@ static func enrich_item_book(item_book: Dictionary) -> Dictionary:
 	return result
 
 
-static func enrich_definition_source(source: Dictionary) -> Dictionary:
+static func enrich_definition_source(
+	source: Dictionary,
+	custom_spell_overrides := {}
+) -> Dictionary:
 	var result := source.duplicate(true)
 	var handled_fields: Array[String] = []
 	var power := classic_torch_power(source)
@@ -45,7 +56,7 @@ static func enrich_definition_source(source: Dictionary) -> Dictionary:
 			handled_fields.append_array(TORCH_SPECIAL_FIELDS)
 	var record: Variant = source.get("classicRecord", {})
 	if record is Dictionary and not record.is_empty():
-		_apply_stored_spell(result, record, handled_fields)
+		_apply_stored_spell(result, record, handled_fields, custom_spell_overrides)
 		_apply_equipped_condition(result, record, handled_fields)
 		_apply_special_ability_modifiers(result, record, handled_fields)
 	_update_materialization(result, handled_fields)
@@ -86,12 +97,15 @@ static func handles_special_field(record: Dictionary, field_name: String) -> boo
 	return field_name == "special5" and not ability_modifiers.is_empty()
 
 
-static func stored_spell_behavior(record: Dictionary) -> Dictionary:
+static func stored_spell_behavior(
+	record: Dictionary,
+	custom_spell_overrides := {}
+) -> Dictionary:
 	if torch_record_power(record) > 0:
 		return {}
 	var spell_id: int = absi(int(record.get("special2", 0)))
-	var power: int = absi(int(record.get("special1", 0)))
-	if spell_id <= 1100 or power <= 0 or power == 8:
+	var raw_power: int = absi(int(record.get("special1", 0)))
+	if spell_id <= 1100 or raw_power <= 0:
 		return {}
 	_ensure_spell_catalog()
 	var resource_key := SpellIdentityScript.resource_key(
@@ -99,22 +113,47 @@ static func stored_spell_behavior(record: Dictionary) -> Dictionary:
 		_spell_mapping,
 		_spell_catalog
 	)
+	var usage := {}
+	if not resource_key.is_empty():
+		var metadata: Variant = _spell_catalog.get(resource_key, {})
+		if metadata is Dictionary:
+			usage = _spell_usage(metadata)
+	var core_spell_record := _core_spell_record(spell_id)
+	if not core_spell_record.is_empty():
+		if resource_key.is_empty():
+			resource_key = SpellIdentityScript.mapped_name(spell_id, _spell_mapping)
+			if resource_key.is_empty():
+				resource_key = str(core_spell_record.get("displayName", ""))
+		var source_record: Variant = core_spell_record.get("record", {})
+		if source_record is Dictionary:
+			usage = {
+				"inField": bool(source_record.get("inCamp", false)),
+				"inCombat": bool(source_record.get("inCombat", false)),
+			}
+	if resource_key.is_empty() and custom_spell_overrides is Dictionary:
+		var custom_record: Variant = custom_spell_overrides.get(spell_id, {})
+		if custom_record is Dictionary \
+				and not custom_record.is_empty() \
+				and CustomSpellSupportScript.is_executable(custom_record):
+			resource_key = str(
+				custom_record.get("displayName", "Classic spell %d" % spell_id)
+			).strip_edges()
+			usage = {
+				"inField": bool(custom_record.get("inCamp", false)),
+				"inCombat": bool(custom_record.get("inCombat", false)),
+			}
 	if resource_key.is_empty():
 		return {}
-	var metadata: Variant = _spell_catalog.get(resource_key, {})
-	if not (metadata is Dictionary):
-		return {}
-	var usage: Dictionary = _spell_usage(metadata)
 	var in_field: bool = bool(usage.get("inField", false))
 	var in_combat: bool = bool(usage.get("inCombat", false))
-	if not in_field and not in_combat:
-		return {}
 	return {
 		"spellId": spell_id,
 		"resourceKey": resource_key,
-		"power": power,
+		"power": raw_power,
+		"randomPower": raw_power == 8,
 		"inField": in_field,
 		"inCombat": in_combat,
+		"encounterOnly": not in_field and not in_combat,
 	}
 
 
@@ -124,13 +163,25 @@ static func _spell_usage(metadata: Dictionary) -> Dictionary:
 			"inField": bool(metadata["inField"]),
 			"inCombat": bool(metadata["inCombat"]),
 		}
-	var resource_path: String = str(metadata.get("resourcePath", ""))
-	var spell_script: Variant = load(resource_path) if not resource_path.is_empty() else null
-	var spell: Variant = spell_script.new() if spell_script is GDScript else null
-	return {
-		"inField": bool(spell.get("in_field")) if spell is Object else false,
-		"inCombat": bool(spell.get("in_combat")) if spell is Object else false,
-	}
+	return {"inField": false, "inCombat": false}
+
+
+static func _core_spell_record(spell_id: int) -> Dictionary:
+	if not _core_spell_records_loaded:
+		_core_spell_records_loaded = true
+		var document: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(CORE_SPELL_INVENTORY_PATH)
+		)
+		var spells: Variant = document.get("spells", []) \
+			if document is Dictionary else []
+		if spells is Array:
+			for spell_value: Variant in spells:
+				if spell_value is Dictionary:
+					_core_spell_records[absi(int(
+						spell_value.get("packedSpellId", 0)
+					))] = spell_value
+	var value: Variant = _core_spell_records.get(absi(spell_id), {})
+	return value if value is Dictionary else {}
 
 
 static func equipped_condition_behavior(record: Dictionary) -> Dictionary:
@@ -160,7 +211,7 @@ static func special_ability_modifiers(record: Dictionary) -> Dictionary:
 		return {}
 	var result := {}
 	for field_name: String in ["special3", "special4"]:
-		var ability_number := int(record.get(field_name, 0))
+		var ability_number := absi(int(record.get(field_name, 0)))
 		if ability_number >= 1 and ability_number <= 15:
 			result[field_name] = {
 				"index": ability_number - 1,
@@ -172,9 +223,10 @@ static func special_ability_modifiers(record: Dictionary) -> Dictionary:
 static func _apply_stored_spell(
 	result: Dictionary,
 	record: Dictionary,
-	handled_fields: Array[String]
+	handled_fields: Array[String],
+	custom_spell_overrides := {}
 ) -> void:
-	var behavior := stored_spell_behavior(record)
+	var behavior := stored_spell_behavior(record, custom_spell_overrides)
 	if behavior.is_empty():
 		return
 	var descriptor := [behavior["resourceKey"], behavior["power"]]
@@ -182,6 +234,21 @@ static func _apply_stored_spell(
 		result["_on_field_use_spell"] = descriptor.duplicate()
 	if bool(behavior["inCombat"]):
 		result["_on_combat_use_spell"] = descriptor.duplicate()
+	if bool(behavior["randomPower"]):
+		var random_extra_data: Dictionary = result.get("extra_data", {}).duplicate(true) \
+			if result.get("extra_data", {}) is Dictionary else {}
+		random_extra_data["classicRandomSpellPower"] = true
+		result["extra_data"] = random_extra_data
+	if bool(behavior["encounterOnly"]):
+		var extra_data: Dictionary = result.get("extra_data", {}).duplicate(true) \
+			if result.get("extra_data", {}) is Dictionary else {}
+		extra_data["classicEncounterSpellUse"] = {
+			"resourceKey": behavior["resourceKey"],
+			"spellId": behavior["spellId"],
+			"power": behavior["power"],
+			"randomPower": behavior["randomPower"],
+		}
+		result["extra_data"] = extra_data
 	handled_fields.append("special1")
 	handled_fields.append("special2")
 

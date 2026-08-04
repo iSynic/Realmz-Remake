@@ -3,13 +3,9 @@ extends SceneTree
 const BundleScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_bundle.gd"
 )
-const MapMaterializerScript = preload(
-	"res://scripts/classic_runtime/classic_map_materializer.gd"
-)
-const ItemMaterializerScript = preload(
-	"res://scripts/classic_runtime/classic_item_materializer.gd"
-)
-const BestiaryMaterializerScript = preload(
+const MAP_MATERIALIZER_PATH := "res://scripts/classic_runtime/classic_map_materializer.gd"
+const ITEM_MATERIALIZER_PATH := "res://scripts/classic_runtime/classic_item_materializer.gd"
+const BESTIARY_MATERIALIZER_PATH := (
 	"res://scripts/classic_runtime/classic_bestiary_materializer.gd"
 )
 const GENERATED_DIRECTORIES := ["Bestiary", "Items", "Maps", "Tilesets"]
@@ -62,14 +58,14 @@ func _run() -> void:
 			return
 		var materializers: Array = []
 		if items_only:
-			materializers = [ItemMaterializerScript.new()]
+			materializers = [load(ITEM_MATERIALIZER_PATH).new()]
 		elif bestiary_only:
-			materializers = [BestiaryMaterializerScript.new()]
+			materializers = [load(BESTIARY_MATERIALIZER_PATH).new()]
 		else:
 			materializers = [
-				MapMaterializerScript.new(),
-				ItemMaterializerScript.new(),
-				BestiaryMaterializerScript.new(),
+				load(MAP_MATERIALIZER_PATH).new(),
+				load(ITEM_MATERIALIZER_PATH).new(),
+				load(BESTIARY_MATERIALIZER_PATH).new(),
 			]
 		for materializer in materializers:
 			var result: Dictionary = materializer.materialize(bundle, directory)
