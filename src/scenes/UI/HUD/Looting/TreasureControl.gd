@@ -32,7 +32,6 @@ signal done_looting
 
 
 func on_viewport_size_changed(screensize: Vector2) -> void:
-	itemsRect.size = Vector2(screensize.x - 320, screensize.y - 24)
 	expRect.position = Vector2(0, screensize.y - 24)
 	expRect.size = Vector2(screensize.x - 320, 24)
 	botrightpanel.position = Vector2(screensize.x - 320, screensize.y - 200)

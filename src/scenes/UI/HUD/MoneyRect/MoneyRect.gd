@@ -84,8 +84,8 @@ func character_button_pressed(cb, chara) :
 		child.set_selected(child==cb)
 
 
-func on_viewport_size_changed(screensize) :
-	_set_size(Vector2(screensize.x-320, screensize.y))
+func on_viewport_size_changed(_screensize: Vector2) -> void:
+	offset_right = -320.0
 
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 #func _process(delta):
