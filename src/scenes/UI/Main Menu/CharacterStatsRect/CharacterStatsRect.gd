@@ -344,6 +344,8 @@ func _classic_stat_value(sn : String) -> Variant :
 		return current_character.get_classic_saving_throw(save_index)
 	if sn.begins_with("ClassicSkill") :
 		var skill_index := int(sn.trim_prefix("ClassicSkill"))
+		if current_character.has_method("get_classic_special_ability"):
+			return current_character.get_classic_special_ability(skill_index)
 		if skill_index >= 0 \
 				and skill_index < current_character.classic_special_abilities.size() :
 			return current_character.classic_special_abilities[skill_index]

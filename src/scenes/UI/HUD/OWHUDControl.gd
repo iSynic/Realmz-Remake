@@ -1057,7 +1057,7 @@ func _on_SpellButton_pressed():
 
 #	await spellcastMenu.spell_picked
 
-func _on_spell_picked(character, spell, powerlevel, item : Dictionary) :
+func _on_spell_picked(character, spell, powerlevel, item: Variant) -> void:
 	if spell==null :
 		printerr("OW HUD ERROR : spell from spells menu was a NULL  not a  gdscript ! "+spell)
 		return

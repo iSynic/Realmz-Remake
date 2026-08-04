@@ -4385,6 +4385,8 @@ func filter_characters_by_check(
 
 
 func _classic_special_ability_value(character: Object, index: int) -> int:
+	if character.has_method("get_classic_special_ability"):
+		return int(character.call("get_classic_special_ability", index))
 	if _object_has_property(character, "classic_special_abilities"):
 		var values: Variant = character.get("classic_special_abilities")
 		if values is Array and index >= 0 and index < values.size():

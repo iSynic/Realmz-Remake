@@ -1354,6 +1354,28 @@ func change_classic_special_ability(index: int, change: int) -> int:
 	return classic_special_abilities[index]
 
 
+func get_classic_special_ability(index: int) -> int:
+	if index < 0 or index >= classic_special_abilities.size():
+		return 0
+	var total := classic_special_abilities[index]
+	var resources := NodeAccess.__Resources()
+	if resources == null:
+		return total
+	for instance: ItemInstance in item_inventory:
+		if not instance.equipped:
+			continue
+		var definition: ItemDefinition = resources.get_item_definition(instance)
+		if definition == null:
+			continue
+		var modifiers: Variant = definition.extra_data_value(
+			"classicSpecialAbilityModifiers",
+			{}
+		)
+		if modifiers is Dictionary:
+			total += int(modifiers.get(str(index), 0))
+	return total
+
+
 func _restore_saved_spells(saved_spell_levels: Array, resources: Object) -> void:
 	spells.clear()
 	for saved_level_value: Variant in saved_spell_levels:

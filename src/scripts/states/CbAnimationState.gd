@@ -981,10 +981,21 @@ func _consume_spell_item_charges(caster: Creature, used_item: Variant) -> void:
 		)
 		if used_definition != null \
 				and used_definition.ammo_type != "cantuse":
-			caster.consume_item_charges(caster.current_ammo_weapon_instance)
+			var ammo := caster.current_ammo_weapon_instance
+			if caster.consume_item_charges(ammo):
+				var ammo_definition := GameGlobal.cmp_resources.get_item_definition(
+					ammo
+				)
+				if ammo_definition != null \
+						and ammo_definition.delete_on_empty \
+						and ammo.charges <= 0:
+					caster.remove_inventory_item(ammo)
 		elif used_definition != null \
 				and used_definition.maximum_charges > 0:
-			caster.consume_item_charges(used_item)
+			if caster.consume_item_charges(used_item) \
+					and used_definition.delete_on_empty \
+					and used_item.charges <= 0:
+				caster.remove_inventory_item(used_item)
 	elif used_item is Dictionary and not used_item.is_empty():
 		if used_item.has("ammo_type"):
 			caster.consume_item_charges(caster.current_ammo_weapon_instance)

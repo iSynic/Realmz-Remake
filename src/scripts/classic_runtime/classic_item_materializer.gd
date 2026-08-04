@@ -12,14 +12,13 @@ const ITEM_BOOK_PATH := "Items/stuff_book.json"
 const ITEM_IMAGE_BOOK_PATH := "Items/img_pack.json"
 const ITEM_ATLAS_PATH := "Items/textureAtlas.png"
 const SHARED_ITEM_BOOK_PATH := "res://shared_assets/items/stuff_book.json"
-const MATERIALIZATION_VERSION := 3
+const MATERIALIZATION_VERSION := 4
 const ITEM_ATLAS_CELL_SIZE := 34
 const ITEM_IMAGE_SIZE := 32
 const ITEM_IMAGE_INSET := 1
 # These fields affect item behavior but do not yet have verified native equivalents.
 # Keeping the record is lossless; treating it as launchable would not be.
 const UNSUPPORTED_EFFECT_FIELDS := [
-	"lu",
 	"special1",
 	"special2",
 	"special3",
@@ -475,18 +474,11 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 	if classic_type != 2:
 		if small_damage != 0:
 			unsupported_fields.append("vSmall")
-		if large_damage != 0:
-			unsupported_fields.append("vLarge")
 		if magic_plus != 0:
 			unsupported_fields.append("damage")
-		for field_name: String in ELEMENT_BY_CLASSIC_FIELD:
-			if int(record.get(field_name, 0)) != 0:
-				unsupported_fields.append(field_name)
 	else:
 		if small_damage < 1:
 			unsupported_fields.append("vSmall")
-		if large_damage < 1 or large_damage != small_damage:
-			unsupported_fields.append("vLarge")
 		var damage := {}
 		if small_damage > 0:
 			damage["Physical"] = [1, small_damage]
@@ -519,8 +511,8 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 			stats_summary.append("+%d Physical Damage" % magic_plus)
 
 	var weapon_kind := int(record.get("blunt", 0))
-	if weapon_kind != 0:
-		if classic_type != 2 or weapon_kind not in [-2, -1]:
+	if weapon_kind != 0 and classic_type == 2:
+		if weapon_kind not in [-2, -1]:
 			unsupported_fields.append("blunt")
 		else:
 			var weapon_extra_data: Dictionary = fields.get("extra_data", {})
@@ -540,18 +532,27 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 		fields["weapon_tag_bonus_dmg"] = tag_bonus_damage
 
 	var armor_rating := int(record.get("ac", 0))
-	if armor_rating < 0 or (armor_rating > 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type)):
+	if armor_rating != 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type):
 		unsupported_fields.append("ac")
-	elif armor_rating > 0:
+	elif armor_rating != 0:
 		stats["EvasionMelee"] = armor_rating
 		stats["EvasionRanged"] = armor_rating
-		stats_summary.append("+%d Melee Evasion" % armor_rating)
-		stats_summary.append("+%d Ranged Evasion" % armor_rating)
+		var armor_sign := "+" if armor_rating > 0 else ""
+		stats_summary.append("%s%d Melee Evasion" % [armor_sign, armor_rating])
+		stats_summary.append("%s%d Ranged Evasion" % [armor_sign, armor_rating])
 		var extra_data: Dictionary = fields.get("extra_data", {})
 		extra_data["classicArmorRating"] = armor_rating
 		fields["extra_data"] = extra_data
 		# Remake's shared items use this direct mapping despite its coarser hit scale.
 		fidelity_fallbacks.append("armorRatingUsesNativeEvasionScale")
+
+	var luck_modifier := int(record.get("lu", 0))
+	if luck_modifier != 0 and SLOT_BY_CLASSIC_TYPE.has(classic_type):
+		var luck_extra_data: Dictionary = fields.get("extra_data", {})
+		luck_extra_data["classicLuckModifier"] = luck_modifier
+		fields["extra_data"] = luck_extra_data
+		var luck_sign := "+" if luck_modifier > 0 else ""
+		stats_summary.append("%s%d Luck" % [luck_sign, luck_modifier])
 
 	var strength_modifier := int(record.get("st", 0))
 	if strength_modifier != 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type):

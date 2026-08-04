@@ -24,11 +24,17 @@ func _run() -> void:
 	var root := "res://Campaigns"
 	var expected_count := 13
 	var replace_generated := false
+	var items_only := false
+	var bestiary_only := false
 	for argument: String in arguments:
 		if argument.begins_with("--expected-count="):
 			expected_count = int(argument.trim_prefix("--expected-count="))
 		elif argument == "--replace-generated":
 			replace_generated = true
+		elif argument == "--items-only":
+			items_only = true
+		elif argument == "--bestiary-only":
+			bestiary_only = true
 		elif not argument.begins_with("--"):
 			root = argument
 	var directories := _campaign_directories(root)
@@ -54,11 +60,18 @@ func _run() -> void:
 			printerr("%s: %s" % [directory.get_file(), bundle.last_error])
 			quit(1)
 			return
-		for materializer in [
-			MapMaterializerScript.new(),
-			ItemMaterializerScript.new(),
-			BestiaryMaterializerScript.new(),
-		]:
+		var materializers: Array = []
+		if items_only:
+			materializers = [ItemMaterializerScript.new()]
+		elif bestiary_only:
+			materializers = [BestiaryMaterializerScript.new()]
+		else:
+			materializers = [
+				MapMaterializerScript.new(),
+				ItemMaterializerScript.new(),
+				BestiaryMaterializerScript.new(),
+			]
+		for materializer in materializers:
 			var result: Dictionary = materializer.materialize(bundle, directory)
 			if str(result.get("status", "")) != "ok":
 				printerr("%s: %s" % [directory.get_file(), materializer.last_error])

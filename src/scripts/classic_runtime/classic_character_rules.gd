@@ -820,6 +820,25 @@ static func classic_foe_type_bonus(
 	return result
 
 
+static func classic_luck_accuracy_adjustment(
+	attacker_luck: int,
+	defender_luck: int,
+	attacker_roll: int = -1,
+	defender_roll: int = -1
+) -> float:
+	var attack_bonus := _classic_luck_roll(attacker_luck, attacker_roll)
+	var defense_bonus := _classic_luck_roll(defender_luck, defender_roll)
+	return float(attack_bonus - defense_bonus) / 100.0
+
+
+static func _classic_luck_roll(total_luck: int, supplied_roll: int) -> int:
+	if total_luck <= 0:
+		return 0
+	if supplied_roll >= 0:
+		return clampi(supplied_roll, 1, total_luck)
+	return randi_range(1, total_luck)
+
+
 static func classic_item_use_permission(
 	character: Variant,
 	item: Variant

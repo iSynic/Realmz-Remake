@@ -2668,6 +2668,14 @@ func calculate_melee_accuracy(attacker : Creature, defender : Creature, weapon: 
 		0.0,
 		1.0
 	)
+	accuracy = clampf(
+		accuracy + ClassicCharacterRulesScript.classic_luck_accuracy_adjustment(
+			_classic_combat_luck(attacker),
+			_classic_combat_luck(defender)
+		),
+		0.0,
+		1.0
+	)
 	accuracy = ClassicProtectionFromFoeScript.adjust_melee_accuracy(
 		accuracy,
 		attacker,
@@ -2697,6 +2705,15 @@ func calculate_melee_accuracy(attacker : Creature, defender : Creature, weapon: 
 		defender,
 		{"weaponDefinitionId": weapon_instance.definition_id if weapon_instance != null else ""}
 	)
+
+
+func _classic_combat_luck(character: Object) -> int:
+	if character == null or not character.has_method("get_classic_luck"):
+		return 0
+	var initialized: Variant = character.get("classic_luck_initialized")
+	if initialized == null or not bool(initialized):
+		return 0
+	return maxi(0, int(character.call("get_classic_luck")))
 
 
 func _classic_melee_evasion(defender: Variant) -> float:
@@ -3274,11 +3291,13 @@ func get_classic_secret_detection_chance() -> float:
 		return 0.0
 	var total := 0
 	for character: Variant in player_characters:
-		var abilities: Variant = character.get("classic_special_abilities") \
-			if character is Object else null
-		if abilities is Array and abilities.size() > CLASSIC_DETECT_SECRET_ABILITY_INDEX:
+		if character is Object \
+				and character.has_method("get_classic_special_ability"):
 			total += clampi(
-				int(abilities[CLASSIC_DETECT_SECRET_ABILITY_INDEX]),
+				int(character.call(
+					"get_classic_special_ability",
+					CLASSIC_DETECT_SECRET_ABILITY_INDEX
+				)),
 				0,
 				100
 			)

@@ -13,6 +13,7 @@ const VALID_DISPOSITIONS := [
 	"inactive content",
 ]
 const VALID_PRIORITIES := ["P1", "P2", "P3"]
+const SUPPORTED_CATALOG_SCHEMAS := [2, 3]
 
 
 func inspect(report: Dictionary, catalog_path := DEFAULT_CATALOG_PATH) -> Dictionary:
@@ -157,18 +158,22 @@ func render_markdown(report: Dictionary, audit: Dictionary) -> String:
 	]
 	var reconciliation: Dictionary = audit.get("reconciliation", {})
 	if not reconciliation.is_empty():
+		var resolved_diagnostics := int(reconciliation.get(
+			"resolvedDiagnostics",
+			reconciliation.get("resolvedFalsePositiveDiagnostics", 0)
+		))
 		lines.append_array([
 			"## Taxonomy reconciliation",
 			"",
 			str(reconciliation.get("note", "")),
 			"",
 			(
-				"The previous %d-row baseline minus %d resolved false positives, plus "
+				"The previous %d-row baseline minus %d resolved or implemented rows, plus "
 				+ "%d additional leaf rows created by splitting mixed diagnostics, "
 				+ "produces the current %d-row baseline."
 			) % [
 				int(reconciliation.get("previousFidelityFallbacks", 0)),
-				int(reconciliation.get("resolvedFalsePositiveDiagnostics", 0)),
+				resolved_diagnostics,
 				int(reconciliation.get("leafExpansionDiagnostics", 0)),
 				int(totals.get("fidelityFallbacks", 0)),
 			],
@@ -259,7 +264,7 @@ func _load_catalog(path: String) -> Dictionary:
 	file.close()
 	if not (parsed is Dictionary):
 		return {"error": "Fallback catalog root must be a JSON object"}
-	if int(parsed.get("schemaVersion", 0)) != 2:
+	if int(parsed.get("schemaVersion", 0)) not in SUPPORTED_CATALOG_SCHEMAS:
 		return {"error": "Unsupported fallback catalog schema"}
 	if not (parsed.get("codes", null) is Dictionary):
 		return {"error": "Fallback catalog codes must be a JSON object"}

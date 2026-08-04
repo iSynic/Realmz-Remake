@@ -193,34 +193,14 @@ func use_inventory_item(item: ItemInstance, user: Creature) -> void:
 		return
 	var spell_use := resources.item_spell_use(item, "field")
 	if spell_use.size() >= 2:
-			print("ItemSmallBUtton ITEM RIGHT CLICKED HAS A _on_field_use_spell")
-			print("ItemSmallBUtton _on_field_use_spell TBI :(")
-			var spellname : String = spell_use[0]
-			var spellpower : int = spell_use[1]
-			var spell = GameGlobal.cmp_resources.spells_book[spellname]["script"]
-			
-			
-			var targs_picked : bool = false
-			var targets : Array = []
-			
-			var how_many_targets : int = get_num_of_targs_of_spell_in_field(spell, spellpower, user)
-			if how_many_targets == -2 :
-				targets.append(user)
-				targs_picked = true
-			if how_many_targets == -1 :
-				targets = GameGlobal.player_characters + GameGlobal.player_allies
-				targs_picked = true
-			
-			if how_many_targets>0 and (not targs_picked) :
-				#request PC pick
-				print("MenusState entered PC_Pick")
-				picked_charapanels.clear()
-				need_to_pick_n = how_many_targets
-				cur_menu_name = "PC_Pick"
-				targets = await characters_picked
-				print("ExMenu : cast "+spell.name+" on  :")
-				for p in targets :
-					print("    "+p.name)
+		if definition.maximum_charges > 0 and item.charges <= 0:
+			return
+		var spellname: String = spell_use[0]
+		var spellpower: int = spell_use[1]
+		if not GameGlobal.cmp_resources.spells_book.has(spellname):
+			return
+		var spell = GameGlobal.cmp_resources.spells_book[spellname]["script"]
+		await on_spell_picked(user, spell, spellpower, item)
 
 
 
@@ -237,9 +217,18 @@ func get_num_of_targs_of_spell_in_field(spell : Spell, spellpower, user : Creatu
 	how_many_targets = min(how_many_targets, GameGlobal.player_allies.size()+GameGlobal.player_characters.size())
 	return how_many_targets
 
-func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dictionary) :
+func on_spell_picked(
+	character: Creature,
+	spell,
+	powerlevel: int,
+	item: Variant
+) -> void:
 	print("ExMenus state on_spell_picked : ",character.name," ", spell.name)
-	if item.is_empty() and not spell.get("is_not_spell") and not character.can_cast_spells():
+	var from_item: bool = item is ItemInstance \
+		or (item is Dictionary and not item.is_empty())
+	if not from_item \
+			and not spell.get("is_not_spell") \
+			and not character.can_cast_spells():
 		return
 	var _spelldata :  Dictionary = character.get_spell_data(spell, powerlevel)
 	var how_many_targets : int = get_num_of_targs_of_spell_in_field(spell, powerlevel, character)
@@ -264,6 +253,9 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 		if must_pick :
 			UI.ow_hud.request_pc_pick(how_many_targets)
 			targets = await UI.ow_hud.pc_picked
+			if targets.is_empty():
+				UI.ow_hud.spellcastMenu.hide()
+				return
 		pass
 		#print("MenusState entered PC_Pick")
 		#picked_charapanels.clear()
@@ -281,7 +273,7 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 				and bool(scenario_host.call("has_spell_behavior", spell)):
 			var cast_context := {
 				"mode": "field",
-				"fromItem": not item.is_empty(),
+				"fromItem": from_item,
 			}
 			var validation_result: Dictionary = await scenario_host.call(
 				"run_spell_behavior_hook",
@@ -301,7 +293,8 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 			if not bool(validation_result.get("valid", true)):
 				UI.ow_hud.spellcastMenu.hide()
 				return
-		character.on_ability_use(spell, powerlevel)
+		if not from_item:
+			character.on_ability_use(spell, powerlevel)
 		if is_instance_valid(scenario_host) \
 				and scenario_host.has_method("has_spell_behavior") \
 				and bool(scenario_host.call("has_spell_behavior", spell)):
@@ -312,7 +305,7 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 				character,
 				targets,
 				powerlevel,
-				{"mode": "field", "fromItem": not item.is_empty()}
+				{"mode": "field", "fromItem": from_item}
 			)
 			if str(cast_result.get("status", "")) == "error":
 				push_error(str(cast_result.get(
@@ -327,7 +320,7 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 				character,
 				targets,
 				powerlevel,
-				{"mode": "field", "fromItem": not item.is_empty()}
+				{"mode": "field", "fromItem": from_item}
 			)
 			if str(effect_result.get("status", "")) == "error":
 				push_error(str(effect_result.get(
@@ -337,6 +330,7 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 				return
 			scenario_spell_handled = bool(effect_result.get("handled", false))
 		if scenario_spell_handled:
+			_consume_field_spell_item(character, item)
 			UI.ow_hud._on_spell_menu_closed()
 			UI.ow_hud.updateCharPanelDisplay()
 			StateMachine.exit_ex_menu_state()
@@ -368,6 +362,7 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 			UI.ow_hud.updateCharPanelDisplay()
 			
 			StateMachine.exit_ex_menu_state()
+		_consume_field_spell_item(character, item)
 			
 #			charactersrect._set_position(Vector2(screensize.x-320,0) )
 #			charactersrect._set_size(Vector2(320,charrectheight))
@@ -376,6 +371,19 @@ func on_spell_picked(character : Creature, spell, powerlevel : int, item : Dicti
 
 	UI.ow_hud.spellcastMenu.hide()
 	UI.ow_hud.textRect.textLabel.parse_bbcode('')
+
+
+func _consume_field_spell_item(character: Creature, item: Variant) -> void:
+	if not (item is ItemInstance):
+		return
+	var definition := NodeAccess.__Resources().get_item_definition(item)
+	if definition == null or definition.maximum_charges <= 0:
+		return
+	if not character.consume_item_charges(item):
+		return
+	if definition.delete_on_empty and item.charges <= 0:
+		character.remove_inventory_item(item)
+	GameGlobal.refresh_OW_HUD()
 
 
 func set_selected_chara(_c : Creature) :

@@ -521,6 +521,20 @@ func set_classic_luck(value: int) -> void:
 	classic_luck_initialized = true
 
 
+func get_classic_luck() -> int:
+	var total := classic_luck
+	var resources := NodeAccess.__Resources()
+	if resources == null:
+		return total
+	for instance: ItemInstance in item_inventory:
+		if not instance.equipped:
+			continue
+		var definition: ItemDefinition = resources.get_item_definition(instance)
+		if definition != null:
+			total += int(definition.extra_data_value("classicLuckModifier", 0))
+	return total
+
+
 func set_classic_creation_spell_points(value: int) -> void:
 	base_stats["maxSP"] = maxi(0, value)
 	recalculate_stats()

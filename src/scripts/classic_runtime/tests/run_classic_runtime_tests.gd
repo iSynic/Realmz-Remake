@@ -7310,10 +7310,17 @@ func _test_classic_item_materializer() -> void:
 	var size_split_record := weapon_record.duplicate(true)
 	size_split_record["vLarge"] = 8
 	_expect(
-		materializer._native_item(size_split_record, []).get(
+		not materializer._native_item(size_split_record, []).get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("vLarge"),
-		"size-dependent Classic weapon damage remains an explicit blocker"
+		"unused Classic large-target damage remains lossless without blocking play"
+	)
+	_expect_equal(
+		materializer._native_item(size_split_record, []).get(
+			"extra_data", {}
+		).get("classicWeaponDamage"),
+		{"small": 6, "large": 8},
+		"unused Classic large-target damage remains available for inspection"
 	)
 	var categoryless_record := weapon_record.duplicate(true)
 	categoryless_record["itemCat0"] = 0
@@ -7483,19 +7490,27 @@ func _test_classic_item_materializer() -> void:
 	)
 	var negative_armor_record := shield_record.duplicate(true)
 	negative_armor_record["ac"] = -1
+	var negative_armor_item: Dictionary = materializer._native_item(
+		negative_armor_record, []
+	)
+	_expect_equal(
+		negative_armor_item.get("stats", {}).get("EvasionMelee"),
+		-1,
+		"negative Classic armor remains a signed equipment modifier"
+	)
 	_expect(
-		materializer._native_item(negative_armor_record, []).get(
-			"classicMaterialization", {}
-		).get("unsupportedFields", []).has("ac"),
-		"negative Classic armor remains an explicit blocker"
+		not negative_armor_item.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		).has("ac"),
+		"signed Classic armor remains launchable"
 	)
 	var non_weapon_element_record := weapon_record.duplicate(true)
 	non_weapon_element_record["type"] = 25
 	_expect(
-		materializer._native_item(non_weapon_element_record, []).get(
+		not materializer._native_item(non_weapon_element_record, []).get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("heat"),
-		"elemental damage on a non-melee item remains an explicit blocker"
+		"non-melee elemental bytes remain inert as in Classic combat"
 	)
 	_expect(
 		materializer._native_item(non_weapon_element_record, []).get(
@@ -7576,11 +7591,67 @@ func _test_classic_item_materializer() -> void:
 	)
 	var luck_record := armor_record.duplicate(true)
 	luck_record["lu"] = 2
+	var luck_item: Dictionary = materializer._native_item(luck_record, [])
+	_expect_equal(
+		luck_item.get("extra_data", {}).get("classicLuckModifier"),
+		2,
+		"Classic luck is retained as equipped compatibility metadata"
+	)
 	_expect(
-		materializer._native_item(luck_record, []).get(
+		not luck_item.get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("lu"),
-		"Classic luck remains blocked without a working native stat or trait"
+		"equipped Classic luck no longer blocks materialization"
+	)
+	_expect_equal(
+		CharacterRulesScript.classic_luck_accuracy_adjustment(12, 7, 8, 3),
+		0.05,
+		"Classic luck changes attack probability by its opposed source rolls"
+	)
+	var stored_spell_record := armor_record.duplicate(true)
+	stored_spell_record["special1"] = -7
+	stored_spell_record["special2"] = 3309
+	var stored_spell_item: Dictionary = materializer._native_item(
+		stored_spell_record, []
+	)
+	_expect_equal(
+		stored_spell_item.get("_on_combat_use_spell"),
+		["Phase", 7],
+		"Classic stored spells resolve to their exact native combat resource"
+	)
+	_expect(
+		not stored_spell_item.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		).has("special2"),
+		"resolved Classic stored spells no longer block materialization"
+	)
+	var condition_record := armor_record.duplicate(true)
+	condition_record["special1"] = 22
+	condition_record["special2"] = -1
+	var condition_item: Dictionary = materializer._native_item(condition_record, [])
+	_expect_equal(
+		condition_item.get("traits"),
+		[["p_classic_tangled.gd", [1]]],
+		"equipped Classic conditions use the permanent source-backed trait"
+	)
+	var ability_record := armor_record.duplicate(true)
+	ability_record["special3"] = 5
+	ability_record["special4"] = 1
+	ability_record["special5"] = 25
+	var ability_item: Dictionary = materializer._native_item(ability_record, [])
+	_expect_equal(
+		ability_item.get("extra_data", {}).get(
+			"classicSpecialAbilityModifiers"
+		),
+		{"0": 25, "4": 25},
+		"Classic equipment retains both special-ability modifiers"
+	)
+	_expect_equal(
+		ability_item.get("classicMaterialization", {}).get(
+			"unsupportedFields", []
+		),
+		[],
+		"source-backed Classic equipment abilities materialize completely"
 	)
 	var readiness: Dictionary = ReadinessScript.new().inspect(bundle, {"items": item_book})
 	_expect(

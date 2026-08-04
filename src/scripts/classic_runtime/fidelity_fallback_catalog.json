@@ -1,17 +1,17 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "kind": "classic-fidelity-fallback-catalog",
   "baseline": {
     "campaigns": 13,
     "readyCampaigns": 13,
     "progressionBlockers": 0,
-    "fidelityFallbacks": 2098
+    "fidelityFallbacks": 1508
   },
   "reconciliation": {
     "previousFidelityFallbacks": 2470,
-    "resolvedFalsePositiveDiagnostics": 1693,
+    "resolvedDiagnostics": 2283,
     "leafExpansionDiagnostics": 1321,
-    "note": "Schema 2 removes the obsolete classicInertMoraleThresholds marker and splits mixed item and monster rows into independently owned leaf diagnostics."
+    "note": "Schema 2 removed the obsolete classicInertMoraleThresholds marker and split mixed rows into independently owned leaf diagnostics. Schema 3 also records source-backed item categories, restrictions, combat fields, stored spells, equipped conditions, and special-ability modifiers, including the dependent monster-item rows those implementations resolve."
   },
   "codes": {
     "classic-synchronous-sound": {

@@ -208,6 +208,10 @@ func _query_spell_definition(payload: Dictionary) -> Dictionary:
 
 
 static func _character_stat(character: Object, stat_name: String) -> int:
+	if stat_name == "Luck" \
+			and character != null \
+			and character.has_method("get_classic_luck"):
+		return int(character.call("get_classic_luck"))
 	if character != null and character.has_method("get_stat"):
 		return int(character.call("get_stat", stat_name))
 	return 0
