@@ -186,6 +186,7 @@ func _preload_secondary_scenes_after_first_frame() -> void:
 		not is_inside_tree()
 		or _deferred_requests_started
 		or OS.get_cmdline_args().has("--script")
+		or not _is_running_main_scene()
 	):
 		return
 	_deferred_requests_started = true
@@ -213,9 +214,22 @@ func _preload_secondary_scenes_after_first_frame() -> void:
 
 func _warm_campaign_catalog_after_first_frame() -> void:
 	await get_tree().process_frame
-	if not is_inside_tree() or OS.get_cmdline_args().has("--script"):
+	if (
+		not is_inside_tree()
+		or OS.get_cmdline_args().has("--script")
+		or not _is_running_main_scene()
+	):
 		return
 	await GameGlobal.warm_campaign_selection_previews_async()
+
+
+func _is_running_main_scene() -> bool:
+	var current_scene := get_tree().current_scene
+	if current_scene == null:
+		return false
+	return current_scene.scene_file_path == str(
+		ProjectSettings.get_setting("application/run/main_scene", "")
+	)
 
 
 func _instantiate_deferred_scene(scene_path: String, scene: PackedScene) -> void:
