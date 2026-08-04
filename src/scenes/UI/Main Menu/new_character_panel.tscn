@@ -1,6 +1,6 @@
 [gd_scene load_steps=6 format=3 uid="uid://ci4cf1yx31p2n"]
 
-[ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="1_fcejw"]
+[ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="1_fcejw"]
 [ext_resource type="Script" path="res://scenes/UI/Main Menu/NewCharacterPanel.gd" id="2_nga7k"]
 [ext_resource type="PackedScene" uid="uid://bov2d346tediq" path="res://scenes/UI/Main Menu/CharacterStatsRect/CharacterStatsRect.tscn" id="5_pga5p"]
 [ext_resource type="PackedScene" uid="uid://biqyyjm2makqt" path="res://scenes/UI/HUD/AbilitiesManagement/abilities_mngt_rect.tscn" id="6_oel76"]

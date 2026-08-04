@@ -1,6 +1,8 @@
 class_name ValidationManager
  
-const validations = []
+const validations = [
+	preload("res://scripts/validation/resource_uid_validation.gd"),
+]
 
 func run_all_validations() -> bool:
 	print("Running all validations...")

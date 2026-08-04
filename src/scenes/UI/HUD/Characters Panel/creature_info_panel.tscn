@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://b2x4kchstat01"]
 
-[ext_resource type="Texture2D" uid="uid://baijqqoeouga7" path="res://shared_assets/UI/StonePatternRect9.png" id="1_stone"]
+[ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="1_stone"]
 [ext_resource type="Script" path="res://scenes/UI/HUD/Characters Panel/creature_info_panel.gd" id="2_script"]
 [ext_resource type="FontFile" path="res://Fonts/BlackChancery.tres" id="3_font"]
 [ext_resource type="StyleBox" path="res://shared_assets/UI/button_normal_styleboxtexture.tres" id="4_btn_n"]

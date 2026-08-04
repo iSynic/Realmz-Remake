@@ -4,12 +4,12 @@ Thumbs.db
 .godot/*
 dev/*
 demo/*
-*.import
-# Include .import files for tiles
-!shared_assets/tiles/**/*.import
-!BattleEffects/*.import
-!textureAtlas.png.import
-!map_symbols.png.import
+# Source-adjacent Godot 4 import metadata is versioned. The compiled cache
+# remains ignored above.
+
+# Controlled scenario fixtures intentionally preserve their exact package
+# contents, so do not add generated script UID sidecars inside them.
+scripts/scenario_runtime/tests/fixtures/**/*.gd.uid
 default_bus_layout.tres
 default_env.tres
 godot-mod-player.png
