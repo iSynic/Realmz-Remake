@@ -38,7 +38,7 @@ func _test_checked_catalogs() -> void:
 		),
 		"shared item book passes validated loading: %s" % str(catalog.last_errors),
 	)
-	_expect_equal(catalog.definition_count(), 525, "all shared definitions load")
+	_expect_equal(catalog.definition_count(), 526, "all shared definitions load")
 	var stock_fidelity_expectations := {
 		"Leather of Darkness -2": {
 			"iconId": 59,
@@ -370,7 +370,7 @@ func _test_checked_catalogs() -> void:
 		),
 		"reloading the same source replaces definitions safely",
 	)
-	_expect_equal(catalog.definition_count(), 525, "same-source reload does not duplicate")
+	_expect_equal(catalog.definition_count(), 526, "same-source reload does not duplicate")
 
 	var cob_book := _read_object(COB_ITEM_BOOK)
 	var cob_images := _read_object(COB_IMAGE_BOOK)
@@ -387,7 +387,7 @@ func _test_checked_catalogs() -> void:
 		"City of Bywater item book passes validated loading: %s"
 		% str(catalog.last_errors),
 	)
-	_expect_equal(catalog.definition_count(), 531, "campaign definitions extend shared catalog")
+	_expect_equal(catalog.definition_count(), 532, "campaign definitions extend shared catalog")
 	var personal_items_id := "classic:%s:807" % COB_CAMPAIGN_ID
 	_expect_equal(
 		catalog.resolve_catalog_key(
@@ -434,7 +434,7 @@ func _test_checked_catalogs() -> void:
 	)
 	_expect_equal(
 		catalog.definition_count(),
-		532,
+		533,
 		"all checked shared and campaign definitions load",
 	)
 	var otherworld_id := "campaign:scenario-otherworld:Bywater%20Dagger"
