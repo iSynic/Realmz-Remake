@@ -82,7 +82,6 @@ const ELEMENT_BY_SPECIAL_ATTACK := {
 const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
-const CLASSIC_INERT_MORALE_MAX := 100
 const MATERIALIZATION_VERSION := 6
 
 var last_error := ""
@@ -324,13 +323,6 @@ func _native_monster(
 		icon_resolution = icon_resolution.duplicate(true)
 		icon_resolution["runtimeImageKey"] = image_key
 		icon_resolution["runtimeImageSource"] = "shared-bestiary-atlas"
-	var run_percent := int(record.get("runPercent", 0))
-	var surrender_percent := int(record.get("surrenderPercent", 0))
-	if (
-		(run_percent != 0 and run_percent <= CLASSIC_INERT_MORALE_MAX)
-		or (surrender_percent != 0 and surrender_percent <= CLASSIC_INERT_MORALE_MAX)
-	):
-		fidelity_fallbacks.append("classicInertMoraleThresholds")
 	for fallback: String in native_inventory.get("fidelityFallbacks", []):
 		if not fidelity_fallbacks.has(fallback):
 			fidelity_fallbacks.append(fallback)

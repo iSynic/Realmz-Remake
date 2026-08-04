@@ -4099,10 +4099,10 @@ func _test_custom_monster_battle_fixture() -> void:
 		"custom caster preserves its source surrender threshold"
 	)
 	_expect(
-		arcanist.get(
+		not arcanist.get(
 			"classicMaterialization", {}
 		).get("fidelityFallbacks", []).has("classicInertMoraleThresholds"),
-		"custom caster records the inert source morale thresholds"
+		"source-backed inert morale thresholds are not fidelity fallbacks"
 	)
 	_expect_equal(
 		skirmisher.get("classicMissileItemName"),
@@ -7601,7 +7601,7 @@ func _test_classic_item_materializer() -> void:
 	)
 	_expect(
 		_readiness_has_reference_diagnostic(
-			unsupported_readiness, "native-item-fidelity-fallback", 901
+			unsupported_readiness, "classic-item-field-fallback", 901
 		),
 		"encounter identity matching remains available when other item behavior is unsupported"
 	)
@@ -9559,10 +9559,18 @@ func _test_classic_bestiary_materializer() -> void:
 		"shipped inert morale thresholds do not block native materialization"
 	)
 	_expect(
-		morale_native.get(
+		not morale_native.get(
 			"classicMaterialization", {}
 		).get("fidelityFallbacks", []).has("classicInertMoraleThresholds"),
-		"nonzero inert morale thresholds remain visible as a compatibility fallback"
+		"source-backed inert morale thresholds are not compatibility fallbacks"
+	)
+	_expect_equal(
+		ReadinessScript.new()._group_fallback_fields(
+			["classicInertMoraleThresholds"],
+			Callable(ReadinessScript.new(), "_monster_fallback_code")
+		),
+		{},
+		"readiness ignores the legacy generated morale fallback marker"
 	)
 	morale_record["runPercent"] = 101
 	morale_record["surrenderPercent"] = 101
@@ -9766,7 +9774,7 @@ func _test_classic_bestiary_materializer() -> void:
 	)
 	_expect(
 		_readiness_has_reference_diagnostic(
-			unsupported_readiness, "native-monster-fidelity-fallback", 1
+			unsupported_readiness, "classic-monster-special-attack-fallback", 1
 		),
 		"preserved special attacks remain launchable with their stable identity"
 	)
@@ -10623,7 +10631,7 @@ func _test_classic_campaign_package_installer() -> void:
 	_expect(
 		_readiness_has_reference_diagnostic(
 			installed_special_monster.readiness_report,
-			"native-monster-fidelity-fallback",
+			"classic-monster-special-attack-fallback",
 			1
 		),
 		"special monster installation reports its bounded fidelity fallback"

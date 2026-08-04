@@ -1691,24 +1691,37 @@ func _check_monster_materialization(
 			)
 	if fallbacks.is_empty():
 		return
-	var fallback_message := "Classic monster %d uses native fidelity fallbacks" % monster_id
-	var fallback_extra := {"referenceId": monster_id, "fallbackFields": fallbacks}
-	if action is Dictionary and not action.is_empty():
-		_add_fallback_for_action(
-			action,
-			"native-monster-fidelity-fallback",
-			fallback_message,
-			fallback_extra
+	var grouped_fallbacks := _group_fallback_fields(
+		fallbacks,
+		Callable(self, "_monster_fallback_code")
+	)
+	for fallback_code: String in grouped_fallbacks:
+		var fallback_fields: Array = grouped_fallbacks[fallback_code]
+		var fallback_message := (
+			"Classic monster %d uses the %s compatibility fallback"
+			% [monster_id, fallback_code]
 		)
-	else:
-		_add_fallback(
-			"native-monster-fidelity-fallback",
-			source,
-			record_index,
-			slot,
-			fallback_message,
-			fallback_extra
-		)
+		var fallback_extra := {
+			"familyCode": "native-monster-fidelity-fallback",
+			"referenceId": monster_id,
+			"fallbackFields": fallback_fields,
+		}
+		if action is Dictionary and not action.is_empty():
+			_add_fallback_for_action(
+				action,
+				fallback_code,
+				fallback_message,
+				fallback_extra
+			)
+		else:
+			_add_fallback(
+				fallback_code,
+				source,
+				record_index,
+				slot,
+				fallback_message,
+				fallback_extra
+			)
 
 
 func _check_item_ids(
@@ -1747,20 +1760,93 @@ func _check_item_ids(
 		var materialization: Variant = native_item.get("classicMaterialization", {})
 		if materialization is Dictionary \
 				and str(materialization.get("status", "")) == "blocked":
-			_add_fallback(
-				"native-item-fidelity-fallback",
-				"Data ED2",
-				encounter_id,
-				-1,
-				(
-					"Complex encounter item %d can be identified, but some of its "
-					+ "ordinary item behavior is not materialized natively"
-				) % item_id,
-				{
-					"referenceId": item_id,
-					"unsupportedFields": materialization.get("unsupportedFields", []),
-				}
+			var unsupported_fields: Array = materialization.get("unsupportedFields", [])
+			var grouped_fallbacks := _group_fallback_fields(
+				unsupported_fields,
+				Callable(self, "_item_fallback_code")
 			)
+			for fallback_code: String in grouped_fallbacks:
+				_add_fallback(
+					fallback_code,
+					"Data ED2",
+					encounter_id,
+					-1,
+					(
+						"Complex encounter item %d can be identified, but its %s "
+						+ "behavior is not materialized natively"
+					) % [item_id, fallback_code],
+					{
+						"familyCode": "native-item-fidelity-fallback",
+						"referenceId": item_id,
+						"unsupportedFields": grouped_fallbacks[fallback_code],
+					}
+				)
+
+
+func _group_fallback_fields(fields: Array, code_for_field: Callable) -> Dictionary:
+	var grouped: Dictionary = {}
+	for field_value: Variant in fields:
+		var field_name := str(field_value)
+		var code := str(code_for_field.call(field_name))
+		if code.is_empty():
+			continue
+		var code_fields: Array = grouped.get(code, [])
+		if not code_fields.has(field_name):
+			code_fields.append(field_name)
+		grouped[code] = code_fields
+	return grouped
+
+
+func _monster_fallback_code(field_name: String) -> String:
+	# Older generated campaign books labeled the source-backed morale thresholds
+	# as a fallback. The runtime now executes both thresholds exactly, so retain
+	# compatibility with those books without reporting resolved behavior as debt.
+	if field_name == "classicInertMoraleThresholds":
+		return ""
+	if field_name == "weaponRequirementsUseNativeMissFeedback":
+		return "classic-monster-weapon-requirement-feedback"
+	if field_name == "weapon.randomSelector":
+		return "classic-monster-random-weapon-fallback"
+	if field_name == "elementalSpecialAttackMitigation":
+		return "classic-monster-elemental-mitigation-fallback"
+	if field_name.ends_with(".nativeFields") and field_name.begins_with("items["):
+		return "classic-monster-item-materialization-fallback"
+	if field_name == "itemDetectionMarkers":
+		return "classic-monster-item-detection-fallback"
+	if field_name == "separateActiveWeaponInventoryEntry":
+		return "classic-monster-active-weapon-projection-fallback"
+	if field_name == "missilePercent":
+		return "classic-monster-missile-item-fallback"
+	if field_name.begins_with("attacks[") and field_name.ends_with("].special"):
+		return "classic-monster-special-attack-fallback"
+	if field_name == "attackSounds":
+		return "classic-monster-attack-sound-fallback"
+	if field_name == "weapon.nonEquippable":
+		return "classic-monster-non-equippable-weapon-fallback"
+	if field_name == "weapon.nativeFields":
+		return "classic-monster-weapon-materialization-fallback"
+	if field_name == "zeroMeleeAttacksUseNativeActionFloor":
+		return "classic-monster-zero-melee-action-fallback"
+	return "classic-monster-field-fallback"
+
+
+func _item_fallback_code(field_name: String) -> String:
+	if field_name in [
+		"raceRestrictions",
+		"raceClassOnly",
+		"specificRace",
+		"casteRestrictions",
+		"casteClassOnly",
+		"specificCaste",
+	]:
+		return "classic-item-restriction-fallback"
+	if field_name in ["special1", "special2", "special3", "special4", "special5", "cursedItemId"]:
+		return "classic-item-special-effect-fallback"
+	if field_name.begins_with("itemCategory[") or field_name == "itemCategory.missing":
+		return "classic-item-category-fallback"
+	if field_name in ["vLarge", "blunt", "lu", "ac", "heat"]:
+		return "classic-item-combat-field-fallback"
+	return "classic-item-field-fallback"
 
 
 func _native_item_for_classic_id(

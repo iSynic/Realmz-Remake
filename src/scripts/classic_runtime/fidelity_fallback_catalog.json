@@ -1,11 +1,17 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "classic-fidelity-fallback-catalog",
   "baseline": {
     "campaigns": 13,
     "readyCampaigns": 13,
     "progressionBlockers": 0,
-    "fidelityFallbacks": 2470
+    "fidelityFallbacks": 2098
+  },
+  "reconciliation": {
+    "previousFidelityFallbacks": 2470,
+    "resolvedFalsePositiveDiagnostics": 1693,
+    "leafExpansionDiagnostics": 1321,
+    "note": "Schema 2 removes the obsolete classicInertMoraleThresholds marker and splits mixed item and monster rows into independently owned leaf diagnostics."
   },
   "codes": {
     "classic-synchronous-sound": {
@@ -72,21 +78,149 @@
       "userAssistanceNeeded": false,
       "notes": "The missing text affects presentation unless source control flow proves a behavioral dependency."
     },
-    "native-item-fidelity-fallback": {
+    "classic-item-category-fallback": {
       "disposition": "Remake runtime gap",
       "owner": "F:/Realmz Remake",
       "priority": "P1",
-      "requiredEvidence": "Per-field Classic source semantics, an imported item fixture, and focused runtime tests for identification, equipping, restrictions, curses, and special behavior.",
+      "requiredEvidence": "Classic canuse category scanning, an imported item fixture, and equip/use tests covering the exact category bit.",
       "userAssistanceNeeded": false,
-      "notes": "Identity is native, but one or more ordinary item fields are not yet materialized."
+      "notes": "The item is identifiable but its first active Classic permission category lacks an exact native projection."
     },
-    "native-monster-fidelity-fallback": {
+    "classic-item-combat-field-fallback": {
       "disposition": "Remake runtime gap",
       "owner": "F:/Realmz Remake",
       "priority": "P1",
-      "requiredEvidence": "Per-field Classic source semantics, native monster fixtures, and combat tests covering each fallback field without changing unrelated monster behavior.",
+      "requiredEvidence": "Classic item combat source, exact imported records, and equipment/combat tests for the reported damage, armor, or weapon field.",
       "userAssistanceNeeded": false,
-      "notes": "This is the largest active behavior-loss group and should be split by fallback field before implementation."
+      "notes": "A source combat field is retained but not yet applied through exact Classic rules."
+    },
+    "classic-item-field-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Per-field Classic source semantics, an imported item fixture, and a focused test at every runtime consumer.",
+      "userAssistanceNeeded": false,
+      "notes": "Catch-all for a materialized item field that needs a dedicated leaf family before implementation."
+    },
+    "classic-item-restriction-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic canuse restriction control flow, exact race/caste records, and equip/use denial tests.",
+      "userAssistanceNeeded": false,
+      "notes": "The source restriction bits exceed or disagree with the current native permission projection."
+    },
+    "classic-item-special-effect-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic item special-field dispatch, exact imported records, and identification/use/equip/combat tests for each special field.",
+      "userAssistanceNeeded": false,
+      "notes": "One or more scripted or cursed item effects remain preserved without exact runtime behavior."
+    },
+    "classic-monster-active-weapon-projection-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic monster inventory and loot source plus a battle fixture proving active weapon use and post-battle drops.",
+      "userAssistanceNeeded": false,
+      "notes": "Classic stores an active weapon separately from its carried slots; the native projection must preserve both use and loot semantics."
+    },
+    "classic-monster-attack-sound-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P2",
+      "requiredEvidence": "Classic attack-sound selection source, exact attack rows, and an audible combat presentation test.",
+      "userAssistanceNeeded": false,
+      "notes": "The attack remains functional but currently uses a generic sound."
+    },
+    "classic-monster-elemental-mitigation-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic elemental special-attack source and deterministic save/protection/damage fixtures for party and monster targets.",
+      "userAssistanceNeeded": false,
+      "notes": "Native resistance currently replaces Classic's separate save and protection sequence."
+    },
+    "classic-monster-field-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Per-field Classic source semantics, an exact monster fixture, and a focused combat test.",
+      "userAssistanceNeeded": false,
+      "notes": "Catch-all for a monster field that needs a dedicated leaf family before implementation."
+    },
+    "classic-monster-item-detection-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P2",
+      "requiredEvidence": "Classic detected-item sign-bit source and inventory/loot inspection tests that preserve identification state.",
+      "userAssistanceNeeded": false,
+      "notes": "The item can be carried and dropped, but the source magic-detected marker is lost."
+    },
+    "classic-monster-item-materialization-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Resolution of the referenced item leaf diagnostics plus monster inventory, equipment, and loot tests.",
+      "userAssistanceNeeded": false,
+      "notes": "A monster inventory slot references an item whose own Classic fields are not fully materialized."
+    },
+    "classic-monster-missile-item-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic monster missile-selection source and deterministic item, charge, chance, and targeting tests.",
+      "userAssistanceNeeded": false,
+      "notes": "The source missile chance cannot be executed with an exact carried missile item."
+    },
+    "classic-monster-non-equippable-weapon-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic weapon-use source and a fixture proving how the active item behaves when its native category is not equippable.",
+      "userAssistanceNeeded": false,
+      "notes": "The source active weapon is carried but cannot be represented as native equipment."
+    },
+    "classic-monster-random-weapon-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic negative weapon selector source, exact candidate records, and seeded selection/equipment/loot tests.",
+      "userAssistanceNeeded": false,
+      "notes": "The source random active-weapon selector is preserved but not executed."
+    },
+    "classic-monster-special-attack-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic attack special dispatch, an exact attack-row fixture, and deterministic save/effect tests for each reported special code.",
+      "userAssistanceNeeded": false,
+      "notes": "The attack identity is retained but the special effect is not fully handled."
+    },
+    "classic-monster-weapon-materialization-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Resolution of the referenced item leaf diagnostics plus active weapon and loot tests.",
+      "userAssistanceNeeded": false,
+      "notes": "The active weapon references an item whose own Classic fields are not fully materialized."
+    },
+    "classic-monster-weapon-requirement-feedback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic required-weapon hit checks and exact failure-result presentation for blunt, sharp, item-ID, and magic-plus requirements.",
+      "userAssistanceNeeded": false,
+      "notes": "Hit gating is retained, but native miss feedback does not yet reproduce the Classic result path."
+    },
+    "classic-monster-zero-melee-action-fallback": {
+      "disposition": "Remake runtime gap",
+      "owner": "F:/Realmz Remake",
+      "priority": "P1",
+      "requiredEvidence": "Classic zero-attack action-selection source and a combat fixture proving whether a native action floor is allowed.",
+      "userAssistanceNeeded": false,
+      "notes": "Remake currently supplies one melee action when the source record supplies none."
     },
     "unresolved-classic-picture-resource": {
       "disposition": "missing Classic resource",

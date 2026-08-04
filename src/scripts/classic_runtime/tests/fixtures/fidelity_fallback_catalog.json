@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "classic-fidelity-fallback-catalog-test",
   "baseline": {
     "campaigns": 1,

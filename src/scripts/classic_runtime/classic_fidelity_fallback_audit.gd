@@ -122,6 +122,7 @@ func inspect(report: Dictionary, catalog_path := DEFAULT_CATALOG_PATH) -> Dictio
 		"byDisposition": by_disposition,
 		"byPriority": by_priority,
 		"userHelpNeeded": user_help_needed,
+		"reconciliation": catalog.get("reconciliation", {}).duplicate(true),
 	}
 
 
@@ -153,11 +154,32 @@ func render_markdown(report: Dictionary, audit: Dictionary) -> String:
 			audit.get("baselineMatches", false)
 		).to_lower(),
 		"",
+	]
+	var reconciliation: Dictionary = audit.get("reconciliation", {})
+	if not reconciliation.is_empty():
+		lines.append_array([
+			"## Taxonomy reconciliation",
+			"",
+			str(reconciliation.get("note", "")),
+			"",
+			(
+				"The previous %d-row baseline minus %d resolved false positives, plus "
+				+ "%d additional leaf rows created by splitting mixed diagnostics, "
+				+ "produces the current %d-row baseline."
+			) % [
+				int(reconciliation.get("previousFidelityFallbacks", 0)),
+				int(reconciliation.get("resolvedFalsePositiveDiagnostics", 0)),
+				int(reconciliation.get("leafExpansionDiagnostics", 0)),
+				int(totals.get("fidelityFallbacks", 0)),
+			],
+			"",
+		])
+	lines.append_array([
 		"## Ownership and priority totals",
 		"",
 		"| Group | Diagnostics |",
 		"|---|---:|",
-	]
+	])
 	_append_count_rows(lines, "Disposition", audit.get("byDisposition", {}))
 	_append_count_rows(lines, "Priority", audit.get("byPriority", {}))
 	lines.append_array([
@@ -237,7 +259,7 @@ func _load_catalog(path: String) -> Dictionary:
 	file.close()
 	if not (parsed is Dictionary):
 		return {"error": "Fallback catalog root must be a JSON object"}
-	if int(parsed.get("schemaVersion", 0)) != 1:
+	if int(parsed.get("schemaVersion", 0)) != 2:
 		return {"error": "Unsupported fallback catalog schema"}
 	if not (parsed.get("codes", null) is Dictionary):
 		return {"error": "Fallback catalog codes must be a JSON object"}
