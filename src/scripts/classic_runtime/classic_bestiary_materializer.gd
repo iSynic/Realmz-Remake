@@ -82,7 +82,7 @@ const ELEMENT_BY_SPECIAL_ATTACK := {
 const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
-const MATERIALIZATION_VERSION := 9
+const MATERIALIZATION_VERSION := 10
 
 var last_error := ""
 
@@ -807,6 +807,11 @@ func _native_attacks(record: Dictionary) -> Dictionary:
 					unsupported_fields.append("attacks[%d].specialDamage" % attack_index)
 				else:
 					attack["extra_data"]["classicSpecialDamageMax"] = high
+			elif special == 17:
+				if high < 1:
+					unsupported_fields.append("attacks[%d].specialPower" % attack_index)
+				else:
+					attack["extra_data"]["classicSpecialPower"] = high
 			elif special != 0 and not MonsterSpecialAttackScript.supports(special):
 				unsupported_fields.append("attacks[%d].special" % attack_index)
 			entries.append(attack)

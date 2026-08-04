@@ -8,12 +8,16 @@ const StatusAttackScript = preload(
 const PermanentAfflictionScript = preload(
 	"res://scripts/classic_runtime/classic_permanent_affliction.gd"
 )
+const CharacterRulesScript = preload(
+	"res://scripts/classic_runtime/classic_character_rules.gd"
+)
 const CharmedTrait = preload("res://shared_assets/traits/t_classic_charmed.gd")
 
 const SAVE_BY_SPECIAL := {
 	8: 6,
 	9: 5,
 	10: 0,
+	17: 7,
 	18: 7,
 	19: 7,
 }
@@ -88,7 +92,10 @@ static func apply_from_weapon(
 		save_roll,
 		party_charm_bonus,
 		chance_modifier,
-		int(extra_data.get("classicSpecialDamageMax", 0)),
+		int(extra_data.get(
+			"classicSpecialDamageMax",
+			extra_data.get("classicSpecialPower", 0)
+		)),
 		damage_roll
 	)
 
@@ -136,8 +143,8 @@ static func apply(
 			and int(target.get_meta("classic_magic_resistance", 0)) > 100:
 		result["blockedByMagicResistance"] = true
 		return result
-	# Drain Victory has no monster-target case in attack.c.
-	if special_code == 9 and is_monster_target:
+	# Drain Victory and Age have no monster-target case in attack.c.
+	if special_code in [9, 17] and is_monster_target:
 		result["partyTargetOnly"] = true
 		return result
 
@@ -186,6 +193,8 @@ static func apply(
 			return _drain_experience(attacker, target, result)
 		10:
 			return _charm(attacker, target, result)
+		17:
+			return _age(attacker, target, result, damage_max)
 		18:
 			return _blind(target, result)
 		19:
@@ -312,6 +321,43 @@ static func _charm(
 			result["attackerTargetCleared"] = true
 	result["applied"] = true
 	result["targetFaction"] = int(target.get("curFaction"))
+	return result
+
+
+static func _age(
+	attacker: Object,
+	target: Object,
+	result: Dictionary,
+	special_power: int
+) -> Dictionary:
+	if special_power < 1:
+		return _error("Classic aging attack has no positive magnitude")
+	var profile: Variant = _property_value(target, "classic_rule_profile")
+	if not (profile is Dictionary):
+		return _error("Classic aging attack requires target race rules")
+	var creation: Variant = profile.get("creation", {})
+	if not (creation is Dictionary) or not creation.has("maximumAge"):
+		return _error("Classic aging attack requires target maximum age")
+	var maximum_age := int(creation.get("maximumAge", 0))
+	var hit_dice := maxi(0, int(attacker.get_meta("classic_hit_dice", 0)))
+	if maximum_age < 1 or hit_dice < 1:
+		return _error("Classic aging attack has invalid race or attacker rules")
+	# attack.c stores this floating-point result in a short and adds it directly
+	# to the character's day counter. Preserve that unit quirk exactly.
+	var age_days := floori(
+		float(maximum_age) * 0.01 * float(special_power * hit_dice)
+	)
+	var aging_result: Dictionary = CharacterRulesScript.advance_character_age_days(
+		target,
+		age_days
+	)
+	if str(aging_result.get("status", "")) == "error":
+		return _error(str(aging_result.get("message", "Classic aging failed")))
+	result["ageDays"] = age_days
+	result["ageYears"] = int(aging_result.get("ageYears", 0))
+	result["ageGroup"] = int(aging_result.get("ageGroup", 0))
+	result["ageTransition"] = int(aging_result.get("transition", 0))
+	result["applied"] = age_days > 0
 	return result
 
 

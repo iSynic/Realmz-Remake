@@ -10009,20 +10009,29 @@ func _test_classic_bestiary_materializer() -> void:
 		not special_attack_materialization.get(
 			"unsupportedFields", []
 		).has("attacks[0].special") \
-			and special_attack_materialization.get(
+			and not special_attack_materialization.get(
 				"fidelityFallbacks", []
 			).has("attacks[0].special"),
-		"preserved special attacks record their exact bounded fallback slot"
+		"source-backed aging attacks no longer require a bounded fallback"
+	)
+	_expect_equal(
+		unsupported_book.get("Classic Monster 1", {}).get(
+			"tools", {}
+		).get("unarmed_melee_attacks", [])[0].get(
+			"extra_data", {}
+		).get("classicSpecialPower"),
+		8,
+		"aging attacks retain their source percentage magnitude"
 	)
 	var unsupported_readiness: Dictionary = ReadinessScript.new().inspect(
 		unsupported_bundle,
 		{"bestiary": unsupported_book}
 	)
 	_expect(
-		_readiness_has_reference_diagnostic(
+		not _readiness_has_reference_diagnostic(
 			unsupported_readiness, "classic-monster-special-attack-fallback", 1
 		),
-		"preserved special attacks remain launchable with their stable identity"
+		"source-backed aging attacks remain launchable without a fallback"
 	)
 	_expect_equal(
 		CampaignPackageInstallerScript.new()._remove_directory(test_root),
@@ -10733,6 +10742,55 @@ func _test_classic_monster_special_attacks() -> void:
 	)
 	_expect_equal(stone_target.stats.get("curHP"), -10, "petrification forces dead health")
 	_expect_equal(stone_target.life_status, 3, "petrification marks the target dead")
+
+	var age_target := CampaignRuleCharacter.new()
+	age_target.classic_rule_profile = {
+		"creation": {
+			"maximumAge": 120,
+			"maximumStrengthDamageBonus": 0,
+			"ageRanges": [
+				[0, 20], [21, 40], [41, 60], [61, 80], [81, 120],
+			],
+			"ageChanges": [
+				[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+				[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+			],
+		},
+	}
+	age_target.classic_creation_demographics_initialized = true
+	age_target.classic_age_days = 30 * 365
+	age_target.classic_age_years = 30
+	age_target.classic_age_group = 2
+	age_target.set_classic_magic_resistance(0)
+	age_target.set_classic_saving_throws([0, 0, 0, 0, 0, 0, 0, 0])
+	var aging_attacker := MonsterSpecialAttackTestCharacter.new("Aging attacker", 1)
+	aging_attacker.set_meta("classic_hit_dice", 10)
+	var age_result: Dictionary = MonsterSpecialAttackScript.apply(
+		aging_attacker, age_target, 17, 100, 0, Callable(), 5
+	)
+	_expect_equal(age_result.get("saveIndex"), 7, "aging uses the special save")
+	_expect_equal(
+		age_result.get("ageDays"),
+		60,
+		"aging preserves Classic's percentage result in the day counter"
+	)
+	_expect_equal(
+		age_target.classic_age_days,
+		30 * 365 + 60,
+		"failed aging saves advance the exact persisted age counter"
+	)
+	var monster_age_target := MonsterSpecialAttackTestCharacter.new("Monster age target", 0)
+	monster_age_target.set_meta("classic_hit_dice", 2)
+	var monster_age_result: Dictionary = MonsterSpecialAttackScript.apply(
+		aging_attacker, monster_age_target, 17, 100, 0, Callable(), 5
+	)
+	_expect(
+		bool(monster_age_result.get("partyTargetOnly")),
+		"aging preserves Classic's party-only target rule"
+	)
 
 
 func _clear_producer_monster_equipment(bundle: Object) -> void:
