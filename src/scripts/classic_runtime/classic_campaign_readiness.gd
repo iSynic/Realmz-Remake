@@ -716,7 +716,7 @@ func _check_currency_clear(action: Dictionary, extra_code: Dictionary) -> void:
 
 
 func _check_random_items(
-	bundle: ClassicCampaignBundle,
+	_bundle: ClassicCampaignBundle,
 	action: Dictionary,
 	extra_code: Dictionary
 ) -> void:

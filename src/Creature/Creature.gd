@@ -1229,12 +1229,12 @@ func _apply_classic_monster_generation(
 	set_meta("classic_monster_generation", generated.duplicate(true))
 
 
-func _classic_integer_array(value: Variant, size: int) -> Array[int]:
+func _classic_integer_array(value: Variant, array_size: int) -> Array[int]:
 	var result: Array[int] = []
-	result.resize(size)
+	result.resize(array_size)
 	result.fill(0)
 	if value is Array:
-		for index: int in mini(size, value.size()):
+		for index: int in mini(array_size, value.size()):
 			result[index] = int(value[index])
 	return result
 

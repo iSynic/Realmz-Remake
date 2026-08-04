@@ -1508,7 +1508,7 @@ func get_campaign_description(campaign_name : String) -> String:
 		return str(campaign_onload_script.get("description", ""))
 	return campaign_onload_script.description
 
-func get_campaign_restrictions_description(campaign_name : String, campaign_onload_script) -> String:
+func get_campaign_restrictions_description(_campaign_name : String, campaign_onload_script) -> String:
 	if campaign_onload_script==null :
 		print("campaign_onload_script loaded !!!")
 		return "Pick a campaign first !"
@@ -2082,7 +2082,7 @@ func _consume_classic_rest_ration() -> bool:
 
 
 #if pc_participating is empty, use all PC
-func start_battle(battlename : String, mapname : String, is_pos_relative : bool, is_ambush : bool, allow_loss : bool, allow_escape : bool, npcs_allowed : bool, pc_participating : Array, battle_overrides := {}) :
+func start_battle(battlename : String, mapname : String, _is_pos_relative : bool, is_ambush : bool, allow_loss : bool, allow_escape : bool, npcs_allowed : bool, pc_participating : Array, battle_overrides := {}) :
 	print("GameGlobal start_battle " + battlename)
 	var participant_names: Array = []
 	for participant_value: Variant in pc_participating:
@@ -2703,7 +2703,7 @@ func _apply_scenario_item_damage_modifiers(
 
 
 func _scenario_equipped_item_modifiers(
-	owner: Creature,
+	item_owner: Creature,
 	hook_kind: String,
 	user: Creature,
 	target: Creature,
@@ -2711,9 +2711,9 @@ func _scenario_equipped_item_modifiers(
 	details: Dictionary
 ) -> float:
 	var current := base_value
-	if owner == null:
+	if item_owner == null:
 		return current
-	for instance: ItemInstance in owner.item_inventory:
+	for instance: ItemInstance in item_owner.item_inventory:
 		if instance.equipped:
 			current = _scenario_item_modifier(
 				instance,
@@ -2955,19 +2955,19 @@ func calculate_spell_accuracy(caster : Creature, defender : Creature, spell, spe
 	var base_accuracy : float = 1.0
 	var evasion_stats_used : Array = []
 	for a in spell_attributes :
-		var evasionstat : float = 0
+		var _evasionstat : float = 0
 		#var accuracystat : float = 0
 		if a=='Magical' :
 			evasion_stats_used.append(a)
-			evasionstat = defender.get_stat("EvasionMagic")
+			_evasionstat = defender.get_stat("EvasionMagic")
 		#if a=='Physical' :
 			#evasionstat = defender.get_stat("EvasionMagic")
 		if a=='Ranged' :
 			evasion_stats_used.append(a)
-			evasionstat = defender.get_stat("EvasionRanged")
+			_evasionstat = defender.get_stat("EvasionRanged")
 		if a=='Melee' :
 			evasion_stats_used.append(a)
-			evasionstat = defender.get_stat("EvasionMelee")
+			_evasionstat = defender.get_stat("EvasionMelee")
 		#print(a, ' accuracystat : ',accuracystat,', evasionstat  ', evasionstat )
 		base_accuracy = base_accuracy * (1.0+(accuracy-evasion) )
 

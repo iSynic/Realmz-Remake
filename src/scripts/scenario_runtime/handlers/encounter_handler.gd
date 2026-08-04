@@ -237,9 +237,9 @@ static func _semantic_response_match_key(response: Dictionary) -> String:
 
 
 static func _selected_response_id(response: Dictionary, available: Array) -> String:
-	var reference: Variant = response.get("responseRef")
-	if reference is Dictionary:
-		var referenced_id := str(reference.get("responseId", reference.get("id", "")))
+	var response_reference: Variant = response.get("responseRef")
+	if response_reference is Dictionary:
+		var referenced_id := str(response_reference.get("responseId", response_reference.get("id", "")))
 		if referenced_id in available:
 			return referenced_id
 	var direct_id := str(response.get("responseId", ""))

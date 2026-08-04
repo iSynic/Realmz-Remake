@@ -539,8 +539,8 @@ static func _item_matches(
 static func is_item_cursed(character: Object, item: Variant) -> bool:
 	var definition := _item_definition(character, item)
 	if definition != null:
-		var classic_record := definition.classic_record()
-		if int(classic_record.get("cursedItemId", 0)) != 0:
+		var item_classic_record := definition.classic_record()
+		if int(item_classic_record.get("cursedItemId", 0)) != 0:
 			return true
 		for trait_value: Variant in definition.trait_descriptors():
 			if trait_value is Array and not trait_value.is_empty() \

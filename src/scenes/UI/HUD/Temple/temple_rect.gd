@@ -117,7 +117,7 @@ func _on_spell_button_pressed(namepowercost : Array) :
 	await GameGlobal.do_spell_field_effect(temple_caster, displayed_chara, spell, namepowercost[1])
 	if spell.get("special_effect") : 
 		print("TEMPLE FIELD SPECIAL EFFECT")
-		var is_over : bool = await spell.special_effect(temple_caster, spell, namepowercost[1], Vector2.ZERO, [], [displayed_chara], false)
+		await spell.special_effect(temple_caster, spell, namepowercost[1], Vector2.ZERO, [], [displayed_chara], false)
 	display_character(displayed_chara)
 	UI.ow_hud.updateCharPanelDisplay()
 

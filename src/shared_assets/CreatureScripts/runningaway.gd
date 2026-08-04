@@ -121,7 +121,6 @@ static func get_closest_creas_not_of_side(crea : Creature, notside : int) -> Arr
 	return found_creas
 
 static func check_los_between_creas(crea_a : Creature, crea_b : Creature, max_range : int) -> bool :
-	var tg : TargetingLayer = GameGlobal.map.targetingLayer
 	var tiles_line_array = TargetingLayer.bresenham_line(crea_a.position,crea_b.position, 0, max_range)
 	for ts_pos in tiles_line_array :
 		var tilestack : Array = GameGlobal.map.mapdata[ts_pos.x][ts_pos.y]

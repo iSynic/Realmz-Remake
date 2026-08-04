@@ -2077,7 +2077,7 @@ func _on_command_requested(command: String, payload: Dictionary) -> void:
 	_resume_after_command(command, command_payload, response)
 
 
-func _resume_after_command(command: String, payload: Dictionary, response: Dictionary) -> void:
+func _resume_after_command(command: String, _payload: Dictionary, response: Dictionary) -> void:
 	if command == "teleport":
 		var state: Object = runtime.runtime_state
 		var reveal_result := reveal_dungeon_overhead(Vector2i(state.x, state.y))

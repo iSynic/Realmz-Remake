@@ -45,5 +45,4 @@ func _on_time_pass(_character, seconds) :
 		chara.remove_trait(self)
 	
 func get_info_as_text() -> String :
-	var usedpower : int = ceil(sqrt(power*2))
 	return 'Regenerating SP '+str(power)+' total'

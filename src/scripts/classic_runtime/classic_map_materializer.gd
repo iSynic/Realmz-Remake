@@ -1229,10 +1229,10 @@ func _build_land_overlay_tileset_plan(
 		var map_record: Dictionary = pending_map["record"]
 		if str(map_record.get("levelType", "")) != "land":
 			continue
-		var tiles: Variant = map_record.get("tiles")
-		if not (tiles is Array):
+		var map_tiles: Variant = map_record.get("tiles")
+		if not (map_tiles is Array):
 			continue
-		for tile_value: Variant in tiles:
+		for tile_value: Variant in map_tiles:
 			var resource_id: Variant = MapBridgeScript.land_overlay_icon_id(int(tile_value))
 			if resource_id != null:
 				requested_resource_ids[int(resource_id)] = true
@@ -1412,10 +1412,10 @@ func _build_dungeon_tileset_plan(
 		var map_record: Dictionary = pending_map["record"]
 		if str(map_record.get("levelType", "")) != "dungeon":
 			continue
-		var tiles: Variant = map_record.get("tiles")
+		var map_tiles: Variant = map_record.get("tiles")
 		var width := int(map_record.get("width", 0))
 		var height := int(map_record.get("height", 0))
-		if not (tiles is Array) or width <= 0 or height <= 0 or tiles.size() != width * height:
+		if not (map_tiles is Array) or width <= 0 or height <= 0 or map_tiles.size() != width * height:
 			return {
 				"status": "error",
 				"message": "Compiled map %s needs %d dungeon field values before Remake can generate it" % [
@@ -1423,7 +1423,7 @@ func _build_dungeon_tileset_plan(
 					maxi(0, width * height),
 				],
 			}
-		for tile_value: Variant in tiles:
+		for tile_value: Variant in map_tiles:
 			var field := int(tile_value) & 0xffff
 			var runtime_fields: Array[int] = [field]
 			if field & DUNGEON_SECRET_DIRECTION_MASK:

@@ -275,7 +275,7 @@ func _rout_combat_monsters(payload: Dictionary) -> Dictionary:
 			== "core.combat.rout-monsters":
 		if service_owner.classic_bundle == null:
 			return _error("Scenario monster catalog is unavailable")
-		var monster_ids: Array = []
+		var matched_monster_ids: Array = []
 		var target_name_id := absi(
 			int(routed_payload.get("monsterNameId", -1))
 		)
@@ -287,15 +287,15 @@ func _rout_combat_monsters(payload: Dictionary) -> Dictionary:
 			)
 			if absi(int(monster.get("monsterNameId", -1))) \
 					== target_name_id:
-				monster_ids.append(int(monster_id_value))
-		monster_ids.sort()
-		if monster_ids.size() > int(
-			routed_payload.get("maxMatches", monster_ids.size())
+				matched_monster_ids.append(int(monster_id_value))
+		matched_monster_ids.sort()
+		if matched_monster_ids.size() > int(
+			routed_payload.get("maxMatches", matched_monster_ids.size())
 		):
-			monster_ids.resize(
-				int(routed_payload.get("maxMatches", monster_ids.size()))
+			matched_monster_ids.resize(
+				int(routed_payload.get("maxMatches", matched_monster_ids.size()))
 			)
-		routed_payload["monsterIds"] = monster_ids
+		routed_payload["monsterIds"] = matched_monster_ids
 	var context: Dictionary = service_owner.call("_combat_context")
 	if context.has("error"):
 		return _error(str(context["error"]))

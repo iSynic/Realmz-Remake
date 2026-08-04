@@ -32,15 +32,15 @@ func get_saved_variables() :
 	print('trait  druidmorph.gd  shouldnt be active out of combat, get_saved_variables should never happen')
 	return []
 
-func _on_new_round(chara) :
+func _on_new_round(character) :
 	if duration==0 :
-		chara.combat_button.set_icon( chara.icon, chara.size )
-		chara.remove_trait(self)
+		character.combat_button.set_icon(character.icon, character.size)
+		character.remove_trait(self)
 	duration -=1
 
-func _on_battle_end(chara) :
-	chara.combat_button.set_icon( chara.icon, chara.size )
-	chara.remove_trait(self)
+func _on_battle_end(character) :
+	character.combat_button.set_icon(character.icon, character.size)
+	character.remove_trait(self)
 
 func get_info_as_text() -> String :
 	return 'turned into a bear for '+str(duration)+' turns'

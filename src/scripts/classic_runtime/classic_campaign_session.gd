@@ -33,12 +33,12 @@ var _timed_dispatch_loop_active := false
 func load_installed_campaign(
 	campaigns_directory: String,
 	campaign_name: String,
-	command_adapter: Object,
+	adapter: Object,
 	prepared_install: Object = null,
 	gameplay_rule_selection := {}
 ) -> Dictionary:
 	clear()
-	self.command_adapter = command_adapter
+	command_adapter = adapter
 	if (
 		prepared_install != null
 		and str(prepared_install.get("campaign_name")) == campaign_name
@@ -521,7 +521,7 @@ func resume_saved_continuation() -> Dictionary:
 	return host.resume_restored_continuation()
 
 
-func restore_legacy_native_location(location: Dictionary) -> Dictionary:
+func restore_legacy_native_location(_location: Dictionary) -> Dictionary:
 	return _error(
 		"This save predates the current scenario runtime and cannot be upgraded; "
 		+ "start a new playthrough"

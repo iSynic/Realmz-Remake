@@ -80,7 +80,6 @@ func specific_set_point_weight_scale(pos : Vector2i, weight_scale: float) :
 	#● float get_point_weight_scale(id: Vector2i) const
 	#first , we dont want to mes with points outsid the region
 	#update()
-	var region_end : Vector2i = region.end
 	#print("Astar specific_set_point_weight_scale ", crea_size )
 	#for cx in range(crea_size.x) :
 		#for cy in range(crea_size.y) :
@@ -91,7 +90,7 @@ func specific_set_point_weight_scale(pos : Vector2i, weight_scale: float) :
 				#set_point_solid(pos-Vector2i(cx,cy), true)
 	
 
-func get_tilestack_cost(ts : Array, swimmer : bool, flyer : bool, big : bool) -> float :
+func get_tilestack_cost(ts : Array, _swimmer : bool, _flyer : bool, _big : bool) -> float :
 	#returns -1 if not walkable, else the movement cost
 	if ts.is_empty() :
 		return -1

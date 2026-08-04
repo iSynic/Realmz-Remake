@@ -19,19 +19,19 @@ static func continues_tile_processing(outcome: int) -> bool:
 static func identity(area_name: String, area: Dictionary) -> Dictionary:
 	var metadata: Variant = area.get(METADATA_KEY)
 	if metadata is Dictionary:
-		var level_type := str(metadata.get("levelType", ""))
-		var level_index := int(metadata.get("levelIndex", -1))
-		var rect_index := int(metadata.get("rectIndex", -1))
+		var metadata_level_type := str(metadata.get("levelType", ""))
+		var metadata_level_index := int(metadata.get("levelIndex", -1))
+		var metadata_rect_index := int(metadata.get("rectIndex", -1))
 		if (
-			level_type in ["land", "dungeon"]
-			and level_index >= 0
-			and rect_index >= 0
-			and rect_index < MAX_RECTANGLES
+			metadata_level_type in ["land", "dungeon"]
+			and metadata_level_index >= 0
+			and metadata_rect_index >= 0
+			and metadata_rect_index < MAX_RECTANGLES
 		):
 			return {
-				"levelType": level_type,
-				"levelIndex": level_index,
-				"rectIndex": rect_index,
+				"levelType": metadata_level_type,
+				"levelIndex": metadata_level_index,
+				"rectIndex": metadata_rect_index,
 			}
 
 	var level_type := ""

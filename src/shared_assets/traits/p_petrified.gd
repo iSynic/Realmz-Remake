@@ -43,5 +43,5 @@ func _on_remove_trait(character : Creature, traitscript) :
 func get_info_as_text() -> String :
 	return 'Petrified (Permanent)'+' (source : '+trait_source+')'
 
-func equals_args(traits_array : Array) :
+func equals_args(_traits_array : Array) :
 	return true

@@ -1108,15 +1108,15 @@ func set_action_point(payload: Dictionary, game_global: Object, resources: Objec
 	var projected_area: Dictionary = {}
 	var replaced_areas: Array = []
 	for area_name_value: Variant in script_areas.keys():
-		var area_name := str(area_name_value)
+		var matched_area_name := str(area_name_value)
 		var area: Variant = script_areas[area_name_value]
 		if not (area is Dictionary) or not _area_matches_trigger(
-			area_name, area, record_index, stable_id
+			matched_area_name, area, record_index, stable_id
 		):
 			continue
 		if projected_area.is_empty():
 			projected_area = area.duplicate(true)
-		replaced_areas.append(area_name)
+		replaced_areas.append(matched_area_name)
 		script_areas.erase(area_name_value)
 
 	var coordinate: Variant = payload.get("coordinate")

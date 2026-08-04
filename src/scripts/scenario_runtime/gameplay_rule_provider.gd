@@ -18,12 +18,12 @@ var option_schema: Dictionary = {}
 var default_options: Dictionary = {}
 
 
-func configure(descriptor: Dictionary) -> Dictionary:
-	id = str(descriptor.get("id", "")).strip_edges()
-	api_version = int(descriptor.get("apiVersion", 0))
-	domain = str(descriptor.get("domain", "")).strip_edges()
-	option_schema = descriptor.get("options", {}).duplicate(true)
-	default_options = descriptor.get("defaults", {}).duplicate(true)
+func configure(provider_descriptor: Dictionary) -> Dictionary:
+	id = str(provider_descriptor.get("id", "")).strip_edges()
+	api_version = int(provider_descriptor.get("apiVersion", 0))
+	domain = str(provider_descriptor.get("domain", "")).strip_edges()
+	option_schema = provider_descriptor.get("options", {}).duplicate(true)
+	default_options = provider_descriptor.get("defaults", {}).duplicate(true)
 	if id.is_empty() or id.find(".") <= 0:
 		return _invalid("Gameplay rule provider requires a namespaced ID")
 	if api_version <= 0:

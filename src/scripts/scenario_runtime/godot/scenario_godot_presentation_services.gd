@@ -192,7 +192,7 @@ func _scenario_choice(payload: Dictionary) -> Dictionary:
 func _scenario_encounter_response(payload: Dictionary) -> Dictionary:
 	var picture_id: Variant = payload.get("pictureId")
 	if picture_id != null and not str(picture_id).is_empty():
-		await _show_classic_picture({"pictureId": int(picture_id)})
+		_show_classic_picture({"pictureId": int(picture_id)})
 	var sound_id: Variant = payload.get("soundId")
 	if sound_id != null and not str(sound_id).is_empty():
 		await _play_sound_command({"soundId": int(sound_id)})

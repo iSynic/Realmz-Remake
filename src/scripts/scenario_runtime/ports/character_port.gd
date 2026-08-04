@@ -335,7 +335,7 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		routed_request.get("_scenarioApiOperation", "")
 	)
 	if scenario_operation == "core.character.fatigue":
-		var fatigue_result := await apply_rule_modifiers(
+		var fatigue_result := apply_rule_modifiers(
 			"fatigue",
 			float(routed_request.get("amount", 0.0)),
 			{
@@ -410,7 +410,7 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 				routed_request.get("amount", 0)
 			)
 		)
-		var experience_result := await apply_rule_modifiers(
+		var experience_result := apply_rule_modifiers(
 			"experience",
 			base_experience,
 			{
@@ -428,7 +428,7 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 	if command_id in ["change_selected_health", "change_party_health"]:
 		var base_health := float(routed_request.get("amount", 0))
 		var health_family := "healing" if base_health >= 0.0 else "damage"
-		var health_result := await apply_rule_modifiers(
+		var health_result := apply_rule_modifiers(
 			health_family,
 			absf(base_health),
 			{

@@ -40,5 +40,5 @@ func _on_get_creature_script() :
 func get_info_as_text() -> String :
 	return 'Permanently Confused'+' (source : '+trait_source+')'
 
-func equals_args(traits_array : Array) :
+func equals_args(_traits_array : Array) :
 	return true

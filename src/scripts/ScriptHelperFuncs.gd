@@ -83,7 +83,6 @@ static func yesno_branch_Divinity(continue_on_yes : bool, tg_type : int, tg_id :
 	if (continue_on_yes and answer=='YES') or (not continue_on_yes and answer=='NO') :
 		return ''
 	else:
-		var apname : String = ''
 		if tg_type==0 :
 			GameGlobal.must_cancel_movement = true # that's  "cancel movement"
 			print("yesno_branch back a step")
@@ -234,11 +233,11 @@ static func flag_disabled_current_script() ->void :
 	GameGlobal.stuff_done[map_name+'.'+script_name+'.disabled'] = 1
 
 ## Divinity Code 32: Offer Temple : temple
-static func allow_temple_menu(price_mult : float) :
+static func allow_temple_menu(_price_mult : float) :
 	print("allow_temple_menu TBI when temple menu is done")
 
 ## DivinityCode 38: Continue On Possession, Else Branch Within Encounters
-static func branch_item_pos_encounter(item_name : String, continue_on_pos : bool, target_type:int, target:String, code_index:int) :
+static func branch_item_pos_encounter(_item_name : String, _continue_on_pos : bool, _target_type:int, _target:String, _code_index:int) :
 	print('branch_item_pos_encounter  TBI  when encounters are understood')
 
 ## Divinity Code 45: Teleport Only , tele
@@ -263,14 +262,14 @@ static func set_walk_back_once(should : bool) :
 
 static func do_RR_battle(rr_dict : Dictionary) :
 	var answer = "YES"
-	var randi : int = randi()%100
+	var random_roll : int = randi()%100
 	var offered_encounter := false
 	var classic_adapter: Object = null
 	var classic_session: Object = GameGlobal.classic_campaign_session
 	if is_instance_valid(classic_session):
 		classic_adapter = classic_session.get("command_adapter")
 	#printerr("ScriptHelperFuncs do_RR_battle chance : " ,rr_dict["option_chance"],'>=',randi,' : start fight ? ', rr_dict["option_chance"]<=randi )
-	if rr_dict["option_chance"]>=randi :
+	if rr_dict["option_chance"]>=random_roll :
 		offered_encounter = true
 		if is_instance_valid(classic_adapter) \
 				and classic_adapter.has_method("play_classic_map_sound"):
@@ -366,7 +365,7 @@ static func randomrect_battle(b : Array, o : int, s : String, t : String, battle
 	printerr("randomrect_battle b :", b)
 	var rand_battle_id : int = range(b[0], b[1]+1).pick_random()
 	GameGlobal.start_battle("Battle_"+str(rand_battle_id),"", true, false, true,true,true,[])
-	var battle_outcome = await GameGlobal.battle_end
+	await GameGlobal.battle_end
 
 
 
@@ -632,7 +631,7 @@ static func branch_on_quest_Divinity(quest_id : int, go_on_if_done : int, target
 	return next_ap_name
 
 ## Divinity Code 12: Change Land Tile
-static func change_map_tile_Divinity(map_id : int, xcoord : int, ycoord : int, tileid : int, useless) :
+static func change_map_tile_Divinity(map_id : int, xcoord : int, ycoord : int, tileid : int, _useless) :
 	var map_name = 'map_'+str(map_id)
 	if map_name==GameGlobal.currentmap_name :
 		var map = NodeAccess.__Map()
@@ -665,11 +664,11 @@ static func request_click() :
 
 
 ## Divinity Code 11: Give Victory Points
-static func give_exp(exp : int) :
-	await StateMachine.enter_ex_menu_state({"menu_name" : "LootMenu", "treasure" : [] ,"money" : [0,0,0] ,"exp" : exp })
+static func give_exp(experience : int) :
+	await StateMachine.enter_ex_menu_state({"menu_name" : "LootMenu", "treasure" : [] ,"money" : [0,0,0] ,"exp" : experience })
 
 ## Divinity Code 30: Pick on Check Vs. Attribute • Special Abilities
-static func filter_PCs_ability_Divinity(ability_id:int, success_mod:int, who:int, what_type:int, previously_picked : Array = []) :
+static func filter_PCs_ability_Divinity(ability_id:int, success_mod:int, who:int, _what_type:int, previously_picked : Array = []) :
 	var ability_arr : Array =["Melee_Crit_Mult",'','','Melee_Crit_Rate', 'Detect_Secret', 'Acrobatics', "Detect_Trap", "Disable_Trap",'',"Force_Lock",'',"Pick_Lock", 'read lv1 scrolls', 'Turn_Undead' ]
 	var ability_name : String = ability_arr[ability_id]
 	var picked_array : Array = []
@@ -688,13 +687,13 @@ static func filter_PCs_ability_Divinity(ability_id:int, success_mod:int, who:int
 	return picked_array
 
 ##Divinity Code 18: Cast Spell on Party
-static func castSpellOnPartyDivinity(spell_id, power, drv_modifier, can_drv) :
+static func castSpellOnPartyDivinity(spell_id, power, _drv_modifier, _can_drv) :
 	printerr("Divinity Code 18: Cast Spell on Party, use castspellonpickedcharacters instead.")
 	var spell_name : String = SpellsIdDivinity.mappings[spell_id]
 	CastSpellOnPickedCharacters(GameGlobal.player_characters, spell_name, power)
 
 #Divinity Code 17: Cast Spell on Picked
-static func castSpellOnPickedDivinity(spell_id, power, drv_modifier, can_drv) :
+static func castSpellOnPickedDivinity(spell_id, power, _drv_modifier, _can_drv) :
 	var spell_name : String = SpellsIdDivinity.mappings[spell_id]
 	CastSpellOnPickedCharacters(GameGlobal.last_picked_characters, spell_name, power)
 
@@ -1041,7 +1040,6 @@ static func display_simple_encounter_from_data(_enc_name : String) :
 			answers.append('STOP')
 	display_text(prompt)
 	var answer = await display_multiple_choices(choices,answers)
-	var sexap_name : String = ''
 	if answer=="STOP" : return
 	else : return sexap_arr[choices_data_arr[int(answer)][1]]
 
@@ -1064,7 +1062,6 @@ static func branch_item_possession_divinity(item_id : int, cont_not_poss : int, 
 	var has_item : bool  = does_party_have_item_named(ItemIdDivinity.mapping[item_id])
 	if (cont_not_poss and (not has_item)) or ((not cont_not_poss) and has_item) :
 		return ''
-	var returned : String = 'xapid'
 	match type :
 		0 :
 			return "XAP"+str(xap_id)
@@ -1113,7 +1110,7 @@ static func display_random_text_from_array_wait(text_arr : Array) :
 #if not branch.is_empty() :
 	#return branch
 # for SE,   call it  istead of using return
-static func branch_on_random_divinity(type:int, low:int, high:int, sound_id:int, message : String) :
+static func branch_on_random_divinity(type:int, low:int, high:int, _sound_id:int, _message : String) :
 	var  rand_id : int = randi_range(low, high)
 	match type :
 		0: #XAP
@@ -1243,7 +1240,7 @@ static func is_NPC_in_party(npc_name : String) :
 
 
 #Divinity Code 150 destroy_related_monsters
-static func destroy_related_monsters(cname : String, number : int,  allies_too : bool) :
+static func destroy_related_monsters(cname : String, _number : int,  allies_too : bool) :
 	for cb in StateMachine.combat_state.all_battle_creatures_btns :
 		if cb.creature.name ==  cname and not GameGlobal.player_characters.has(cb.creature):
 			if cb.creature.baseFaction == 0 and (not allies_too) :

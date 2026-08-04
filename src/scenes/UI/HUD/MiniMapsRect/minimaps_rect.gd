@@ -13,7 +13,6 @@ func _ready() -> void:
 func on_display() :
 	print("MiniMapRect GameGlobal.minimaps : ", GameGlobal.minimaps )
 	#find a known map
-	var found_cur_map : bool = false
 	var found_a_map : bool = false
 	var first_map_found
 	for m in GameGlobal.minimaps :
@@ -23,7 +22,6 @@ func on_display() :
 				found_a_map = true
 			if not cur_map.is_empty() :
 				if m[0]==cur_map[0] :
-					found_cur_map = true
 					first_map_found = m
 					break
 	maptextrect.visible = found_a_map

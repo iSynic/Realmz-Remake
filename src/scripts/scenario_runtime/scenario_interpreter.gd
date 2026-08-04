@@ -665,13 +665,13 @@ func record_semantic_encounter_completion(encounter: Dictionary) -> void:
 		state.call("mark_encounter_completed", encounter)
 
 
-func record_semantic_response_reference(reference: Dictionary) -> void:
-	_semantic_active_response_ref = reference.duplicate(true)
+func record_semantic_response_reference(response_reference: Dictionary) -> void:
+	_semantic_active_response_ref = response_reference.duplicate(true)
 	_semantic_active_result_ref = null
 
 
-func record_semantic_result_reference(reference: Dictionary) -> bool:
-	_semantic_active_result_ref = reference.duplicate(true)
+func record_semantic_result_reference(result_reference: Dictionary) -> bool:
+	_semantic_active_result_ref = result_reference.duplicate(true)
 	_result_transition_count += 1
 	return _result_transition_count <= MAX_RESULT_TRANSITIONS
 
@@ -2475,8 +2475,8 @@ static func validate_snapshot(value: Variant) -> Dictionary:
 		"semanticActiveResponseRef",
 		"semanticActiveResultRef",
 	]:
-		var reference: Variant = saved.get(field_name)
-		if reference != null and not (reference is Dictionary):
+		var saved_reference: Variant = saved.get(field_name)
+		if saved_reference != null and not (saved_reference is Dictionary):
 			return _invalid("Scenario VM snapshot has invalid %s" % field_name)
 	if saved.get("pendingCommand") != null:
 		var pending_validation := ScenarioPendingCommand.validate(saved["pendingCommand"])

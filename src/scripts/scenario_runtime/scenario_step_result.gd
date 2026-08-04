@@ -40,8 +40,8 @@ func to_dictionary() -> Dictionary:
 	}
 
 
-static func continued(data := {}) -> ScenarioStepResult:
-	return ScenarioStepResult.new(CONTINUE, data)
+static func continued(step_data := {}) -> ScenarioStepResult:
+	return ScenarioStepResult.new(CONTINUE, step_data)
 
 
 static func yielded(command_id: String, request := {}, continuation := {}) -> ScenarioStepResult:

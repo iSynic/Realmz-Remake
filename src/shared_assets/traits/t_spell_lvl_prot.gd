@@ -22,7 +22,7 @@ func unstack(args : Array) :
 func get_saved_variables() :
 	return [ceili(duration / 5.0),level]
 
-func _on_spell_hit_chara(caster : Creature, spell, damage : int ):
+func _on_spell_hit_chara(_caster : Creature, spell, damage : int ):
 	#[has_effect, applied_damage, [{added_to_action_queue}] ]
 	if spell.attributes.has('Magical') and spell.level <= level:
 		return [false, 0, [{}]]

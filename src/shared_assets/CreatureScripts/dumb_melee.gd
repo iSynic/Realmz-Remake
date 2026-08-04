@@ -64,12 +64,12 @@ static func decide_action(crea : Creature) -> Array :
 				var weapon_spell = NodeAccess.__Resources().spells_book[weapon_spell_arr[0]]["script"]
 				var weapon_power : int = weapon_spell_arr[1]
 				if weapon_spell.get_range(weapon_power, crea) >= targ_range :
-					var affected_tiles : Array = GameGlobal.map.targetingLayer.get_affected_tiles(weapon_spell, weapon_power, crea.combat_button, target_pos, [])
-					var affected_creas : Array = GameGlobal.map.targetingLayer.get_cbs_touching_tiles(affected_tiles)
-					if affected_creas.size()>0 :
+					var weapon_affected_tiles : Array = GameGlobal.map.targetingLayer.get_affected_tiles(weapon_spell, weapon_power, crea.combat_button, target_pos, [])
+					var weapon_affected_creas : Array = GameGlobal.map.targetingLayer.get_cbs_touching_tiles(weapon_affected_tiles)
+					if weapon_affected_creas.size()>0 :
 						print("    DECIDED TO USE BOW")
 					var aoe_shape = weapon_spell.get_aoe(weapon_power, crea)
-					return [1, weapon_spell, weapon_power, spell_target_pos, aoe_shape, {},Vector2i(target_pos), affected_tiles, affected_creas]
+					return [1, weapon_spell, weapon_power, spell_target_pos, aoe_shape, {},Vector2i(target_pos), weapon_affected_tiles, weapon_affected_creas]
 					#return [1, weapon_spell, weapon_power, spell_target_pos, aoe_shape, {},Vector2i(target_pos), true, true]
 			
 			if allspellsArray.is_empty() :

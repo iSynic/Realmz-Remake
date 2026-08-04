@@ -52,10 +52,10 @@ func load_from_directory(directory: String) -> bool:
 	if str(candidate.get("format", "")) != FORMAT \
 			or int(candidate.get("formatVersion", 0)) != FORMAT_VERSION:
 		return _fail("Unsupported pre-release scenario package; re-export it from Providence")
-	var campaign_kind := str(candidate.get("campaignKind", ""))
-	if campaign_kind not in CAMPAIGN_KINDS:
-		return _fail("Unsupported scenario campaign kind '%s'" % campaign_kind)
-	if campaign_kind != "remake-authored":
+	var loaded_campaign_kind := str(candidate.get("campaignKind", ""))
+	if loaded_campaign_kind not in CAMPAIGN_KINDS:
+		return _fail("Unsupported scenario campaign kind '%s'" % loaded_campaign_kind)
+	if loaded_campaign_kind != "remake-authored":
 		implementation = ClassicBundleScript.new()
 		if not implementation.load_from_directory(directory):
 			return _fail(str(implementation.last_error))

@@ -29,9 +29,9 @@ static func can_hit(
 		""
 	))
 	if not required_kind.is_empty():
-		var extra_data: Variant = weapon.get("extra_data", {})
-		if not (extra_data is Dictionary) \
-				or str(extra_data.get("classicWeaponKind", "")) != required_kind:
+		var weapon_extra_data: Variant = weapon.get("extra_data", {})
+		if not (weapon_extra_data is Dictionary) \
+				or str(weapon_extra_data.get("classicWeaponKind", "")) != required_kind:
 			return false
 
 	var required_magic_plus := int(_metadata(

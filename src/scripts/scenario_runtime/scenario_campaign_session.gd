@@ -97,7 +97,7 @@ static func validate_save_payload(
 func load_installed_campaign(
 	campaigns_directory: String,
 	campaign_name: String,
-	command_adapter: Object,
+	adapter: Object,
 	prepared_install: Object = null,
 	gameplay_rule_selection := {}
 ) -> Dictionary:
@@ -107,7 +107,7 @@ func load_installed_campaign(
 	)
 	if manifest_kind == REMAKE_AUTHORED_KIND:
 		clear()
-		self.command_adapter = command_adapter
+		command_adapter = adapter
 		if not _safe_campaign_name(campaign_name):
 			return _semantic_error("Campaign name is invalid")
 		var loaded_bundle := BundleScript.new()
@@ -128,7 +128,7 @@ func load_installed_campaign(
 	var result := super.load_installed_campaign(
 		campaigns_directory,
 		campaign_name,
-		command_adapter,
+		adapter,
 		prepared_install,
 		gameplay_rule_selection
 	)

@@ -461,8 +461,8 @@ func _rebuild_gameplay_advanced_controls() -> void:
 		provider_option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var provider_ids: Array = []
 		for provider_id: String in gameplay_rule_registry.providers:
-			var provider: GameplayRuleProvider = gameplay_rule_registry.providers[provider_id]
-			if provider.domain == domain:
+			var candidate_provider: GameplayRuleProvider = gameplay_rule_registry.providers[provider_id]
+			if candidate_provider.domain == domain:
 				provider_ids.append(provider_id)
 		provider_ids.sort()
 		var selected_provider_index := 0

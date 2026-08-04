@@ -930,7 +930,7 @@ func _validate_runtime_document() -> bool:
 		"lifecycle": "lifecycle",
 		"ruleModifiers": "rule-modifier",
 	}
-	var required_extension_ids := _runtime_extension_ids()
+	var required_runtime_extension_ids := _runtime_extension_ids()
 	var script_document: Dictionary = documents.get("remakeScripts", {})
 	var behavior_ids: Dictionary = {}
 	for behavior_value: Variant in script_document.get("behaviors", []):
@@ -975,7 +975,7 @@ func _validate_runtime_document() -> bool:
 			var binding_validation := extension_registry.validate_binding_reference(
 				capability_by_binding[binding_name],
 				binding_id,
-				required_extension_ids
+				required_runtime_extension_ids
 			)
 			if not bool(binding_validation.get("valid", false)):
 				return _fail(

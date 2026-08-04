@@ -51,12 +51,12 @@ func load_for_campaign(directory: String, manifest: Dictionary) -> bool:
 
 	var shared_assets: Dictionary = manifest["sharedAssets"]
 	for reference_value: Variant in shared_assets["files"]:
-		var reference: Dictionary = reference_value
+		var asset_reference: Dictionary = reference_value
 		var logical_path := _normalized_logical_path(
-			str(reference.get("logicalPath", ""))
+			str(asset_reference.get("logicalPath", ""))
 		)
-		var content_hash := str(reference.get("sha256", "")).to_lower()
-		var expected_bytes := int(reference.get("bytes", -1))
+		var content_hash := str(asset_reference.get("sha256", "")).to_lower()
+		var expected_bytes := int(asset_reference.get("bytes", -1))
 		var extension := logical_path.get_extension().to_lower()
 		var store_record_value: Variant = store_files.get(content_hash)
 		if not (store_record_value is Dictionary):
@@ -91,7 +91,7 @@ func load_for_campaign(directory: String, manifest: Dictionary) -> bool:
 				"Shared Classic asset '%s' failed its checksum: %s"
 				% [logical_path, content_hash]
 			)
-		references[logical_path] = reference.duplicate(true)
+		references[logical_path] = asset_reference.duplicate(true)
 	return true
 
 
@@ -100,8 +100,8 @@ func resolve(logical_path: String) -> String:
 	var reference_value: Variant = references.get(normalized)
 	if not (reference_value is Dictionary):
 		return campaign_directory.path_join(normalized)
-	var reference: Dictionary = reference_value
-	var content_hash := str(reference.get("sha256", "")).to_lower()
+	var asset_reference: Dictionary = reference_value
+	var content_hash := str(asset_reference.get("sha256", "")).to_lower()
 	return _content_path(content_hash, normalized.get_extension().to_lower())
 
 

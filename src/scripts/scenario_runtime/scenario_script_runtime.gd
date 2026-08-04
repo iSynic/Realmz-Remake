@@ -1148,7 +1148,7 @@ static func validate_document(
 			return _invalid("%s duplicates another state definition" % state_context)
 		seen_state_definitions[state_key] = true
 	var seen_scripts: Dictionary = {}
-	var declared_sources: Dictionary = {}
+	var behavior_sources: Dictionary = {}
 	for index: int in range(document["behaviors"].size()):
 		var script_value: Variant = document["behaviors"][index]
 		var context := "remake/scripts.json.behaviors[%d]" % index
@@ -1247,9 +1247,9 @@ static func validate_document(
 				return _invalid("%s cannot declare GDScript source" % context)
 		else:
 			var source_path := str(script.get("sourcePath", ""))
-			if not _is_safe_source_path(source_path) or declared_sources.has(source_path):
+			if not _is_safe_source_path(source_path) or behavior_sources.has(source_path):
 				return _invalid("%s has an invalid or duplicate sourcePath" % context)
-			declared_sources[source_path] = true
+			behavior_sources[source_path] = true
 			if campaign_bundle != null and not _source_hash_matches(
 				campaign_bundle,
 				source_path,

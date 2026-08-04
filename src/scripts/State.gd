@@ -7,8 +7,6 @@ It's up to  the user to call the parent state's functions, e.g 'get_parent().phy
 Use State as a child of a StateMachine node.
 """
 
-@onready var _state_machine = _get_state_machine(self)
-
 func _get_state_machine(node : Node) -> Node :
 #	print("STATE : "+name+"._get_state_machine  on "+node.name)
 #	print("    is "+node.name+"'s group state_machine ? ", )

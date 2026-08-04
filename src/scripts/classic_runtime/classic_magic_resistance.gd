@@ -397,13 +397,13 @@ static func opposed_level_resolution(
 
 	# Negative Classic damage types check target level against caster level before
 	# spell screens, general resistance, and the ordinary damage-type save.
-	var chance := 35 + 5 * int(target_level) - 5 * int(caster_level)
-	chance += power * int(spell.get("classic_save_adjust"))
+	var resistance_chance := 35 + 5 * int(target_level) - 5 * int(caster_level)
+	resistance_chance += power * int(spell.get("classic_save_adjust"))
 	return {
 		"checksOpposedLevel": true,
-		"chance": chance,
+		"chance": resistance_chance,
 		"roll": roll,
-		"resisted": roll <= chance,
+		"resisted": roll <= resistance_chance,
 	}
 
 

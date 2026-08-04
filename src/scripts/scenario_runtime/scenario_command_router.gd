@@ -80,6 +80,8 @@ func route(command_id: String, request: Dictionary) -> Dictionary:
 			"status": "error",
 			"message": "Scenario command '%s' %s" % [command_id, request_error],
 		}
+	# Port implementations may suspend even though the shared contract has a synchronous fallback.
+	@warning_ignore("redundant_await")
 	var response: Variant = await port.execute(command_id, request)
 	if not (response is Dictionary):
 		return {

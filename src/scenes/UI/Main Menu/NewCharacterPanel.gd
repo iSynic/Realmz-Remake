@@ -200,10 +200,10 @@ func _on_primary_button_pressed() -> void:
 		_show_stage(current_stage + 1)
 		return
 	if current_stage == CreationStage.REVIEW:
-		if await _prepare_spell_selection_stage():
+		if _prepare_spell_selection_stage():
 			_show_stage(CreationStage.SPELLS)
 		return
-	await _finish_character_creation()
+	_finish_character_creation()
 
 
 func _on_back_button_pressed() -> void:
@@ -899,7 +899,7 @@ func _prepare_spell_selection_stage() -> bool:
 
 func _finish_character_creation() -> void:
 	if not spell_selection_prepared:
-		if not await _prepare_spell_selection_stage():
+		if not _prepare_spell_selection_stage():
 			return
 	okButton.disabled = true
 	abilities_rect.apply_selection()

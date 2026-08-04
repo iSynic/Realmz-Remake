@@ -81,7 +81,6 @@ static func decide_action(crea : Creature) -> Array :
 			# CAST MAGIC or use bow !!!
 			print("test_crea_script.gd "+crea.name+" considers using item or maguc")
 			#print(crea.inventory)
-			var spell_target_pos : Vector2 = target_pos
 			var sp_left = crea.get_stat("curSP")
 			var allspellsArray : Array = crea.get_all_spells()
 			if not crea.can_cast_spells():
@@ -200,7 +199,7 @@ static func decide_action(crea : Creature) -> Array :
 	print("decideaction : "+crea.name+" can do nothing")
 	return [0, Vector2i.ZERO ]
 	
-static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_crea: Creature, used_an_item : bool, item_used: ItemInstance) :
+static func get_spell_cast_message (caster: Creature, spell, plvl : int, target_crea: Creature, _used_an_item : bool, item_used: ItemInstance) :
 	var targ_range : int = AiFunctions.get_range_between_creas(caster, target_crea)
 	print(spell.name,plvl, ' ',spell.get_range(plvl, caster) , '<=>' ,targ_range)
 	if spell.get_range(plvl, caster) >= targ_range :
@@ -345,11 +344,8 @@ static func find_target_crea(crea : Creature) :
 		tg_crea = crea.creature_script_memory["target_crea"]
 	
 	#check if  target_crea is next to me, else find closest one :
-	var is_targ_next_to_crea : bool = false
 	if is_instance_valid(tg_crea) :
-		if is_instance_valid(tg_crea.combat_button) :
-			is_targ_next_to_crea = AiFunctions.get_range_between_creas(crea, tg_crea)<=1
-		else :
+		if not is_instance_valid(tg_crea.combat_button) :
 			tg_crea = null
 	else :
 		var closest_enemies : Array = AiFunctions.get_closest_creas_not_of_side(crea, crea.curFaction)

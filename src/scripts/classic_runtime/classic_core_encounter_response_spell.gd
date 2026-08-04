@@ -85,7 +85,7 @@ func configure_core_encounter_response_spell(
 
 
 func _apply_school_metadata(record: Dictionary, spell_ids: Array[int]) -> void:
-	var schools: Array[String] = []
+	var response_schools: Array[String] = []
 	var levels := {"Sorcerer": 0, "Priest": 0, "Enchanter": 0}
 	var costs := levels.duplicate()
 	for spell_id: int in spell_ids:
@@ -94,13 +94,13 @@ func _apply_school_metadata(record: Dictionary, spell_ids: Array[int]) -> void:
 		var spell_level := int(inventory.get("level", 0))
 		if not levels.has(caster_class):
 			continue
-		if not schools.has(caster_class):
-			schools.append(caster_class)
+		if not response_schools.has(caster_class):
+			response_schools.append(caster_class)
 		levels[caster_class] = spell_level
 		costs[caster_class] = int(
 			PresentationScript.SELECTION_COST_BY_LEVEL.get(spell_level, 0)
 		)
-	record["schools"] = schools
+	record["schools"] = response_schools
 	record["schoolLevels"] = levels
 	record["selectionCosts"] = costs
 

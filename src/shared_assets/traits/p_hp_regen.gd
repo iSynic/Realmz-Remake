@@ -25,11 +25,10 @@ func _on_new_round(_character : Creature) :
 	if power <= 0 :
 		chara.remove_trait(self)
 
-func _on_time_pass(_character, seconds) :
+func _on_time_pass(_character, _seconds) :
 	chara.change_cur_hp(power)
 	if power <= 0 :
 		chara.remove_trait(self)
 	
 func get_info_as_text() -> String :
-	var usedpower : int = floor(sqrt(power*2))
 	return 'Regenerating '+str(power)+'HP per round, Permanent'

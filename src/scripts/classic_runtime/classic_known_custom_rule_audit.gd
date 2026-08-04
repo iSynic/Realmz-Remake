@@ -312,15 +312,15 @@ func _validate_table_references(
 		if not (reference_value is Dictionary):
 			errors.append("tableReferences[%d] must be an object" % index)
 			continue
-		var reference: Dictionary = reference_value
-		var stable_id := str(reference.get("stableId", ""))
-		var campaign_id := str(reference.get("campaignId", ""))
+		var reference_record: Dictionary = reference_value
+		var stable_id := str(reference_record.get("stableId", ""))
+		var campaign_id := str(reference_record.get("campaignId", ""))
 		if stable_id.is_empty() or stable_ids.has(stable_id):
 			errors.append("tableReferences[%d] has a missing or duplicate stableId" % index)
 		stable_ids[stable_id] = true
 		if not scenario_ids.has(campaign_id):
 			errors.append("tableReferences[%d] references unknown campaignId" % index)
-		if str(reference.get("consumer", "")) != "Classic loadprofile":
+		if str(reference_record.get("consumer", "")) != "Classic loadprofile":
 			errors.append("tableReferences[%d] must identify the Classic consumer" % index)
 
 

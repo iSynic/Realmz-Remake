@@ -151,8 +151,8 @@ func purchase_item(
 	return {"ok": false, "price": 0}
 
 
-func sell_item(owner: Creature, item: ItemInstance) -> Dictionary:
-	if owner == null or item == null or item.equipped:
+func sell_item(seller: Creature, item: ItemInstance) -> Dictionary:
+	if seller == null or item == null or item.equipped:
 		return {"ok": false, "price": 0}
 	var definition := resources.get_item_definition(item)
 	if definition == null or not definition.tradeable:
@@ -161,7 +161,7 @@ func sell_item(owner: Creature, item: ItemInstance) -> Dictionary:
 	if not GameGlobal.get_shop(GameGlobal.currentShop).has(category):
 		category = "BuyBack"
 	var price := int(definition.price * buy_rate)
-	if not owner.remove_inventory_item(item):
+	if not seller.remove_inventory_item(item):
 		return {"ok": false, "price": 0}
 	var saved_stock: Array = GameGlobal.get_shop(
 		GameGlobal.currentShop

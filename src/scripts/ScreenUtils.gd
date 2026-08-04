@@ -8,7 +8,6 @@ const HD: Vector2 = Vector2(1920, 1080)
 static func set_window_scale(node: Node, scale: float) -> void:
 	print("setting window scale: ", scale)
 	var window = node.get_window()
-	var relative_scale:float = scale / window.content_scale_factor
 	window.content_scale_factor = scale
 	#window.size = window.size*relative_scale
 	#window.move_to_center()

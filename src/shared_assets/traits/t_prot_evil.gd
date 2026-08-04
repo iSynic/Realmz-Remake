@@ -20,14 +20,14 @@ func unstack(args : Array) :
 func get_saved_variables() :
 	return [ceili(duration / 5.0)]
 
-func _on_spell_hit_chara(caster : Creature, spell, damage : int ):
+func _on_spell_hit_chara(caster : Creature, _spell, damage : int ):
 	#[has_effect, applied_damage, [{added_to_action_queue}] ]
 	if caster.tags.has('Evil') :
 		return [true, roundi(damage*0.9), [{}]]
 	else :
 		return[true, damage, [{}]]
 
-func _on_before_melee_attack(character : Creature, returned_array : Array) :
+func _on_before_melee_attack(_character : Creature, returned_array : Array) :
 	#[true, _attacker , combat_button, damage_detail, []] #last is for extra  queued actions
 	if returned_array[1].tags.has('Evil') :
 		returned_array[3]['total'] = roundi(returned_array[3]['total']*0.9)

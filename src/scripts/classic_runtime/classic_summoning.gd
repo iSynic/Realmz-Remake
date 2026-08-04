@@ -86,10 +86,10 @@ static func choose_candidate(
 	# Tests and audits can select deterministically without changing the runtime
 	# path. The fallback also describes what Classic does after 100 misses.
 	if selection_index >= 0:
-		var candidates: Array = preferred if not preferred.is_empty() else fallback
+		var indexed_candidates: Array = preferred if not preferred.is_empty() else fallback
 		return {
 			"status": "selected",
-			"bestiaryKey": str(candidates[selection_index % candidates.size()]),
+			"bestiaryKey": str(indexed_candidates[selection_index % indexed_candidates.size()]),
 			"usedFallback": preferred.is_empty(),
 			"minimumHitDice": pool["minimumHitDice"],
 			"maximumHitDice": pool["maximumHitDice"],
@@ -102,8 +102,8 @@ static func choose_candidate(
 			if not classic_by_id.has(monster_id):
 				continue
 			var key := str(classic_by_id[monster_id])
-			var candidates: Array = preferred if attempt < PREFERRED_ATTEMPTS else fallback
-			if key in candidates:
+			var attempt_candidates: Array = preferred if attempt < PREFERRED_ATTEMPTS else fallback
+			if key in attempt_candidates:
 				return {
 					"status": "selected",
 					"bestiaryKey": key,

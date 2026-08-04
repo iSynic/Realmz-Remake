@@ -87,7 +87,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _load_initial_profile_after_first_frame(
 	profilefromcfg: String,
-	hd_mode_from_config: bool
+	_hd_mode_from_config: bool
 ) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame

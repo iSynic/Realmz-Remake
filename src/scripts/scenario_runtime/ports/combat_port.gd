@@ -226,7 +226,7 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 		var family := (
 			"damage" if command_id == "apply_combat_damage" else "healing"
 		)
-		var modifier_result := await apply_rule_modifiers(
+		var modifier_result := apply_rule_modifiers(
 			family,
 			float(routed_request.get("amount", 0)),
 			{

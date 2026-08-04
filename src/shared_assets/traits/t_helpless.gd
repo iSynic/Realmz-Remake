@@ -34,8 +34,8 @@ func _on_new_round(_character : Creature) :
 func _on_get_player_controlled() :
 	return false
 
-func _on_battle_end(chara) :
-	chara.remove_trait(self)
+func _on_battle_end(character) :
+	character.remove_trait(self)
 
 func _on_get_stat(statname : String, stat : int) :
 	if ['EvasionMelee','EvasionRanged'].has(statname) :

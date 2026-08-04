@@ -36,8 +36,8 @@ func _on_get_stat(statname : String, stat : int) :
 	else :
 		return stat
 
-func _on_battle_end(chara) :
-	chara.remove_trait(self)
+func _on_battle_end(character) :
+	character.remove_trait(self)
 
 func _on_get_player_controlled() :
 	return false

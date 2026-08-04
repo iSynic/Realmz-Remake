@@ -11,7 +11,7 @@ contained in the game.
 """
 extends Node
 
-class_name definition
+class_name RealmzDefinitions
 
 # Render variables #
 class Render:

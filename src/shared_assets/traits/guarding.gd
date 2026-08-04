@@ -11,21 +11,21 @@ func _init(args : Array):
 	power = chara.get_apr_left()
 	UI.ow_hud.creatureRect.logrect.log_other_text(chara, ' goes  in guarding stance', null,'')
 
-func stack(args : Array) :
+func stack(_args : Array) :
 	pass
 
-func unstack(args : Array) :
+func unstack(_args : Array) :
 	pass
 
 func get_saved_variables() :
 	print('trait  guarding.gd  shouldnt be active out of combat, get_saved_variables should never happen')
 	return [power]
 
-func _on_new_round(chara) :
-	chara.remove_trait(self)
+func _on_new_round(character) :
+	character.remove_trait(self)
 
-func _on_battle_end(chara) :
-	chara.remove_trait(self)
+func _on_battle_end(character) :
+	character.remove_trait(self)
 
 func _on_other_creature_walked(othercreabutton : CombatCreaButton) -> Array :
 	print('guard.gd trait : _on_other_creature_walked')

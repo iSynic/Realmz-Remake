@@ -14,7 +14,7 @@ func _init(args : Array):
 func get_saved_variables() :
 	return []
 
-func _on_spell_hit_chara(caster : Creature, spell, damage : int ):
+func _on_spell_hit_chara(caster : Creature, _spell, damage : int ):
 	#[has_effect, applied_damage, [{added_to_action_queue}] ]
 	if caster.tags.has('Evil') :
 		
@@ -22,7 +22,7 @@ func _on_spell_hit_chara(caster : Creature, spell, damage : int ):
 	else :
 		return[true, damage, [{}]]
 
-func _on_before_melee_attack(character : Creature, returned_array : Array) :
+func _on_before_melee_attack(_character : Creature, returned_array : Array) :
 	#[true, _attacker , combat_button, damage_detail, []] #last is for extra  queued actions
 	if returned_array[1].tags.has('Evil') :
 		returned_array[3]['total'] = roundi(returned_array[3]['total']*0.9)
@@ -31,5 +31,5 @@ func _on_before_melee_attack(character : Creature, returned_array : Array) :
 func get_info_as_text() -> String :
 	return 'Permanent Evil Protection'+' (source : '+trait_source+')'
 
-func equals_args(traits_array : Array) :
+func equals_args(_traits_array : Array) :
 	return true

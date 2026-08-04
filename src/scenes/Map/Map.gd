@@ -689,7 +689,7 @@ func generate_zoomed_map(mapname : String) -> void:
 	load_map(GameGlobal.currentcampaign, "temporary_zoomed_map" )
 	print("MAP loaded  temporary_zoomed_map")
 
-func find_path(from : Vector2i, to : Vector2i, swimmer : bool, flying : bool, big : bool, crea : Creature, melee_enemies_on_the_way : bool) -> Array :
+func find_path(from : Vector2i, to : Vector2i, _swimmer : bool, _flying : bool, _big : bool, crea : Creature, melee_enemies_on_the_way : bool) -> Array :
 	#var right_astar : SpecificAstar2D = aStar11 #get_right_graph_for_crea(crea)
 	var right_astar : SpecificAstar2D = get_right_graph_for_crea(crea)
 	print("MAP ASTAR CREA  SIZE : ", right_astar.crea_size)

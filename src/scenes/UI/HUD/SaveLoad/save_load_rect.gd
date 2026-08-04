@@ -408,7 +408,7 @@ func load_game(campaignname : String, savename : String) :
 	# Load that catalog before deserializing the saved party.
 	print("campaignname currentcampaign : ", campaignname, '!=',prevCampaign+"? ",campaignname != prevCampaign )
 	if campaignname != prevCampaign :
-		await NodeAccess.__Resources().load_campaign_ressources(campaignname)
+		NodeAccess.__Resources().load_campaign_ressources(campaignname)
 	# load the player characters
 	var pcs_names_array : Array = data_dict["pc_order"]
 	GameGlobal.player_characters.clear()

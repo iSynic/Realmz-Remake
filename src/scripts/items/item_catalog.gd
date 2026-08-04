@@ -138,7 +138,7 @@ func resolve_legacy_name(display_name: String) -> String:
 
 func register_embedded_definition(
 	normalized_definition: Dictionary,
-	legacy_template: Dictionary = {},
+	legacy_item_template: Dictionary = {},
 ) -> bool:
 	last_errors.clear()
 	if not _is_json_compatible(normalized_definition):
@@ -217,13 +217,13 @@ func register_embedded_definition(
 				"conflicts with the previously registered digest",
 			)
 			return false
-		if not legacy_template.is_empty() \
+		if not legacy_item_template.is_empty() \
 				and not _legacy_templates.has(definition_id):
-			_legacy_templates[definition_id] = legacy_template.duplicate(true)
+			_legacy_templates[definition_id] = legacy_item_template.duplicate(true)
 		return true
 	_definitions[definition_id] = ItemDefinitionScript.new(normalized_definition)
-	if not legacy_template.is_empty():
-		_legacy_templates[definition_id] = legacy_template.duplicate(true)
+	if not legacy_item_template.is_empty():
+		_legacy_templates[definition_id] = legacy_item_template.duplicate(true)
 	return true
 
 

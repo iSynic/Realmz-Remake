@@ -242,7 +242,7 @@ class Render:
 			if N.get_child_count() > 0:  
 				setAllChildrenLayers(N)
 			else:			
-				N.z_index = N.z_index + definition.Render.get_layer_space()		
+				N.z_index = N.z_index + RealmzDefinitions.Render.get_layer_space()
 				print(N.z_index)
 
 func _ready() :

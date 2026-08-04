@@ -100,7 +100,7 @@ func execute(command_id: String, request: Dictionary) -> Dictionary:
 			int(routed_request.get("dy", 0))
 		)
 	if command_id == "alter_game_time" and routed_request.has("seconds"):
-		var modifier_result := await apply_rule_modifiers(
+		var modifier_result := apply_rule_modifiers(
 			"time-advance",
 			float(routed_request.get("seconds", 0)),
 			{

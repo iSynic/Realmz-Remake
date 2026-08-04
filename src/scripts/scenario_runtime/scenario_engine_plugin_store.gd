@@ -290,11 +290,11 @@ func _validate_catalog(document: Dictionary) -> Dictionary:
 func _copy_package_files(
 	source_root: String,
 	target_root: String,
-	descriptor: Dictionary
+	package_descriptor: Dictionary
 ) -> bool:
 	if DirAccess.make_dir_recursive_absolute(_global_path(target_root)) != OK:
 		return _fail("Could not create the plug-in staging directory")
-	for file_value: Variant in descriptor.get("files", []):
+	for file_value: Variant in package_descriptor.get("files", []):
 		var file: Dictionary = file_value
 		var relative_path := str(file.get("path", ""))
 		var source_path := source_root.path_join(relative_path)

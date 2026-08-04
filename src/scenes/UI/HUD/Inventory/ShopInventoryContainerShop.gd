@@ -46,9 +46,9 @@ func _drop_data(_pos: Vector2, data: Variant) -> void:
 	if not _can_drop_data(_pos, data):
 		return
 	var item: ItemInstance = data[0]
-	var owner: Creature = data[1]
+	var seller: Creature = data[1]
 	var shoprect: ShopRect = get_parent()
-	var result := shoprect.sell_item(owner, item)
+	var result := shoprect.sell_item(seller, item)
 	if not bool(result.get("ok", false)):
 		GameGlobal.play_sfx("generation error.ogg")
 		return

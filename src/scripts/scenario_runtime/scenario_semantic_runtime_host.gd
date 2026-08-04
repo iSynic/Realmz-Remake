@@ -16,12 +16,12 @@ var active: bool:
 		return interpreter != null and interpreter.pending_command != null
 
 
-func configure(owner: Object) -> void:
-	session = owner
+func configure(session_owner: Object) -> void:
+	session = session_owner
 	runtime = self
-	interpreter = owner.interpreter
-	runtime_state = owner.semantic_state
-	command_router = owner.command_router
+	interpreter = session_owner.interpreter
+	runtime_state = session_owner.semantic_state
+	command_router = session_owner.command_router
 	_event_queue.clear()
 	_event_queue_draining = false
 

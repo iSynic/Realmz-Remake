@@ -25,8 +25,8 @@ func new(xy, texture):
 func _ready():
 	pass # Replace with function body.
 
-func _on_Thing_area_entered(area):
+func _on_Thing_area_entered(_area):
 	emit_signal("on_thing_enter")	
 
-func _on_Thing_area_exited(area):
+func _on_Thing_area_exited(_area):
 	emit_signal("on_thing_leave")

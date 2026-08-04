@@ -61,24 +61,24 @@ func _init(args : Array):
 	
 	UI.ow_hud.creatureRect.logrect.log_other_text(chara, '  prepares themself for he next round.', null,'')
 
-func stack(args : Array) :
+func stack(_args : Array) :
 	pass
 
-func unstack(args : Array) :
+func unstack(_args : Array) :
 	pass
 
 func get_saved_variables() :
 	print('trait preparing.gd shouldnt be active out of combat, get_saved_variables should never happen')
 	return [duration]
 
-func _on_new_round(chara) :
+func _on_new_round(character) :
 	duration -= 1
 	if duration <= 0 :
-		chara.remove_trait(self)
+		character.remove_trait(self)
 	
 
-func _on_battle_end(chara) :
-	chara.remove_trait(self)
+func _on_battle_end(character) :
+	character.remove_trait(self)
 
 func _on_get_stat(statname : String, stat : float) :
 	match statname :

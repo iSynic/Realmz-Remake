@@ -88,10 +88,10 @@ static func preview_from_campaigns_directory(
 		fallback["readinessState"] = "Invalid"
 		fallback["diagnostic"] = "Classic campaign name is invalid"
 		return fallback
-	var campaign_directory := _normalized_directory(campaigns_directory).path_join(
+	var candidate_directory := _normalized_directory(campaigns_directory).path_join(
 		candidate_name
 	)
-	var manifest := _read_preview_json(campaign_directory.path_join("campaign.json"))
+	var manifest := _read_preview_json(candidate_directory.path_join("campaign.json"))
 	if manifest.is_empty():
 		fallback["readinessState"] = "Invalid"
 		fallback["diagnostic"] = "Classic campaign manifest is unavailable"
@@ -117,11 +117,11 @@ static func preview_from_campaigns_directory(
 	if not (files is Dictionary):
 		return fallback
 	var scenario := _read_preview_document(
-		campaign_directory,
+		candidate_directory,
 		str(files.get("scenario", ""))
 	)
 	var rules := _read_preview_document(
-		campaign_directory,
+		candidate_directory,
 		str(files.get("rules", ""))
 	)
 	var admission := CampaignAdmissionScript.rules_from_bundle({
@@ -345,7 +345,7 @@ func selection_rules() -> Dictionary:
 	return selection
 
 
-static func _read_preview_document(campaign_directory: String, relative_path: String) -> Dictionary:
+static func _read_preview_document(directory_path: String, relative_path: String) -> Dictionary:
 	var normalized := relative_path.replace("\\", "/").strip_edges()
 	if (
 		normalized.is_empty()
@@ -354,7 +354,7 @@ static func _read_preview_document(campaign_directory: String, relative_path: St
 		or ".." in normalized.split("/", false)
 	):
 		return {}
-	return _read_preview_json(campaign_directory.path_join(normalized))
+	return _read_preview_json(directory_path.path_join(normalized))
 
 
 static func _read_preview_json(path: String) -> Dictionary:

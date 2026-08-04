@@ -246,11 +246,11 @@ func make_continuation_snapshot() -> Dictionary:
 	}
 
 
-func restore_continuation(snapshot: Variant) -> Dictionary:
-	var validation := validate_continuation_snapshot(snapshot)
+func restore_continuation(snapshot_data: Variant) -> Dictionary:
+	var validation := validate_continuation_snapshot(snapshot_data)
 	if str(validation.get("status", "")) != "ok":
 		return validation
-	var saved: Dictionary = snapshot
+	var saved: Dictionary = snapshot_data
 	if str(saved.get("state", "")) == "idle":
 		interpreter.reset_execution()
 		last_result.clear()
@@ -277,14 +277,14 @@ func replay_continuation() -> Dictionary:
 	return {"status": "ok"}
 
 
-static func validate_continuation_snapshot(snapshot: Variant) -> Dictionary:
-	if not (snapshot is Dictionary):
+static func validate_continuation_snapshot(snapshot_data: Variant) -> Dictionary:
+	if not (snapshot_data is Dictionary):
 		return _continuation_error("Classic continuation is not a dictionary")
-	if int(snapshot.get("schemaVersion", 0)) != CONTINUATION_SCHEMA_VERSION:
+	if int(snapshot_data.get("schemaVersion", 0)) != CONTINUATION_SCHEMA_VERSION:
 		return _continuation_error("Classic continuation schema is not supported")
-	var state := str(snapshot.get("state", ""))
+	var state := str(snapshot_data.get("state", ""))
 	var script_validation := ScenarioScriptRuntime.validate_snapshot(
-		snapshot.get("scenarioScriptRuntime")
+		snapshot_data.get("scenarioScriptRuntime")
 	)
 	if not bool(script_validation.get("valid", false)):
 		return _continuation_error(str(script_validation.get(
@@ -295,7 +295,7 @@ static func validate_continuation_snapshot(snapshot: Variant) -> Dictionary:
 		return {"status": "ok"}
 	if state != "suspended":
 		return _continuation_error("Classic continuation has an invalid state")
-	var yielded_result: Variant = snapshot.get("yieldedResult")
+	var yielded_result: Variant = snapshot_data.get("yieldedResult")
 	if not (yielded_result is Dictionary) \
 			or str(yielded_result.get("status", "")) != "yield":
 		return _continuation_error("Classic continuation has no yielded command")
@@ -305,11 +305,11 @@ static func validate_continuation_snapshot(snapshot: Variant) -> Dictionary:
 	if not (yielded_result.get("payload", {}) is Dictionary):
 		return _continuation_error("Classic continuation command has an invalid payload")
 	var execution_result := ScenarioInterpreter.validate_execution_snapshot(
-		snapshot.get("executionState")
+		snapshot_data.get("executionState")
 	)
 	if str(execution_result.get("status", "")) != "ok":
 		return execution_result
-	if snapshot["executionState"].get("currentTrigger", {}).is_empty():
+	if snapshot_data["executionState"].get("currentTrigger", {}).is_empty():
 		return _continuation_error("Classic continuation has no active action list")
 	return {"status": "ok"}
 

@@ -46,13 +46,13 @@ func transition_to(scriptname: String) -> bool:
 	encounter_phrase_selection_mode = false
 	encounter_phrase = ""
 	var resources = NodeAccess.__Resources()
-	var encounter_name := scriptname
-	if not resources.special_encounters_book.has(encounter_name):
-		encounter_name = encounter_name.trim_suffix(".gd")
-	if not resources.special_encounters_book.has(encounter_name):
+	var resolved_encounter_name := scriptname
+	if not resources.special_encounters_book.has(resolved_encounter_name):
+		resolved_encounter_name = resolved_encounter_name.trim_suffix(".gd")
+	if not resources.special_encounters_book.has(resolved_encounter_name):
 		push_error("Special encounter %s was not found" % scriptname)
 		return false
-	self.encounter_name = encounter_name
+	self.encounter_name = resolved_encounter_name
 	if encounter_script != null:
 		if encounter_script.is_connected("encounter_over", _on_encounter_script_over):
 			encounter_script.disconnect("encounter_over", _on_encounter_script_over)

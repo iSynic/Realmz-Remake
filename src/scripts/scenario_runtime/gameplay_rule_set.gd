@@ -40,12 +40,12 @@ func snapshot() -> Dictionary:
 static func validate_snapshot(value: Variant) -> Dictionary:
 	if not (value is Dictionary):
 		return _invalid("Saved gameplay rules must be a dictionary")
-	var snapshot: Dictionary = value
-	if int(snapshot.get("schemaVersion", 0)) != SAVE_SCHEMA_VERSION:
+	var saved_snapshot: Dictionary = value
+	if int(saved_snapshot.get("schemaVersion", 0)) != SAVE_SCHEMA_VERSION:
 		return _invalid("Saved gameplay rule schema is not supported")
-	if snapshot.get("locked") != true:
+	if saved_snapshot.get("locked") != true:
 		return _invalid("Saved gameplay rules must be playthrough-locked")
-	var saved_domains: Variant = snapshot.get("domains")
+	var saved_domains: Variant = saved_snapshot.get("domains")
 	if not (saved_domains is Dictionary):
 		return _invalid("Saved gameplay rule domains are invalid")
 	for domain: String in DOMAINS:
