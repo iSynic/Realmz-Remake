@@ -725,7 +725,10 @@ func _load_tile_resource_from_paths(
 		texture_atlas_path,
 		templates_path,
 	]:
-		if not FileAccess.file_exists(required_path):
+		if (
+			not FileAccess.file_exists(required_path)
+			and not ResourceLoader.exists(required_path)
+		):
 			push_error("Tileset '%s' is missing %s" % [ts_name, required_path])
 			return false
 	var n_ts_json_data: Dictionary = (
@@ -801,7 +804,10 @@ func _load_tile_resource_from_paths_async(
 		texture_atlas_path,
 		templates_path,
 	]:
-		if not FileAccess.file_exists(required_path):
+		if (
+			not FileAccess.file_exists(required_path)
+			and not ResourceLoader.exists(required_path)
+		):
 			push_error("Tileset '%s' is missing %s" % [ts_name, required_path])
 			return false
 	var n_ts_json_data: Dictionary = (
