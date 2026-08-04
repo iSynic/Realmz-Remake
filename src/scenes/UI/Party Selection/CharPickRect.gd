@@ -35,8 +35,20 @@ func _ready():
 #	pass
 
 
-func fill() :
-	pick_party_label.text = "Pick a party for "+GameGlobal.currentcampaign
+func clear() -> void:
+	selectedcharbutton = null
+	characterfoldernameslist.clear()
+	for container: VBoxContainer in [eligibleContainer, teamContainer]:
+		for child: Node in container.get_children():
+			container.remove_child(child)
+			child.queue_free()
+	pick_party_label.text = "Checking campaign…"
+	$RestrictionsLabel.text = ""
+
+
+func _begin_fill() -> Array:
+	clear()
+	pick_party_label.text = "Pick a party for "+my_menu.selectedCampaign
 	restrictions_summary = GameGlobal.get_campaign_restrictions_description(
 		my_menu.selectedCampaign,
 		my_menu.selectedcampaign_onselect
@@ -56,41 +68,63 @@ func fill() :
 #		print("loaded char ", newchar.name)
 #		characterslist.append(newchar)
 ##		charactersdict[newchar.name] = newchar
-	
-	# clean the scroll containers
-	for child in eligibleContainer.get_children() :
-		eligibleContainer.remove_child(child)
-		child.queue_free()
-	for child in teamContainer.get_children() :
-		teamContainer.remove_child(child)
-		child.queue_free()
-	
-	for c in GameGlobal.profile_characters_list :
+	return GameGlobal.profile_characters_list.duplicate()
+
+
+func _append_character(c: Variant) -> void:
 #		print("charîckrect  adding panel for ", c.name)
-		var charpickpanel = charpickbuttonTSCN.instantiate()
+	var charpickpanel = charpickbuttonTSCN.instantiate()
 #		charpickpanel.set_text(c.name)
-		var admission := GameGlobal.get_character_campaign_admission(
-			c,
-			my_menu.selectedCampaign,
-			my_menu.selectedcampaign_onselect
-		)
-		charpickpanel.set_character(
-			c,
-			bool(admission.get("allowed", false)),
-			str(admission.get("reason", ""))
-		)
-		charpickpanel.my_menu = self
-		charpickpanel.connect("pressed",Callable(self,"_on_char_button_pressed").bind(charpickpanel))
+	var admission := GameGlobal.get_character_campaign_admission(
+		c,
+		my_menu.selectedCampaign,
+		my_menu.selectedcampaign_onselect
+	)
+	charpickpanel.set_character(
+		c,
+		bool(admission.get("allowed", false)),
+		str(admission.get("reason", ""))
+	)
+	charpickpanel.my_menu = self
+	charpickpanel.connect(
+		"pressed",
+		Callable(self,"_on_char_button_pressed").bind(charpickpanel)
+	)
 #		if GameGlobal.player_characters.has(c) :
-		var samename : bool = false
-		for ggpc in GameGlobal.player_characters :
-			if ggpc.name==c.name :
-				samename=true
-				break
-		if samename :
-			teamContainer.add_child(charpickpanel)
-		else :
-			eligibleContainer.add_child(charpickpanel)
+	var samename := false
+	for player_character: Variant in GameGlobal.player_characters:
+		if player_character.name == c.name:
+			samename = true
+			break
+	if samename:
+		teamContainer.add_child(charpickpanel)
+	else:
+		eligibleContainer.add_child(charpickpanel)
+
+
+func fill() -> void:
+	var characters := _begin_fill()
+	for character: Variant in characters:
+		_append_character(character)
+	check_party_ok()
+
+
+func fill_async(expected_generation: int) -> void:
+	var characters := _begin_fill()
+	var frame_started := Time.get_ticks_usec()
+	var characters_this_frame := 0
+	for character: Variant in characters:
+		if my_menu._active_preparation_generation != expected_generation:
+			return
+		_append_character(character)
+		characters_this_frame += 1
+		if (
+			LoadPerformanceTrace.is_frame_budget_exhausted(frame_started)
+			or characters_this_frame >= 2
+		):
+			await get_tree().process_frame
+			frame_started = Time.get_ticks_usec()
+			characters_this_frame = 0
 	check_party_ok()
 	
 func _on_char_button_pressed(bp) :

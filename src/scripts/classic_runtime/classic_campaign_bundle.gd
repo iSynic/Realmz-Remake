@@ -73,6 +73,7 @@ var dispatcher_noop_keys: Dictionary = {}
 var extension_registry: ScenarioExtensionRegistry
 var _evidence_records_by_key: Dictionary = {}
 var _evidence_loaded := false
+var _cooperative_worker_load := false
 
 
 func _required_documents() -> Array[String]:
@@ -89,8 +90,9 @@ func _required_manifest_files() -> Array[String]:
 	return required
 
 
-func load_from_directory(directory: String) -> bool:
+func load_from_directory(directory: String, cooperative_worker_load := false) -> bool:
 	_reset()
+	_cooperative_worker_load = cooperative_worker_load
 	root_directory = directory.trim_suffix("/").trim_suffix("\\")
 	var manifest_value: Variant = _read_json(root_directory.path_join("campaign.json"))
 	if not (manifest_value is Dictionary):
@@ -112,6 +114,8 @@ func load_from_directory(directory: String) -> bool:
 		if not (document_value is Dictionary):
 			return _fail("The '%s' classic document must contain a JSON object" % document_name)
 		documents[document_name] = document_value
+		if _cooperative_worker_load:
+			OS.delay_usec(250)
 
 	if not _validate_document_contract():
 		return false
@@ -205,7 +209,8 @@ func _validate_integrity() -> bool:
 			)
 	var paths: Array = entries.keys()
 	paths.sort()
-	for path_value: Variant in paths:
+	for path_index: int in range(paths.size()):
+		var path_value: Variant = paths[path_index]
 		var relative_path := str(path_value)
 		if not _is_safe_campaign_path(relative_path):
 			return _fail("Bundle integrity path is unsafe: %s" % relative_path)
@@ -225,6 +230,8 @@ func _validate_integrity() -> bool:
 		var actual_sha := _sha256_hex(payload)
 		if actual_sha != expected_sha:
 			return _fail("Campaign payload hash mismatch: %s" % relative_path)
+		if _cooperative_worker_load and path_index % 16 == 15:
+			OS.delay_usec(250)
 	var manifest_without_hash: Dictionary = manifest.duplicate(true)
 	manifest_without_hash["integrity"].erase("packageHash")
 	var canonical_manifest := JSON.stringify(_canonical_value(manifest_without_hash))

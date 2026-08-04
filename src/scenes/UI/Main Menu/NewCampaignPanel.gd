@@ -3,6 +3,9 @@ extends NinePatchRect
 const ClassicCampaignPackageInstallerScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_package_installer.gd"
 )
+const ClassicCampaignPreparationCoordinatorScript = preload(
+	"res://scripts/classic_runtime/classic_campaign_preparation_coordinator.gd"
+)
 const GameplayRuleRegistryScript = preload(
 	"res://scripts/scenario_runtime/gameplay_rule_registry.gd"
 )
@@ -56,10 +59,17 @@ var classic_import_in_progress := false
 var gameplay_rule_registry: GameplayRuleRegistry
 var gameplay_rule_selection: Dictionary = {}
 var _catalog_generation := 0
+var _preparation_coordinator: ClassicCampaignPreparationCoordinator
+var _active_preparation_generation := 0
+var _preparation_trace_tokens: Dictionary = {}
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
 	charPickRect.my_menu = self
+	_preparation_coordinator = ClassicCampaignPreparationCoordinatorScript.new()
+	add_child(_preparation_coordinator)
+	_preparation_coordinator.advisory_ready.connect(_on_preparation_advisory)
+	_preparation_coordinator.preparation_finished.connect(_on_preparation_finished)
 	var _err_connnectcampaign = campaignsItemList.connect("item_selected",Callable(self,"_on_campaign_selected"))
 #	campaignsItemList.connect("nothing_selected",Callable(self,"_on_campaign_unselected"))
 	var _err_connectstartbutton = startButton.connect("pressed",Callable(self,"_on_StartButton_pressed"))
@@ -208,76 +218,142 @@ func _normalized_directory(path: String) -> String:
 
 
 func _on_campaign_selected(idx : int) -> void :
-	var prepare_trace := LoadPerformanceTrace.begin_phase(&"campaign.prepare", {
-		"campaign": str(campaignsItemList.get_item_metadata(idx).get(
-			"campaignName", ""
-		)) if campaignsItemList.get_item_metadata(idx) is Dictionary else "",
-		"cache_status": "memory_or_miss",
-	})
 	set_ready(false, [])
 	selected_campaign_index = idx
 	createCharacterButton.disabled = true
+	gameplayRulesPanel.visible = false
+	gameplay_rule_selection = {}
 	var metadata: Variant = campaignsItemList.get_item_metadata(idx)
 	if not (metadata is Dictionary):
-		LoadPerformanceTrace.end_phase(prepare_trace, false, {
-			"error": "missing_campaign_metadata",
-		})
 		return
 	selectedCampaign = str(metadata.get("campaignName", ""))
 	selectedcampaign_onselect = metadata.get("selectionRules")
+	selectedCampaignNameLabel.text = str(
+		selectedcampaign_onselect.get("title", selectedCampaign)
+		if selectedcampaign_onselect is Dictionary
+		else selectedCampaign
+	)
 	if bool(metadata.get("busy", false)):
 		selectedCampaignDescrLabel.text = (
 			selectedCampaign
 			+ "\nThis campaign is already in use by another party.\nDelete that game first."
 		)
-		LoadPerformanceTrace.end_phase(prepare_trace, false, {
+		return
+	charPickRect.clear()
+	var preview: Dictionary = (
+		selectedcampaign_onselect.duplicate(true)
+		if selectedcampaign_onselect is Dictionary
+		else {}
+	)
+	selectedCampaignDescrLabel.text = "%s\nChecking campaign…" % str(
+		preview.get("description", selectedCampaign)
+	)
+	_active_preparation_generation = _preparation_coordinator.request(
+		selectedCampaign,
+		preview
+	)
+	_preparation_trace_tokens[_active_preparation_generation] = (
+		LoadPerformanceTrace.begin_phase(&"campaign.prepare", {
 			"campaign": selectedCampaign,
-			"error": "campaign_busy",
+		})
+	)
+
+
+func _on_preparation_advisory(
+	generation: int,
+	campaign_name: String,
+	selection: Dictionary
+) -> void:
+	if (
+		generation != _active_preparation_generation
+		or campaign_name != selectedCampaign
+		or selection.is_empty()
+	):
+		return
+	selectedCampaignNameLabel.text = str(selection.get("title", campaign_name))
+	selectedCampaignDescrLabel.text = (
+		_classic_campaign_description(selection)
+		+ "\nChecking current package integrity…"
+	)
+
+
+func _on_preparation_finished(
+	generation: int,
+	campaign_name: String,
+	success: bool,
+	install: Object,
+	selection: Dictionary,
+	cache_status: String,
+	error: String
+) -> void:
+	var trace_token := int(_preparation_trace_tokens.get(generation, 0))
+	_preparation_trace_tokens.erase(generation)
+	if generation != _active_preparation_generation or campaign_name != selectedCampaign:
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"campaign": campaign_name,
+			"cache_status": cache_status,
+			"error": "stale_selection",
 		})
 		return
-	if (
-		selectedcampaign_onselect is Dictionary
-		and bool(selectedcampaign_onselect.get("preview", false))
-	):
-		selectedcampaign_onselect = GameGlobal.get_campaign_selection_rules(
-			selectedCampaign
+	if not success:
+		selectedcampaign_onselect = selection
+		selectedCampaignDescrLabel.text = "Cannot prepare campaign: %s" % (
+			error if not error.is_empty()
+			else str(selection.get("diagnostic", "Campaign readiness failed"))
 		)
-		metadata = metadata.duplicate(true)
-		metadata["selectionRules"] = selectedcampaign_onselect
-		campaignsItemList.set_item_metadata(idx, metadata)
-		campaignsItemList.set_item_text(
-			idx,
-			_campaign_display_name(selectedCampaign, selectedcampaign_onselect)
-		)
+		LoadPerformanceTrace.end_phase(trace_token, false, {
+			"campaign": campaign_name,
+			"cache_status": cache_status,
+			"error": error,
+		})
+		return
+	var ui_trace := LoadPerformanceTrace.begin_phase(
+		&"campaign.prepare.ui",
+		{"campaign": campaign_name, "cache_status": cache_status}
+	)
+	selectedcampaign_onselect = selection.duplicate(true)
+	GameGlobal.classic_campaign_install_cache[campaign_name] = install
+	var metadata: Dictionary = campaignsItemList.get_item_metadata(
+		selected_campaign_index
+	).duplicate(true)
+	metadata["selectionRules"] = selectedcampaign_onselect
+	campaignsItemList.set_item_metadata(selected_campaign_index, metadata)
+	campaignsItemList.set_item_text(
+		selected_campaign_index,
+		_campaign_display_name(campaign_name, selectedcampaign_onselect)
+	)
 	createCharacterButton.disabled = not (
-		selectedcampaign_onselect is Dictionary
-		and bool(selectedcampaign_onselect.get("classic", false))
+		bool(selectedcampaign_onselect.get("classic", false))
 		and bool(selectedcampaign_onselect.get("valid", false))
 	)
-	if selectedcampaign_onselect is Dictionary:
-		selectedCampaignNameLabel.text = str(
-			selectedcampaign_onselect.get("title", selectedCampaign)
-		)
-		selectedCampaignDescrLabel.text = _classic_campaign_description(
-			selectedcampaign_onselect
-		)
-		_configure_gameplay_rules()
-	else:
-		gameplayRulesPanel.visible = false
-		gameplay_rule_selection = {}
-		selectedCampaignNameLabel.text = selectedCampaign
-		selectedCampaignDescrLabel.text = GameGlobal.get_campaign_description(selectedCampaign)
-	#reset the character picking panel
-	var picker_trace := LoadPerformanceTrace.begin_phase(&"campaign.party_picker", {
-		"campaign": selectedCampaign,
+	selectedCampaignNameLabel.text = str(
+		selectedcampaign_onselect.get("title", campaign_name)
+	)
+	selectedCampaignDescrLabel.text = _classic_campaign_description(
+		selectedcampaign_onselect
+	)
+	_configure_gameplay_rules()
+	LoadPerformanceTrace.end_phase(ui_trace, true, {
+		"campaign": campaign_name,
+		"cache_status": cache_status,
 	})
-	charPickRect.fill()
+	var picker_trace := LoadPerformanceTrace.begin_phase(&"campaign.party_picker", {
+		"campaign": campaign_name,
+	})
+	await charPickRect.fill_async(generation)
+	if generation != _active_preparation_generation:
+		LoadPerformanceTrace.end_phase(picker_trace, false, {
+			"campaign": campaign_name,
+			"error": "stale_selection",
+		})
+		return
 	LoadPerformanceTrace.end_phase(picker_trace, true, {
-		"campaign": selectedCampaign,
+		"campaign": campaign_name,
 		"character_count": charPickRect.characterfoldernameslist.size(),
 	})
-	LoadPerformanceTrace.end_phase(prepare_trace, true, {
-		"campaign": selectedCampaign,
+	LoadPerformanceTrace.end_phase(trace_token, true, {
+		"campaign": campaign_name,
+		"cache_status": cache_status,
 	})
 
 func _on_StartButton_pressed() -> void :
@@ -464,7 +540,12 @@ func _configure_gameplay_rules() -> void:
 	gameplayPresetOption.select(selected_index)
 	gameplayAdvancedCheck.button_pressed = false
 	gameplayAdvancedVBox.visible = false
-	_on_gameplay_preset_selected(selected_index)
+	gameplay_rule_selection = {
+		"presetId": str(gameplayPresetOption.get_item_metadata(selected_index)),
+		"domains": {},
+	}
+	for child: Node in gameplayAdvancedVBox.get_children():
+		child.queue_free()
 
 
 func _on_gameplay_preset_selected(index: int) -> void:
@@ -472,7 +553,8 @@ func _on_gameplay_preset_selected(index: int) -> void:
 		return
 	var preset_id := str(gameplayPresetOption.get_item_metadata(index))
 	gameplay_rule_selection = {"presetId": preset_id, "domains": {}}
-	_rebuild_gameplay_advanced_controls()
+	if gameplayAdvancedVBox.visible:
+		_rebuild_gameplay_advanced_controls()
 
 
 func _on_gameplay_advanced_toggled(enabled: bool) -> void:
@@ -670,9 +752,7 @@ func _campaign_display_name(campaign_name: String, selection_rules: Variant) -> 
 func _on_CreateCharacterButton_pressed() -> void:
 	if createCharacterButton.disabled or selectedCampaign.is_empty():
 		return
-	var character_panel: Variant = get_parent().get_node_or_null(
-		"NewCharacterPanel"
-	)
+	var character_panel: Variant = await get_parent().ensure_new_character_panel_async()
 	if character_panel == null \
 			or not character_panel.has_method("configure_classic_campaign"):
 		selectedCampaignDescrLabel.text += (

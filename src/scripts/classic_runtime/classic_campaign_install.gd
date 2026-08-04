@@ -45,6 +45,7 @@ var readiness_report: Dictionary = {}
 var native_context_report: Dictionary = {}
 var start_diagnostic := ""
 var last_error := ""
+var _worker_native_campaign_result: Dictionary = {}
 
 
 static func has_manifest(campaigns_directory: String, candidate_name: String) -> bool:
@@ -131,6 +132,25 @@ func load_from_campaigns_directory(
 	candidate_name: String,
 	allow_materialized_runtime := true
 ) -> bool:
+	if not load_worker_phase_from_campaigns_directory(
+		campaigns_directory,
+		candidate_name,
+		allow_materialized_runtime,
+		false
+	):
+		return false
+	return finalize_worker_preparation()
+
+
+# File access, JSON parsing, hashing, and plain data construction only. This
+# phase is safe to run outside the main thread; Godot resources are finalized
+# by finalize_worker_preparation().
+func load_worker_phase_from_campaigns_directory(
+	campaigns_directory: String,
+	candidate_name: String,
+	allow_materialized_runtime := true,
+	cooperative_worker_load := false
+) -> bool:
 	_reset()
 	if not is_safe_campaign_name(candidate_name):
 		return _fail("Classic campaign name must identify one installed campaign directory")
@@ -144,7 +164,7 @@ func load_from_campaigns_directory(
 	if not FileAccess.file_exists(campaign_directory.path_join("campaign.json")):
 		return _fail("Installed Classic campaign is missing campaign.json")
 	bundle = BundleScript.new()
-	if not bundle.load_from_directory(campaign_directory):
+	if not bundle.load_from_directory(campaign_directory, cooperative_worker_load):
 		return _fail(bundle.last_error)
 	var executable_payload := _find_executable_payload(
 		campaign_directory,
@@ -171,18 +191,42 @@ func load_from_campaigns_directory(
 		return _fail(shared_asset_store.last_error)
 	if not _validate_packaged_payloads():
 		return false
-	var native_context_result: Dictionary = NativeContextBuilderScript.new().build(
-		campaign_directory
+	if cooperative_worker_load:
+		_worker_native_campaign_result = (
+			NativeContextBuilderScript.new().build_campaign_file_context_worker(
+				campaign_directory
+			)
+		)
+	return true
+
+
+func finalize_worker_preparation(certified_readiness := {}) -> bool:
+	if bundle == null or not last_error.is_empty():
+		return false
+	var context_builder = NativeContextBuilderScript.new()
+	var native_context_result: Dictionary = (
+		context_builder.build_from_campaign_file_context(
+			campaign_directory,
+			_worker_native_campaign_result
+		)
+		if not _worker_native_campaign_result.is_empty()
+		else context_builder.build(campaign_directory)
 	)
 	native_context_report = NativeContextBuilderScript.public_report(
 		native_context_result
 	)
 	if not bool(native_context_result.get("ok", false)):
 		return _fail(NativeContextBuilderScript.first_error(native_context_result))
-	readiness_report = ReadinessScript.new().inspect(
-		bundle,
-		native_context_result.get("context", {})
-	)
+	if certified_readiness is Dictionary and (
+		int(certified_readiness.get("schemaVersion", 0))
+		== ReadinessScript.SCHEMA_VERSION
+	):
+		readiness_report = certified_readiness.duplicate(true)
+	else:
+		readiness_report = ReadinessScript.new().inspect(
+			bundle,
+			native_context_result.get("context", {})
+		)
 	start_diagnostic = _validate_native_start_map()
 	return true
 
@@ -441,6 +485,7 @@ func _reset() -> void:
 	native_context_report.clear()
 	start_diagnostic = ""
 	last_error = ""
+	_worker_native_campaign_result.clear()
 
 
 func _fail(message: String) -> bool:

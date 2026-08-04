@@ -12,6 +12,10 @@ const PREPARATION_ERROR := "preparation-error"
 
 var _diagnostics: Array = []
 var _sources: Array = []
+static var _shared_context_cache: Dictionary = {}
+static var _shared_diagnostics_cache: Array = []
+static var _shared_sources_cache: Array = []
+static var _shared_cache_directory := ""
 
 
 func build(
@@ -20,14 +24,131 @@ func build(
 ) -> Dictionary:
 	_diagnostics.clear()
 	_sources.clear()
-	var context := {
-		"items": {},
-		"bestiary": {},
-		"spells": {},
-		"sounds": {},
-	}
-	var normalized_campaign := _normalized_directory(campaign_directory)
+	var context := _empty_context()
 	var normalized_shared := _normalized_directory(shared_directory)
+	if not _has_shared_cache(normalized_shared):
+		_merge_shared_context(normalized_shared, context)
+		_store_shared_cache(context, normalized_shared)
+	else:
+		context = _copy_shared_context()
+		_diagnostics.append_array(_shared_diagnostics_cache.duplicate(true))
+		_sources.append_array(_shared_sources_cache.duplicate(true))
+	_merge_campaign_context(_normalized_directory(campaign_directory), context)
+	return _result(context)
+
+
+func warm_shared_cache_async(
+	tree: SceneTree,
+	shared_directory := DEFAULT_SHARED_DIRECTORY
+) -> void:
+	var normalized_shared := _normalized_directory(shared_directory)
+	if _has_shared_cache(normalized_shared):
+		return
+	_diagnostics.clear()
+	_sources.clear()
+	var context := _empty_context()
+	_merge_resource_book(
+		normalized_shared,
+		"items/stuff_book.json",
+		"shared",
+		"items",
+		context["items"],
+		true
+	)
+	await tree.process_frame
+	if _has_shared_cache(normalized_shared):
+		return
+	_merge_resource_book(
+		normalized_shared,
+		"Bestiary/stuff_book.json",
+		"shared",
+		"bestiary",
+		context["bestiary"]
+	)
+	await tree.process_frame
+	if _has_shared_cache(normalized_shared):
+		return
+	_merge_spell_directory(
+		normalized_shared,
+		"spells",
+		"shared",
+		context["spells"]
+	)
+	await tree.process_frame
+	if _has_shared_cache(normalized_shared):
+		return
+	_merge_sound_directory(
+		normalized_shared,
+		"sounds",
+		"shared",
+		context["sounds"]
+	)
+	_store_shared_cache(context, normalized_shared)
+
+
+func build_campaign_file_context_worker(campaign_directory: String) -> Dictionary:
+	_diagnostics.clear()
+	_sources.clear()
+	var context := _empty_context()
+	var normalized_campaign := _normalized_directory(campaign_directory)
+	_merge_resource_book(
+		normalized_campaign,
+		"Items/stuff_book.json",
+		"campaign",
+		"items",
+		context["items"]
+	)
+	_merge_resource_book(
+		normalized_campaign,
+		"Bestiary/stuff_book.json",
+		"campaign",
+		"bestiary",
+		context["bestiary"]
+	)
+	_merge_sound_directory(
+		normalized_campaign,
+		"Sounds",
+		"campaign",
+		context["sounds"]
+	)
+	return _result(context)
+
+
+func build_from_campaign_file_context(
+	campaign_directory: String,
+	campaign_result: Dictionary
+) -> Dictionary:
+	_diagnostics.clear()
+	_sources.clear()
+	var normalized_shared := _normalized_directory(DEFAULT_SHARED_DIRECTORY)
+	if not _has_shared_cache(normalized_shared):
+		var shared_context := _empty_context()
+		_merge_shared_context(normalized_shared, shared_context)
+		_store_shared_cache(shared_context, normalized_shared)
+	var context := _copy_shared_context()
+	_diagnostics.append_array(_shared_diagnostics_cache.duplicate(true))
+	_sources.append_array(_shared_sources_cache.duplicate(true))
+	var campaign_context: Variant = campaign_result.get("context", {})
+	if campaign_context is Dictionary:
+		for resource_kind: String in ["items", "bestiary", "sounds"]:
+			var entries: Variant = campaign_context.get(resource_kind, {})
+			if entries is Dictionary:
+				context[resource_kind].merge(entries, true)
+	_sources.append_array(campaign_result.get("sources", []).duplicate(true))
+	_diagnostics.append_array(
+		campaign_result.get("diagnostics", []).duplicate(true)
+	)
+	# Script-backed spell metadata remains a main-thread ResourceLoader concern.
+	_merge_spell_directory(
+		_normalized_directory(campaign_directory),
+		"Spells",
+		"campaign",
+		context["spells"]
+	)
+	return _result(context)
+
+
+func _merge_shared_context(normalized_shared: String, context: Dictionary) -> void:
 	_merge_resource_book(
 		normalized_shared,
 		"items/stuff_book.json",
@@ -37,23 +158,9 @@ func build(
 		true
 	)
 	_merge_resource_book(
-		normalized_campaign,
-		"Items/stuff_book.json",
-		"campaign",
-		"items",
-		context["items"]
-	)
-	_merge_resource_book(
 		normalized_shared,
 		"Bestiary/stuff_book.json",
 		"shared",
-		"bestiary",
-		context["bestiary"]
-	)
-	_merge_resource_book(
-		normalized_campaign,
-		"Bestiary/stuff_book.json",
-		"campaign",
 		"bestiary",
 		context["bestiary"]
 	)
@@ -63,6 +170,29 @@ func build(
 		"shared",
 		context["spells"]
 	)
+	_merge_sound_directory(
+		normalized_shared,
+		"sounds",
+		"shared",
+		context["sounds"]
+	)
+
+
+func _merge_campaign_context(normalized_campaign: String, context: Dictionary) -> void:
+	_merge_resource_book(
+		normalized_campaign,
+		"Items/stuff_book.json",
+		"campaign",
+		"items",
+		context["items"]
+	)
+	_merge_resource_book(
+		normalized_campaign,
+		"Bestiary/stuff_book.json",
+		"campaign",
+		"bestiary",
+		context["bestiary"]
+	)
 	_merge_spell_directory(
 		normalized_campaign,
 		"Spells",
@@ -70,17 +200,28 @@ func build(
 		context["spells"]
 	)
 	_merge_sound_directory(
-		normalized_shared,
-		"sounds",
-		"shared",
-		context["sounds"]
-	)
-	_merge_sound_directory(
 		normalized_campaign,
 		"Sounds",
 		"campaign",
 		context["sounds"]
 	)
+
+
+func _store_shared_cache(context: Dictionary, normalized_shared: String) -> void:
+	_shared_context_cache = context.duplicate(true)
+	_shared_diagnostics_cache = _diagnostics.duplicate(true)
+	_shared_sources_cache = _sources.duplicate(true)
+	_shared_cache_directory = normalized_shared
+
+
+static func _has_shared_cache(normalized_shared: String) -> bool:
+	return (
+		not _shared_context_cache.is_empty()
+		and _shared_cache_directory == normalized_shared
+	)
+
+
+func _result(context: Dictionary) -> Dictionary:
 	var error_count := 0
 	for diagnostic_value: Variant in _diagnostics:
 		if (
@@ -107,10 +248,32 @@ func build(
 	}
 
 
+static func _empty_context() -> Dictionary:
+	return {"items": {}, "bestiary": {}, "spells": {}, "sounds": {}}
+
+
+static func _copy_shared_context() -> Dictionary:
+	var context := _empty_context()
+	for resource_kind: String in context:
+		var source: Variant = _shared_context_cache.get(resource_kind, {})
+		context[resource_kind] = (
+			source.duplicate(false) if source is Dictionary else {}
+		)
+	return context
+
+
+static func clear_shared_cache_for_tests() -> void:
+	_shared_context_cache.clear()
+	_shared_diagnostics_cache.clear()
+	_shared_sources_cache.clear()
+	_shared_cache_directory = ""
+
+
 static func public_report(result: Dictionary) -> Dictionary:
-	var report := result.duplicate(true)
+	# Avoid recursively copying the large private context only to discard it.
+	var report := result.duplicate(false)
 	report.erase("context")
-	return report
+	return report.duplicate(true)
 
 
 static func first_error(result: Dictionary) -> String:

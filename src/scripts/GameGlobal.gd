@@ -26,6 +26,9 @@ const CLASSIC_CAMPAIGN_SESSION_PATH := (
 const CLASSIC_STOCK_CHARACTER_ROSTER_PATH := (
 	"res://scripts/classic_runtime/classic_stock_character_roster.gd"
 )
+const CLASSIC_NATIVE_CONTEXT_BUILDER_PATH := (
+	"res://scripts/classic_runtime/classic_native_context_builder.gd"
+)
 const SCENARIO_GODOT_SERVICES_PATH := (
 	"res://scripts/scenario_runtime/godot/scenario_godot_services.gd"
 )
@@ -95,6 +98,9 @@ var ClassicCampaignSessionScript: GDScript:
 var ClassicStockCharacterRosterScript: GDScript:
 	get:
 		return _lazy_resource(CLASSIC_STOCK_CHARACTER_ROSTER_PATH) as GDScript
+var ClassicNativeContextBuilderScript: GDScript:
+	get:
+		return _lazy_resource(CLASSIC_NATIVE_CONTEXT_BUILDER_PATH) as GDScript
 var ScenarioGodotServicesScript: GDScript:
 	get:
 		return _lazy_resource(SCENARIO_GODOT_SERVICES_PATH) as GDScript
@@ -341,6 +347,9 @@ func set_current_profile_async(profilename: String) -> bool:
 	_ensure_stock_roster_for_profile()
 	await get_tree().process_frame
 	var loaded := await load_profile_characters_async(generation)
+	if loaded and generation == _profile_load_generation:
+		var context_builder = ClassicNativeContextBuilderScript.new()
+		await context_builder.warm_shared_cache_async(get_tree())
 	if generation == _profile_load_generation:
 		profile_ready.emit(profilename, loaded)
 	return loaded
