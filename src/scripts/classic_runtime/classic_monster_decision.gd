@@ -48,6 +48,12 @@ static func should_retry_cast(
 	)
 
 
+static func can_take_normal_melee_actions(attack_count: int) -> bool:
+	# Classic reaction attacks can still use attack row zero, but the normal
+	# movement/melee loop is skipped entirely when this count is zero.
+	return attack_count > 0
+
+
 static func spell_target_tiles(decision: Array) -> Array:
 	if decision.size() <= 6:
 		return []

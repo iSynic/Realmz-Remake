@@ -1315,6 +1315,7 @@ func _classic_battle_monster_metadata(
 		"classicDeathMacro": int(monster.get("deathMacro", 0)),
 		"classicTurnUndeadEligible": _classic_monster_can_be_turned(monster),
 		"classicHitDice": int(monster.get("hitDice", 0)),
+		"classicMeleeAttackCount": maxi(0, int(monster.get("attackCount", 0))),
 		"classicArmor": int(monster.get("armor", 0)),
 		"classicMagicResistance": int(monster.get("magicResistance", 0)),
 		"classicSpellSaves": SpellSavesScript.monster_saves(monster.get("saves", [])),
@@ -1611,6 +1612,10 @@ func _set_classic_monster_identity(
 	var name_id := int(monster.get("nameId", -1))
 	creature.set_meta("classic_monster_id", monster_id)
 	creature.set_meta("classic_monster_name_id", name_id)
+	creature.set_meta(
+		"classic_melee_attack_count",
+		maxi(0, int(monster.get("attackCount", 0)))
+	)
 	creature.set_meta("classic_death_macro", int(monster.get("deathMacro", 0)))
 	if not creature.has_meta("classic_monster_generation"):
 		creature.set_meta("classic_armor", int(monster.get("armor", 0)))

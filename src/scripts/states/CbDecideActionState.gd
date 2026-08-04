@@ -325,6 +325,11 @@ static func _apply_classic_battle_metadata(
 		)
 	if metadata.has("classicHitDice"):
 		creature.set_meta("classic_hit_dice", int(metadata["classicHitDice"]))
+	if metadata.has("classicMeleeAttackCount"):
+		creature.set_meta(
+			"classic_melee_attack_count",
+			maxi(0, int(metadata["classicMeleeAttackCount"]))
+		)
 	if metadata.has("classicArmor") and not generated:
 		creature.set_meta("classic_armor", int(metadata["classicArmor"]))
 	if metadata.has("classicMagicResistance") and not generated:

@@ -1031,6 +1031,7 @@ func initialize_from_bestiary_dict(creaname: String, generation_context := {}) :
 		["classic_death_macro", "classicDeathMacro"],
 		["classic_turn_undead_eligible", "classicTurnUndeadEligible"],
 		["classic_hit_dice", "classicHitDice"],
+		["classic_melee_attack_count", "classicMeleeAttackCount"],
 		["classic_armor", "classicArmor"],
 		["classic_magic_resistance", "classicMagicResistance"],
 		["classic_spell_saves", "classicSpellSaves"],

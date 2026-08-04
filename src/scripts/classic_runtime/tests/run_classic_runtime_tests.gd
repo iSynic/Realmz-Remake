@@ -8431,6 +8431,11 @@ func _test_classic_bestiary_materializer() -> void:
 		"compiled monster description reaches its native resource"
 	)
 	_expect_equal(monster.get("classicMonsterId"), 1, "native monster preserves its stable ID")
+	_expect_equal(
+		monster.get("classicMeleeAttackCount"),
+		int(bundle.get_monster(1).get("attackCount", 0)),
+		"native monster preserves its exact Classic melee attack count"
+	)
 	_expect_equal(monster.get("classicArmor"), -4, "native monster preserves authored armor")
 	_expect_equal(
 		monster.get("classicMonsterNameId"),
@@ -10070,10 +10075,18 @@ func _test_classic_bestiary_materializer() -> void:
 		spell_only_record
 	)
 	_expect(
-		spell_only_attacks.get("fidelityFallbacks", []).has(
+		not spell_only_attacks.get("fidelityFallbacks", []).has(
 			"zeroMeleeAttacksUseNativeActionFloor"
 		),
-		"a spell-only monster records the native action-floor fallback"
+		"a spell-only monster no longer records a native action-floor fallback"
+	)
+	_expect(
+		not MonsterDecisionScript.can_take_normal_melee_actions(0),
+		"a zero-melee Classic monster skips its normal movement and melee loop"
+	)
+	_expect(
+		MonsterDecisionScript.can_take_normal_melee_actions(1),
+		"a Classic monster with a melee attack can advance normally"
 	)
 	_expect(
 		not materializer._unsupported_fields(

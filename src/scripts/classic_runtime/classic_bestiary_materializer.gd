@@ -82,7 +82,7 @@ const ELEMENT_BY_SPECIAL_ATTACK := {
 const UNSUPPORTED_SCALAR_FIELDS := [
 	"beenAttacked",
 ]
-const MATERIALIZATION_VERSION := 18
+const MATERIALIZATION_VERSION := 19
 
 var last_error := ""
 
@@ -353,6 +353,7 @@ func _native_monster(
 	var native_monster := {
 		"classicMonsterId": monster_id,
 		"classicMonsterNameId": int(record.get("nameId", -1)),
+		"classicMeleeAttackCount": maxi(0, int(record.get("attackCount", 0))),
 		"classicDeathMacro": int(record.get("deathMacro", 0)),
 		"classicTurnUndeadEligible": _type_flag(record, 1) or _type_flag(record, 2),
 		"classicHitDice": hit_dice,
@@ -752,8 +753,8 @@ func _native_attacks(record: Dictionary) -> Dictionary:
 	var uses_native_weapon := int(record.get("weapon", 0)) != 0
 	var source: Variant = record.get("attacks", [])
 	var attack_count := int(record.get("attackCount", 1))
-	if attack_count == 0:
-		fidelity_fallbacks.append("zeroMeleeAttacksUseNativeActionFloor")
+	# Keep row zero available for Classic opportunity and guard reactions even
+	# when the monster has no ordinary melee actions on its own turn.
 	attack_count = maxi(1, attack_count)
 	if source is Array:
 		for attack_index: int in mini(attack_count, source.size()):

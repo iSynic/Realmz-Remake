@@ -240,6 +240,10 @@ static func _move_toward_target(crea: Creature, target_pos: Vector2) -> Array:
 
 
 static func _classic_can_advance(crea: Creature, target_pos: Vector2) -> bool:
+	if not ClassicMonsterDecisionScript.can_take_normal_melee_actions(
+		int(crea.get_meta("classic_melee_attack_count", 1))
+	):
+		return false
 	var path: Array = GameGlobal.map.find_path(
 		crea.position, target_pos, true, false, false, crea, true
 	)
