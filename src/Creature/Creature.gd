@@ -419,8 +419,6 @@ func get_mp_cost_for_tile_stack(stack : Array)->int : #<0 means not walkable
 
 		
 func recalculate_stats() :
-#	print("BUG IN RECALCULATE STATS")
-	print("called creaturegd.recalculate_stats "+name)
 #	NodeAccess.__MainScene().get_tree().quit()
 #	print(name," max hp is ",stats["maxHP"], " cur hp is ",stats["curHP"])
 	var prevminusHP : int = stats["maxHP"]-stats["curHP"]

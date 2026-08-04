@@ -196,7 +196,8 @@ static func initialize_character_creation(
 	stamina_roll: int = RANDOM_ROLL_UNSET,
 	spell_point_rolls: Array[int] = [],
 	foe_type_rolls: Array[int] = [],
-	foe_type_indices: Array[int] = []
+	foe_type_indices: Array[int] = [],
+	batch_level_ups: bool = true
 ) -> Dictionary:
 	if not (character is Object) \
 			or not character.has_method("apply_classic_rule_profile") \
@@ -269,8 +270,18 @@ static func initialize_character_creation(
 	if str(foe_type_bonuses.get("status", "")) != "ok":
 		return foe_type_bonuses
 
+	var can_batch_level_ups: bool = (
+		batch_level_ups
+		and int(_value(character, "level", 0)) < starting_level
+		and character.has_method("begin_character_creation_level_batch")
+		and character.has_method("finish_character_creation_level_batch")
+	)
+	if can_batch_level_ups:
+		character.call("begin_character_creation_level_batch")
 	while int(_value(character, "level", 0)) < starting_level:
 		character.call("level_up")
+	if can_batch_level_ups:
+		character.call("finish_character_creation_level_batch")
 	if int(_value(character, "level", 0)) != starting_level:
 		return {
 			"status": "error",
@@ -771,7 +782,8 @@ static func weighted_movement(
 
 static func apply_level_up_combat_progression(
 	character: Variant,
-	missile_roll: int = -1
+	missile_roll: int = -1,
+	recalculate_after: bool = true
 ) -> Dictionary:
 	var profile := _dictionary_value(
 		_value(character, "classic_rule_profile", {})
@@ -837,7 +849,9 @@ static func apply_level_up_combat_progression(
 		character,
 		clampi(hand_to_hand + hand_to_hand_gain, 0, 200)
 	)
-	if character is Object and character.has_method("recalculate_stats"):
+	if recalculate_after \
+			and character is Object \
+			and character.has_method("recalculate_stats"):
 		character.call("recalculate_stats")
 	return {
 		"status": "ok",
@@ -894,7 +908,8 @@ static func apply_level_up_attack_progression(character: Variant) -> Dictionary:
 
 static func apply_level_up_stamina_progression(
 	character: Variant,
-	stamina_roll: int = RANDOM_ROLL_UNSET
+	stamina_roll: int = RANDOM_ROLL_UNSET,
+	recalculate_after: bool = true
 ) -> Dictionary:
 	var profile := _dictionary_value(
 		_value(character, "classic_rule_profile", {})
@@ -933,7 +948,9 @@ static func apply_level_up_stamina_progression(
 		- roundi(_native_level_up_stat(character, "maxHP"))
 		+ stamina_gain
 	)
-	if character is Object and character.has_method("recalculate_stats"):
+	if recalculate_after \
+			and character is Object \
+			and character.has_method("recalculate_stats"):
 		character.call("recalculate_stats")
 	return {
 		"status": "ok",
@@ -1998,7 +2015,8 @@ static func apply_character_creation_resources(
 
 static func apply_level_up_spellcasting_progression(
 	character: Variant,
-	spell_point_roll: int = RANDOM_ROLL_UNSET
+	spell_point_roll: int = RANDOM_ROLL_UNSET,
+	recalculate_after: bool = true
 ) -> Dictionary:
 	var profile := _dictionary_value(
 		_value(character, "classic_rule_profile", {})
@@ -2044,7 +2062,7 @@ static func apply_level_up_spellcasting_progression(
 		- roundi(_native_level_up_stat(character, "maxSP"))
 		+ spell_point_gain
 	)
-	if character.has_method("recalculate_stats"):
+	if recalculate_after and character.has_method("recalculate_stats"):
 		character.call("recalculate_stats")
 	return {
 		"status": "ok",

@@ -127,6 +127,7 @@ var classic_can_regenerate := false
 var classic_can_regenerate_initialized := false
 var classic_creation_resources_initialized := false
 var classic_source_character: Dictionary = {}
+var _batching_character_creation_levels := false
 
 
 func _init(data : Dictionary,new_icon : Texture,new_portrait : Texture,new_classgd : GDScript,new_racegd : GDScript):
@@ -762,25 +763,47 @@ func apply_raceclass_base_stats() :
 
 #	print(name," has curHP maxHP : ", stats["curHP"], ' ',stats["maxHP"])
 	can_dual_wield = classgd.can_dual_wield and racegd.can_dual_wield
-	print("PC after apply_raceclass_base_stats(), ",base_stats["curHP"] ,'/',base_stats["maxHP"])
 
 
+
+
+func begin_character_creation_level_batch() -> void:
+	_batching_character_creation_levels = true
+
+
+func finish_character_creation_level_batch() -> void:
+	if not _batching_character_creation_levels:
+		return
+	_batching_character_creation_levels = false
+	recalculate_stats()
 
 
 func level_up() :
-	print("PC b4 level up  base_stats ", base_stats["curHP"] ,'/',base_stats["maxHP"])
 	level +=1
 	classgd._level_up(self, level)
 	racegd._level_up(self, level)
 
 	recalculate_stats()
-	ClassicCharacterRulesScript.apply_level_up_stamina_progression(self)
+	var recalculate_progression_stats := not _batching_character_creation_levels
+	ClassicCharacterRulesScript.apply_level_up_stamina_progression(
+		self,
+		ClassicCharacterRulesScript.RANDOM_ROLL_UNSET,
+		recalculate_progression_stats
+	)
 	var spellcasting_result := (
-		ClassicCharacterRulesScript.apply_level_up_spellcasting_progression(self)
+		ClassicCharacterRulesScript.apply_level_up_spellcasting_progression(
+			self,
+			ClassicCharacterRulesScript.RANDOM_ROLL_UNSET,
+			recalculate_progression_stats
+		)
 	)
 	if str(spellcasting_result.get("status", "")) == "error":
 		push_error(str(spellcasting_result.get("message", "")))
-	ClassicCharacterRulesScript.apply_level_up_combat_progression(self)
+	ClassicCharacterRulesScript.apply_level_up_combat_progression(
+		self,
+		-1,
+		recalculate_progression_stats
+	)
 	ClassicCharacterRulesScript.apply_level_up_attack_progression(self)
 	ClassicCharacterRulesScript.apply_level_up_magic_resistance(self)
 	var special_ability_result := (
@@ -795,7 +818,6 @@ func level_up() :
 	)
 	if str(condition_result.get("status", "")) == "error":
 		push_error(str(condition_result.get("message", "")))
-	print("PC after level up  base_stats ", base_stats["curHP"] ,'/',base_stats["maxHP"])
 
 
 func can_equip_item(item) -> bool :

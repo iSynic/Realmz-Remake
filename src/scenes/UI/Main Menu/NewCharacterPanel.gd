@@ -465,8 +465,6 @@ func set_clean_character() :
 	#GameGlobal.playerCharacterGD.new(jsonresult, newicon, newportrait, classgd, racegd)
 
 func try_create_character() :
-#	print("try_create_character : ", new_char_name)
-	print("try create", new_char_class, new_char_race)
 	if not (new_char_class and  new_char_race) :
 		return
 	if not ClassicStandardCharacterRulesScript.is_caste_allowed(

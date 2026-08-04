@@ -724,6 +724,8 @@ class CampaignRuleCharacter:
 	var life_status := 0
 	var spells: Array = [[], [], [], [], [], [], []]
 	var traits: Array = []
+	var recalculation_count := 0
+	var _batching_character_creation_levels := false
 	var ITEM_NO_MELEE_WEAPON := {
 		"name": "NO_MELEE_WEAPON",
 		"weapon_dmg": {"Physical": [1, 3]},
@@ -1131,6 +1133,7 @@ class CampaignRuleCharacter:
 		traits.erase(trait_instance)
 
 	func recalculate_stats() -> void:
+		recalculation_count += 1
 		var hp_deficit := (
 			int(native_stats.get("maxHP", 0))
 			- int(native_stats.get("curHP", 0))
@@ -1203,6 +1206,15 @@ class CampaignRuleCharacter:
 				return false
 		return true
 
+	func begin_character_creation_level_batch() -> void:
+		_batching_character_creation_levels = true
+
+	func finish_character_creation_level_batch() -> void:
+		if not _batching_character_creation_levels:
+			return
+		_batching_character_creation_levels = false
+		recalculate_stats()
+
 	func level_up(
 		magic_resistance_roll: int = -1,
 		missile_roll: int = -1,
@@ -1219,17 +1231,23 @@ class CampaignRuleCharacter:
 		if level == 2:
 			base_stats["MaxActions"] += 0.5
 		recalculate_stats()
+		var recalculate_progression_stats := (
+			not _batching_character_creation_levels
+		)
 		CharacterRulesScript.apply_level_up_stamina_progression(
 			self,
-			stamina_roll
+			stamina_roll,
+			recalculate_progression_stats
 		)
 		CharacterRulesScript.apply_level_up_spellcasting_progression(
 			self,
-			spell_point_roll
+			spell_point_roll,
+			recalculate_progression_stats
 		)
 		CharacterRulesScript.apply_level_up_combat_progression(
 			self,
-			missile_roll
+			missile_roll,
+			recalculate_progression_stats
 		)
 		CharacterRulesScript.apply_level_up_attack_progression(self)
 		CharacterRulesScript.apply_level_up_magic_resistance(
@@ -11169,6 +11187,89 @@ func _test_standard_character_rules() -> void:
 		1960,
 		"advanced standard creation applies Classic's prestige penalty"
 	)
+
+	for caste_id: int in [1, 6]:
+		_expect(
+			StandardCharacterRulesScript.is_caste_allowed(
+				bundle,
+				1,
+				caste_id
+			),
+			"batch parity fixture is a legal Human/caste pair"
+		)
+		var unbatched := CampaignRuleCharacter.new({
+			"classicRaceId": 1,
+			"classicCasteId": caste_id,
+		})
+		seed(6000 + caste_id)
+		var unbatched_started := Time.get_ticks_usec()
+		var unbatched_result := (
+			CharacterRulesScript.initialize_character_creation(
+				bundle,
+				unbatched,
+				1,
+				100,
+				[10, 10, 10, 10, 10, 10],
+				CharacterRulesScript.RANDOM_ROLL_UNSET,
+				5,
+				[],
+				[],
+				[],
+				false
+			)
+		)
+		var unbatched_elapsed := Time.get_ticks_usec() - unbatched_started
+
+		var batched := CampaignRuleCharacter.new({
+			"classicRaceId": 1,
+			"classicCasteId": caste_id,
+		})
+		seed(6000 + caste_id)
+		var batched_started := Time.get_ticks_usec()
+		var batched_result := (
+			CharacterRulesScript.initialize_character_creation(
+				bundle,
+				batched,
+				1,
+				100,
+				[10, 10, 10, 10, 10, 10],
+				CharacterRulesScript.RANDOM_ROLL_UNSET,
+				5
+			)
+		)
+		var batched_elapsed := Time.get_ticks_usec() - batched_started
+		_expect_equal(
+			[unbatched_result.get("status"), batched_result.get("status")],
+			["ok", "ok"],
+			"batched and unbatched level-100 creation both complete"
+		)
+		_expect(
+			batched.save_data() == unbatched.save_data(),
+			"batched level-100 creation preserves the complete character state"
+		)
+		_expect(
+			batched.recalculation_count < unbatched.recalculation_count,
+			(
+				"batched level-100 creation reduces derived-stat rebuilds "
+				+ "(%d versus %d)"
+			) % [
+				batched.recalculation_count,
+				unbatched.recalculation_count,
+			]
+		)
+		print(
+			(
+				"CHARACTER_CREATION_BATCH caste=%d unbatched_us=%d "
+				+ "batched_us=%d recalculations=%d/%d"
+			)
+			% [
+				caste_id,
+				unbatched_elapsed,
+				batched_elapsed,
+				unbatched.recalculation_count,
+				batched.recalculation_count,
+			]
+		)
 
 
 func _test_classic_character_rule_profile() -> void:
