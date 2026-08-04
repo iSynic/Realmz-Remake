@@ -23,6 +23,9 @@ const CLASSIC_CAMPAIGN_ADMISSION_PATH := (
 const CLASSIC_CAMPAIGN_SESSION_PATH := (
 	"res://scripts/scenario_runtime/scenario_campaign_session.gd"
 )
+const CLASSIC_STOCK_CHARACTER_ROSTER_PATH := (
+	"res://scripts/classic_runtime/classic_stock_character_roster.gd"
+)
 const SCENARIO_GODOT_SERVICES_PATH := (
 	"res://scripts/scenario_runtime/godot/scenario_godot_services.gd"
 )
@@ -67,6 +70,7 @@ var current_map_script_name : String = ''
 var classic_runtime_host: Object
 var classic_campaign_session: Object
 var classic_campaign_install_cache: Dictionary = {}
+var classic_campaign_preview_cache: Dictionary = {}
 
 var _lazy_resources: Dictionary = {}
 
@@ -88,6 +92,9 @@ var ClassicCampaignAdmissionScript: GDScript:
 var ClassicCampaignSessionScript: GDScript:
 	get:
 		return _lazy_resource(CLASSIC_CAMPAIGN_SESSION_PATH) as GDScript
+var ClassicStockCharacterRosterScript: GDScript:
+	get:
+		return _lazy_resource(CLASSIC_STOCK_CHARACTER_ROSTER_PATH) as GDScript
 var ScenarioGodotServicesScript: GDScript:
 	get:
 		return _lazy_resource(SCENARIO_GODOT_SERVICES_PATH) as GDScript
@@ -149,6 +156,8 @@ var new_gameplay_rule_selection: Dictionary = {}
 var campaign_global_script = null
 var currentprofile : String = 'Default Profile'
 var profile_characters_list : Array = []
+var _profile_load_generation := 0
+var _stock_roster_profiles: Dictionary = {}
 var cur_save_name : String = "Game not Saved !"
 var cur_save_descrition : String = ''
 
@@ -213,6 +222,7 @@ var minimaps : Array = []
 var map_boats_dict : Dictionary = {}
 
 signal battle_end
+signal profile_ready(profile_name: String, success: bool)
 
 
 func _lazy_resource(path: String) -> Resource:
@@ -278,14 +288,17 @@ func create_new_profile(newprofilename : String , new_honest_mode : bool) -> boo
 	else:
 		return false
 
-func set_current_profile(profilename : String) -> void :
+func _apply_current_profile_settings(profilename: String) -> bool:
 	print("GameGlobal set_current_profile : "+profilename)
+	var profile_directory := Paths.profilesfolderpath.path_join(profilename)
+	if not DirAccess.dir_exists_absolute(profile_directory):
+		return false
 	currentprofile = profilename
 	Paths.currentProfileFolderName = profilename
 	#save this profile as the current one to the game wide cfg
 	Utils.FileHandler.set_cfg_setting(Paths.settingspath,"SETTINGS","current_profile", profilename)
 	#load the settings from this profile
-	var path = Paths.profilesfolderpath+Paths.currentProfileFolderName+'/profile_settings.cfg'
+	var path = profile_directory.path_join("profile_settings.cfg")
 	#get_cfg_setting(path, section, key, default) :
 	var musicvolume : float = Utils.FileHandler.get_cfg_setting(path, "VOLUME", "volume_music", 50)
 	MusicStreamPlayer.volume_db = MusicSettingsScript.volume_db_from_setting(musicvolume)
@@ -300,9 +313,49 @@ func set_current_profile(profilename : String) -> void :
 			MusicSettingsScript.default_music_choice(type)
 		)
 		MusicStreamPlayer.set_type_music_choice(type,favofthistype)
+	return true
 
 
-	GameGlobal.load_profile_characters()
+func set_current_profile(profilename : String) -> void :
+	_profile_load_generation += 1
+	if not _apply_current_profile_settings(profilename):
+		profile_ready.emit(profilename, false)
+		return
+	_ensure_stock_roster_for_profile()
+	load_profile_characters()
+	profile_ready.emit(profilename, true)
+
+
+func set_current_profile_async(profilename: String) -> bool:
+	_profile_load_generation += 1
+	var generation := _profile_load_generation
+	if not _apply_current_profile_settings(profilename):
+		profile_ready.emit(profilename, false)
+		return false
+	# The shared catalog owns definitions used while character saves are restored.
+	var resources: CampaignResources = NodeAccess.__Resources()
+	if resources != null and not resources.ensure_shared_item_catalog_loaded():
+		push_error("Shared item definitions could not be loaded before profile characters.")
+		profile_ready.emit(profilename, false)
+		return false
+	_ensure_stock_roster_for_profile()
+	await get_tree().process_frame
+	var loaded := await load_profile_characters_async(generation)
+	if generation == _profile_load_generation:
+		profile_ready.emit(profilename, loaded)
+	return loaded
+
+
+func _ensure_stock_roster_for_profile() -> void:
+	if _stock_roster_profiles.has(currentprofile):
+		return
+	_stock_roster_profiles[currentprofile] = true
+	var result: Dictionary = ClassicStockCharacterRosterScript.ensure_for_current_profile()
+	if str(result.get("status", "")) != "ok":
+		push_warning(str(result.get(
+			"message",
+			"Classic stock characters could not be installed."
+		)))
 
 
 func load_profile_characters() :
@@ -314,6 +367,30 @@ func load_profile_characters() :
 	var characterfoldernameslist = Utils.FileHandler.list_dirs_in_directory(Paths.profilesfolderpath+"/"+Paths.currentProfileFolderName+"/Characters/")
 	for c in characterfoldernameslist :
 		load_character_to_profile(c)
+
+
+func load_profile_characters_async(generation := -1) -> bool:
+	profile_characters_list.clear()
+	var resources: CampaignResources = NodeAccess.__Resources()
+	if resources != null and not resources.ensure_shared_item_catalog_loaded():
+		push_error("Shared item definitions could not be loaded before profile characters.")
+		return false
+	var character_directory := (
+		Paths.profilesfolderpath
+		.path_join(Paths.currentProfileFolderName)
+		.path_join("Characters")
+	)
+	var names: Array = Utils.FileHandler.list_dirs_in_directory(character_directory)
+	names.sort()
+	var frame_started := Time.get_ticks_usec()
+	for character_name: Variant in names:
+		if generation >= 0 and generation != _profile_load_generation:
+			return false
+		load_character_to_profile(str(character_name))
+		if LoadPerformanceTrace.is_frame_budget_exhausted(frame_started):
+			await get_tree().process_frame
+			frame_started = Time.get_ticks_usec()
+	return generation < 0 or generation == _profile_load_generation
 
 #		var path = Paths.profilesfolderpath+Paths.currentProfileFolderName+'/Characters/'+c
 #		print("charpick rect charpath : ",path)
@@ -1492,11 +1569,52 @@ func get_campaign_selection_rules(campaign_name: String) -> Variant:
 
 func get_campaign_selection_preview(campaign_name: String) -> Variant:
 	if is_classic_campaign(campaign_name):
-		return ClassicCampaignInstallScript.preview_from_campaigns_directory(
+		var manifest_path := (
+			Paths.campaignsfolderpath
+			.path_join(campaign_name)
+			.path_join("campaign.json")
+		)
+		var signature := _file_signature(manifest_path)
+		var cached: Variant = classic_campaign_preview_cache.get(campaign_name)
+		if cached is Dictionary and str(cached.get("signature", "")) == signature:
+			return cached.get("preview", {}).duplicate(true)
+		var preview: Dictionary = ClassicCampaignInstallScript.preview_from_campaigns_directory(
 			Paths.campaignsfolderpath,
 			campaign_name
 		)
+		classic_campaign_preview_cache[campaign_name] = {
+			"signature": signature,
+			"preview": preview.duplicate(true),
+		}
+		return preview
 	return get_campaign_selection_rules(campaign_name)
+
+
+func warm_campaign_selection_previews_async() -> void:
+	var campaign_names: Array = Utils.FileHandler.list_dirs_in_directory(
+		Paths.campaignsfolderpath
+	)
+	campaign_names.sort()
+	var frame_started := Time.get_ticks_usec()
+	for campaign_value: Variant in campaign_names:
+		var campaign_name := str(campaign_value)
+		if is_classic_campaign(campaign_name):
+			get_campaign_selection_preview(campaign_name)
+		if LoadPerformanceTrace.is_frame_budget_exhausted(frame_started):
+			await get_tree().process_frame
+			frame_started = Time.get_ticks_usec()
+
+
+func _file_signature(path: String) -> String:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return "missing"
+	var signature := "%d:%d" % [
+		FileAccess.get_modified_time(path),
+		file.get_length(),
+	]
+	file = null
+	return signature
 
 
 func get_classic_campaign_install(campaign_name: String) -> Object:
@@ -1524,8 +1642,10 @@ func get_classic_campaign_install(campaign_name: String) -> Object:
 func clear_classic_campaign_install_cache(campaign_name := "") -> void:
 	if campaign_name.is_empty():
 		classic_campaign_install_cache.clear()
+		classic_campaign_preview_cache.clear()
 	else:
 		classic_campaign_install_cache.erase(campaign_name)
+		classic_campaign_preview_cache.erase(campaign_name)
 
 
 func get_campaign_description(campaign_name : String) -> String:

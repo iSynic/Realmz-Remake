@@ -113,21 +113,14 @@ static func preview_from_campaigns_directory(
 	fallback["compatibilityProfile"] = compatibility_profile
 	fallback["versionLabel"] = version_label
 
-	var files: Variant = manifest.get("files", {})
-	if not (files is Dictionary):
-		return fallback
-	var scenario := _read_preview_document(
-		candidate_directory,
-		str(files.get("scenario", ""))
-	)
-	var rules := _read_preview_document(
-		candidate_directory,
-		str(files.get("rules", ""))
-	)
-	var admission := CampaignAdmissionScript.rules_from_bundle({
-		"documents": {"scenario": scenario, "rules": rules},
-	})
-	fallback.merge(admission, true)
+	# Catalog discovery is deliberately manifest-only. Admission and readiness
+	# require the complete package and are prepared only after selection.
+	var integrity: Variant = manifest.get("integrity", {})
+	if integrity is Dictionary:
+		fallback["packageHash"] = str(integrity.get("packageHash", ""))
+	var producer: Variant = manifest.get("producer", {})
+	if producer is Dictionary:
+		fallback["producer"] = producer.duplicate(true)
 	fallback["preview"] = true
 	fallback["valid"] = false
 	return fallback

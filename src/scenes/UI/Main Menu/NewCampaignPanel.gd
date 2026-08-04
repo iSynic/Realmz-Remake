@@ -3,9 +3,6 @@ extends NinePatchRect
 const ClassicCampaignPackageInstallerScript = preload(
 	"res://scripts/classic_runtime/classic_campaign_package_installer.gd"
 )
-const ClassicStockCharacterRosterScript = preload(
-	"res://scripts/classic_runtime/classic_stock_character_roster.gd"
-)
 const GameplayRuleRegistryScript = preload(
 	"res://scripts/scenario_runtime/gameplay_rule_registry.gd"
 )
@@ -58,6 +55,7 @@ var pending_classic_import_directory := ""
 var classic_import_in_progress := false
 var gameplay_rule_registry: GameplayRuleRegistry
 var gameplay_rule_selection: Dictionary = {}
+var _catalog_generation := 0
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
@@ -256,19 +254,6 @@ func _on_campaign_selected(idx : int) -> void :
 		and bool(selectedcampaign_onselect.get("classic", false))
 		and bool(selectedcampaign_onselect.get("valid", false))
 	)
-	if not createCharacterButton.disabled:
-		var roster_result: Dictionary = (
-			ClassicStockCharacterRosterScript.ensure_for_current_profile()
-		)
-		if str(roster_result.get("status", "")) == "ok":
-			if not roster_result.get("created", []).is_empty():
-				GameGlobal.load_profile_characters()
-		else:
-			push_warning(str(roster_result.get(
-				"message",
-				"Classic stock characters could not be installed."
-			)))
-
 	if selectedcampaign_onselect is Dictionary:
 		selectedCampaignNameLabel.text = str(
 			selectedcampaign_onselect.get("title", selectedCampaign)
@@ -289,7 +274,7 @@ func _on_campaign_selected(idx : int) -> void :
 	charPickRect.fill()
 	LoadPerformanceTrace.end_phase(picker_trace, true, {
 		"campaign": selectedCampaign,
-		"character_count": characterfoldernameslist.size(),
+		"character_count": charPickRect.characterfoldernameslist.size(),
 	})
 	LoadPerformanceTrace.end_phase(prepare_trace, true, {
 		"campaign": selectedCampaign,
@@ -363,8 +348,9 @@ func _on_StartButton_pressed() -> void :
 
 
 
-func fill() -> void :
+func _reset_catalog() -> void:
 	var catalog_trace := LoadPerformanceTrace.begin_phase(&"campaign.catalog")
+	set_meta(&"catalog_trace", catalog_trace)
 	selectedCampaign = ""
 	selected_campaign_index = -1
 	selectedcampaign_onselect = null
@@ -374,42 +360,72 @@ func fill() -> void :
 	createCharacterButton.disabled = true
 	gameplayRulesPanel.visible = false
 	gameplay_rule_selection = {}
-
+	_set_classic_import_status("Loading campaigns…", false)
 	campaignslist = Utils.FileHandler.list_dirs_in_directory(Paths.campaignsfolderpath)
+	campaignslist.sort()
 	campaignsItemList.clear()
-	for campaign_value: Variant in campaignslist:
-		var campaign_name := str(campaign_value)
-		if not GameGlobal.is_classic_campaign(campaign_name):
-			continue
-		var selection_rules: Variant = GameGlobal.get_campaign_selection_preview(
-			campaign_name
-		)
-		var display_name := _campaign_display_name(campaign_name, selection_rules)
-		var busy := false
-		if GameGlobal.honest_mode :
-			var savepath : String = (
-				Paths.profilesfolderpath
-				+ GameGlobal.currentprofile
-				+ "/Saves/"
-				+ campaign_name
-				+ "/"
-			)
-			if DirAccess.dir_exists_absolute(savepath) :
-				if Utils.FileHandler.list_dirs_in_directory(savepath).size()>0 :
-					busy = true
-					display_name += " (busy)"
-		var item_index := campaignsItemList.item_count
-		campaignsItemList.add_item(display_name)
-		campaignsItemList.set_item_metadata(item_index, {
-			"campaignName": campaign_name,
-			"selectionRules": selection_rules,
-			"busy": busy,
-		})
 
-	LoadPerformanceTrace.end_phase(catalog_trace, true, {
+
+func _append_campaign(campaign_name: String) -> void:
+	if not GameGlobal.is_classic_campaign(campaign_name):
+		return
+	var selection_rules: Variant = GameGlobal.get_campaign_selection_preview(
+		campaign_name
+	)
+	var display_name := _campaign_display_name(campaign_name, selection_rules)
+	var busy := false
+	if GameGlobal.honest_mode:
+		var savepath := (
+			Paths.profilesfolderpath
+			.path_join(GameGlobal.currentprofile)
+			.path_join("Saves")
+			.path_join(campaign_name)
+		)
+		if DirAccess.dir_exists_absolute(savepath):
+			if not Utils.FileHandler.list_dirs_in_directory(savepath).is_empty():
+				busy = true
+				display_name += " (busy)"
+	var item_index := campaignsItemList.item_count
+	campaignsItemList.add_item(display_name)
+	campaignsItemList.set_item_metadata(item_index, {
+		"campaignName": campaign_name,
+		"selectionRules": selection_rules,
+		"busy": busy,
+	})
+
+
+func _finish_catalog(success := true) -> void:
+	_set_classic_import_status("", false)
+	var trace_token: int = int(get_meta(&"catalog_trace", -1))
+	remove_meta(&"catalog_trace")
+	LoadPerformanceTrace.end_phase(trace_token, success, {
 		"campaign_count": campaignsItemList.item_count,
 	})
-	return
+
+
+func fill() -> void:
+	_catalog_generation += 1
+	_reset_catalog()
+	for campaign_value: Variant in campaignslist:
+		_append_campaign(str(campaign_value))
+	_finish_catalog()
+
+
+func fill_async() -> void:
+	_catalog_generation += 1
+	var generation := _catalog_generation
+	_reset_catalog()
+	await get_tree().process_frame
+	var frame_started := Time.get_ticks_usec()
+	for campaign_value: Variant in campaignslist:
+		if generation != _catalog_generation or not is_inside_tree():
+			_finish_catalog(false)
+			return
+		_append_campaign(str(campaign_value))
+		if LoadPerformanceTrace.is_frame_budget_exhausted(frame_started):
+			await get_tree().process_frame
+			frame_started = Time.get_ticks_usec()
+	_finish_catalog()
 
 
 func _configure_gameplay_rules() -> void:
