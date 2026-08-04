@@ -8,9 +8,9 @@ const RESOURCE_ALIASES := {
 static func is_valid_packed_id(spell_id: int) -> bool:
 	if spell_id < 1101:
 		return false
-	var caster_class := int(spell_id / 1000)
+	var caster_class := floori(spell_id / 1000.0)
 	var remainder := spell_id % 1000
-	var spell_level := int(remainder / 100)
+	var spell_level := floori(remainder / 100.0)
 	var spell_slot := remainder % 100
 	return (
 		caster_class >= 1
@@ -28,9 +28,9 @@ static func mapping_key(spell_id: int) -> String:
 	# Subtracting Classic's 1101 base exposes zero-based caster, level, and
 	# slot values. The inherited Remake table stores those parts as a key.
 	var packed := spell_id - 1101
-	var caster_class := int(packed / 1000) + 1
+	var caster_class := floori(packed / 1000.0) + 1
 	var remainder := packed % 1000
-	var spell_level := int(remainder / 100)
+	var spell_level := floori(remainder / 100.0)
 	var spell_slot := remainder % 100
 	return "%d%d%d" % [caster_class * 100, spell_level, spell_slot]
 

@@ -64,7 +64,7 @@ static func ensure_tileset(tiles_book: Dictionary) -> Array:
 		var source_index := source_tile_id - 1
 		var region := Rect2i(
 			(source_index % SOURCE_COLUMNS) * TILE_SIZE,
-			(source_index / SOURCE_COLUMNS) * TILE_SIZE,
+			floori(source_index / float(SOURCE_COLUMNS)) * TILE_SIZE,
 			TILE_SIZE,
 			TILE_SIZE
 		)

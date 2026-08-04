@@ -81,12 +81,12 @@ func has_torch_artwork() -> bool:
 
 func fuel_segment_count() -> int:
 	if _light_condition > 0:
-		return maxi(1, int(_light_condition / 31) + 1)
+		return maxi(1, floori(_light_condition / 31.0) + 1)
 	return 2 if _has_torch else 0
 
 
 func flame_y() -> int:
-	return clampi(FLAME_BASE_Y - int(_light_condition / 4), 0, FLAME_BASE_Y)
+	return clampi(FLAME_BASE_Y - floori(_light_condition / 4.0), 0, FLAME_BASE_Y)
 
 
 func fuel_marker_position(segment_index: int) -> Vector2:

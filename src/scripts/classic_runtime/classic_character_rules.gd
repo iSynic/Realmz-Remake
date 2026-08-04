@@ -1646,7 +1646,7 @@ static func advance_character_age_days(
 		}
 
 	var target_group := 0
-	var target_year := int(target_days / 365)
+	var target_year := floori(target_days / 365.0)
 	for range_index: int in range(age_ranges.size()):
 		var age_range: Array[int] = age_ranges[range_index]
 		if target_year >= age_range[0] and target_year <= age_range[1]:
@@ -1817,7 +1817,7 @@ static func classic_battle_experience(
 			int(_value(character, "classic_age_years", 0)) * 365
 		)
 	)
-	if int(age_days / 365) < maximum_age:
+	if floori(age_days / 365.0) < maximum_age:
 		return share
 	# Preserve the source's float multiplication followed by integer storage.
 	return int(float(share) * 0.6666666)
@@ -2844,7 +2844,7 @@ static func _has_classic_item_identity(item: Dictionary) -> bool:
 
 
 static func _item_category_allowed(masks: Array[int], category: int) -> bool:
-	var word := int(category / 32)
+	var word := floori(category / 32.0)
 	if category < 0 or category >= 58 or masks.size() <= word:
 		return false
 	var storage_bit := 31 - category % 32

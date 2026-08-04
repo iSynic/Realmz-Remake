@@ -83,15 +83,15 @@ static func _draw_authored_markers(image: Image, map_record: Dictionary, icon_si
 		if marker_id == 0:
 			continue
 		var center := Vector2i(
-			int(marker_value.get("x", 0)) * icon_size + int(icon_size / 2),
-			int(marker_value.get("y", 0)) * icon_size + int(icon_size / 2)
+			int(marker_value.get("x", 0)) * icon_size + floori(icon_size / 2.0),
+			int(marker_value.get("y", 0)) * icon_size + floori(icon_size / 2.0)
 		)
 		if marker_id == X_MARKER_ID:
-			_draw_x(image, center, maxi(5, int(icon_size / 2)), Color(1.0, 0.12, 0.08))
+			_draw_x(image, center, maxi(5, floori(icon_size / 2.0)), Color(1.0, 0.12, 0.08))
 		elif marker_id == SECRET_MARKER_ID:
-			_draw_box(image, center, maxi(4, int(icon_size / 2)), Color(1.0, 0.85, 0.0))
+			_draw_box(image, center, maxi(4, floori(icon_size / 2.0)), Color(1.0, 0.85, 0.0))
 		else:
-			_draw_box(image, center, maxi(4, int(icon_size / 2)), Color(0.1, 0.9, 1.0))
+			_draw_box(image, center, maxi(4, floori(icon_size / 2.0)), Color(0.1, 0.9, 1.0))
 
 
 static func _draw_party_marker(
@@ -110,10 +110,10 @@ static func _draw_party_marker(
 	var map_x := int(current_position.get("x", 0)) - int(map_record.get("startX", 0))
 	var map_y := int(current_position.get("y", 0)) - int(map_record.get("startY", 0))
 	var center := Vector2i(
-		map_x * icon_size + int(icon_size / 2),
-		map_y * icon_size + int(icon_size / 2)
+		map_x * icon_size + floori(icon_size / 2.0),
+		map_y * icon_size + floori(icon_size / 2.0)
 	)
-	_draw_plus(image, center, maxi(4, int(icon_size / 2)), Color(0.1, 1.0, 0.2))
+	_draw_plus(image, center, maxi(4, floori(icon_size / 2.0)), Color(0.1, 1.0, 0.2))
 
 
 static func _draw_x(image: Image, center: Vector2i, radius: int, color: Color) -> void:

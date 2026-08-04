@@ -20,7 +20,7 @@ func unstack(args : Array) :
 	duration -= args[0]
 
 func get_saved_variables() :
-	return [ceil(duration/5),level]
+	return [ceili(duration / 5.0),level]
 
 func _on_spell_hit_chara(caster : Creature, spell, damage : int ):
 	#[has_effect, applied_damage, [{added_to_action_queue}] ]
@@ -43,4 +43,4 @@ func _on_time_pass(_character, seconds) :
 	duration -= seconds
 	
 func get_info_as_text() -> String :
-	return 'Spell Protection Lv.'+str(level)+'for '+str(ceil(duration/5))+' rounds'
+	return 'Spell Protection Lv.'+str(level)+'for '+str(ceili(duration / 5.0))+' rounds'

@@ -99,7 +99,9 @@ static func land_overlay_icon_id(value: int) -> Variant:
 			if icon_id <= 999:
 				break
 			icon_id -= 1000
-		return icon_id if icon_id > 200 and icon_id < 1000 else null
+		if icon_id > 200 and icon_id < 1000:
+			return icon_id
+		return null
 	while icon_id < -999:
 		icon_id += 1000
 	return icon_id
@@ -190,7 +192,7 @@ func classic_boat_plan(map_record: Dictionary, tileset_name: String) -> Dictiona
 		if boat_requirement != 1 or int(attribute.get("baseScale", 0)) != 0:
 			continue
 		# Realmz stores land fields by column, unlike Remake's row-major map data.
-		var coordinate := "%d,%d" % [int(cell_index / height), cell_index % height]
+		var coordinate := "%d,%d" % [floori(cell_index / float(height)), cell_index % height]
 		placements[coordinate] = "%s%d" % [tileset_name, tile_id - 1]
 		terrain_by_cell[cell_index] = CLASSIC_BOAT_WATER_TILE
 	return {
@@ -808,7 +810,7 @@ func _resolve_land_edge_transition(
 	var current_cell := Vector2i(-1, -1)
 	for cell_index: int in range(cells.size()):
 		if int(cells[cell_index]) == layout_level:
-			current_cell = Vector2i(cell_index % columns, int(cell_index / columns))
+			current_cell = Vector2i(cell_index % columns, floori(cell_index / float(columns)))
 			break
 	if current_cell.x < 0:
 		return _blocked_land_edge()
@@ -1511,7 +1513,7 @@ func _native_tile_stack(
 			if stacks.has(value):
 				continue
 			var x := index % width
-			var y := index / width
+			var y := floori(index / float(width))
 			if _has_native_cell(native_map, x, y):
 				stacks[value] = {
 					"sourceCell": Vector2i(x, y),

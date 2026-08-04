@@ -451,7 +451,7 @@ func _land_secrets(map_record: Dictionary) -> Array:
 		if state == MapBridgeScript.LAND_SECRET_NONE:
 			continue
 		# Providence preserves Realmz land fields in column-major order.
-		var x := int(tile_index / height)
+		var x := floori(tile_index / float(height))
 		var y := tile_index % height
 		secrets.append([
 			x,
@@ -1297,7 +1297,7 @@ func _build_land_overlay_tileset_plan(
 			Rect2i(Vector2i.ZERO, tile_image.get_size()),
 			Vector2i(
 				(tile_index % columns) * LAND_OVERLAY_TILE_SIZE,
-				(tile_index / columns) * LAND_OVERLAY_TILE_SIZE
+				floori(tile_index / float(columns)) * LAND_OVERLAY_TILE_SIZE
 			)
 		)
 		lookup[resource_id] = tile_index + 1
@@ -1471,7 +1471,7 @@ func _build_dungeon_tileset_plan(
 			Rect2i(Vector2i.ZERO, tile_image.get_size()),
 			Vector2i(
 				(tile_index % columns) * DUNGEON_TILE_SIZE,
-				(tile_index / columns) * DUNGEON_TILE_SIZE
+				floori(tile_index / float(columns)) * DUNGEON_TILE_SIZE
 			)
 		)
 		lookup[field] = tile_index + 1
@@ -1537,7 +1537,7 @@ func _render_dungeon_tile(source: Image, field: int) -> Image:
 				continue
 			var sprite_rect := Rect2i(
 				DUNGEON_SOURCE_X + (sprite_index % 4) * DUNGEON_SOURCE_TILE_SIZE,
-				DUNGEON_SOURCE_Y + (sprite_index / 4) * DUNGEON_SOURCE_TILE_SIZE,
+				DUNGEON_SOURCE_Y + floori(sprite_index / 4.0) * DUNGEON_SOURCE_TILE_SIZE,
 				DUNGEON_SOURCE_TILE_SIZE,
 				DUNGEON_SOURCE_TILE_SIZE
 			)

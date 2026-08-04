@@ -19,7 +19,7 @@ func unstack(args : Array) :
 	duration -= 5*args[0]
 
 func get_saved_variables() :
-	return [ceil(duration/5)]
+	return [ceili(duration / 5.0)]
 
 func _on_new_round(_character : Creature) :
 	if duration <= 0 :
@@ -41,4 +41,4 @@ func _on_time_pass(_character, seconds) :
 	duration -= seconds
 	
 func get_info_as_text() -> String :
-	return 'Speedy for '+str(ceil(duration/5))+' rounds'
+	return 'Speedy for '+str(ceili(duration / 5.0))+' rounds'

@@ -100,7 +100,7 @@ var in_field : bool = false
 var in_combat : bool = false
 
 
-var resist : RESIST_TYPE = 0
+var resist : RESIST_TYPE = RESIST_TYPE.IGNORE_MRES_DODGE
 
 
 var los : bool = true
@@ -115,8 +115,8 @@ var skip_targeting : bool = false
 var autotarget_type : AUTOTARGET_TYPE = AUTOTARGET_TYPE.NONE
 
 
-var proj_tex : GFX = -1
-var proj_hit : GFX = -1
+var proj_tex : GFX = GFX.NONE
+var proj_hit : GFX = GFX.NONE
 var sounds : Array = []
 var max_focus_loss : int = 0
 # Persistent battlefield spells opt into these fields. Keeping them on the

@@ -224,7 +224,9 @@ func _refresh_configuration() -> void:
 
 func _skill_difficulty(skill_name: String) -> Variant:
 	var configured: Dictionary = _runtime.get_skill_configuration(skill_name)
-	return float(configured["difficulty"]) if configured.has("difficulty") else null
+	if configured.has("difficulty"):
+		return float(configured["difficulty"])
+	return null
 
 
 func _context() -> Dictionary:

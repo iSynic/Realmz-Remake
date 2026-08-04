@@ -255,8 +255,8 @@ func _configure_presentation(record: Dictionary) -> void:
 	max_plevel = int(record.get("maxPowerLevel", max_plevel))
 	los = bool(record.get("lineOfSight", _range_low + _range_per_power != 0))
 	ray = bool(record.get("ray", false))
-	proj_tex = int(record.get("projectileTexture", GFX.NONE))
-	proj_hit = int(record.get("projectileHit", GFX.NONE))
+	proj_tex = int(record.get("projectileTexture", GFX.NONE)) as GFX
+	proj_hit = int(record.get("projectileHit", GFX.NONE)) as GFX
 	sounds = _string_array(record.get("sounds", []))
 	max_focus_loss = int(record.get("maxFocusLoss", 0))
 

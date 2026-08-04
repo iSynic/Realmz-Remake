@@ -24,7 +24,7 @@ func unstack(args : Array) :
 	_remove_if_expired()
 
 func get_saved_variables() :
-	return [ceil(duration/5)]
+	return [ceili(duration / 5.0)]
 
 func _on_new_round(_character : Creature) :
 	duration -= 5
@@ -45,4 +45,4 @@ func _remove_if_expired() -> void:
 		chara.remove_trait(self)
 	
 func get_info_as_text() -> String :
-	return 'Chemical Protection for '+str(ceil(duration/5))+' rounds'
+	return 'Chemical Protection for '+str(ceili(duration / 5.0))+' rounds'

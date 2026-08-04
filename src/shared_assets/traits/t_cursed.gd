@@ -20,7 +20,7 @@ func unstack(args : Array) :
 		chara.remove_trait(self)
 
 func get_saved_variables() :
-	return [ceil(duration/5)]
+	return [ceili(duration / 5.0)]
 
 func _on_new_round(_character : Creature) :
 	duration -= 5
@@ -56,4 +56,4 @@ func _on_time_pass(_character, seconds) :
 		return
 
 func get_info_as_text() -> String :
-	return 'Cursed for '+str(ceil(duration/5))+' rounds'
+	return 'Cursed for '+str(ceili(duration / 5.0))+' rounds'

@@ -251,7 +251,7 @@ static func teleport_to_map_and_pos(mapname : String, pos : Vector2, sfx_name : 
 		GameGlobal.map.focuscharacter.set_tile_position(Vector2(pos.x,pos.y))
 		GameGlobal.map.owcharacter.set_tile_position(Vector2(pos.x,pos.y))
 	else :
-		GameGlobal.change_map(mapname, pos.x, pos.y)
+		GameGlobal.change_map(mapname, int(pos.x), int(pos.y))
 
 static func teleport_to_map_and_pos_divinity(map_id : int, posx : int, posy : int, sfx_id : int) :
 	teleport_to_map_and_pos('map_'+str(map_id), Vector2(posx,posy), SfxIdDivinity.mapping[sfx_id])
@@ -503,7 +503,7 @@ static func set_ap_enabled_flag(_mapname : String, _apname : String, _chance : f
 	printerr("\n USED ScriptHelperFuncs set_ap_enabled_flag !! "+flag_name+' = '+str(_chance))
 
 ## Divinity Code 52: Pick on Miscellaneous type=, parameter=, who=
-static func filter_PCs_Divinity(type : int, parameter : int, who : int, previously_picked = []) -> Array :
+static func filter_PCs_Divinity(type : int, parameter : Variant, who : int, previously_picked = []) -> Array :
 	var picked_array : Array = []
 	if previously_picked.is_empty() or who!=2:
 		previously_picked = GameGlobal.player_characters.duplicate()
@@ -528,9 +528,8 @@ static func filter_PCs_Divinity(type : int, parameter : int, who : int, previous
 				picked_array.append(UI.ow_hud.selected_character)
 		2 : #Item
 			if typeof(parameter) != TYPE_STRING :
-				printerr("filter_PCs_Divinity on item posession, parameter must be a String, it is ", parameter)
-				while(true) :{
-				}
+				push_error("filter_PCs_Divinity on item possession requires a String parameter")
+				return picked_array
 			for pc in pc_picked_pre_filter :
 				for i: ItemInstance in pc.inventory_instances():
 					var definition := NodeAccess.__Resources().get_item_definition(i)

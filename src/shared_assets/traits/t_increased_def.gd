@@ -20,7 +20,7 @@ func unstack(args : Array) :
 		chara.remove_trait(self)
 
 func get_saved_variables() :
-	return [ceil(duration/5)]
+	return [ceili(duration / 5.0)]
 
 func _on_new_round(_character : Creature) :
 	if duration <= 0 :

@@ -22,7 +22,7 @@ func unstack(args : Array) :
 		chara.remove_trait(self)
 
 func get_saved_variables() :
-	return [ceil(duration/5)]
+	return [ceili(duration / 5.0)]
 
 func _on_get_stat(statname : String, stat : int) :
 	if ['AccuracyMelee','AccuracyRanged'].has(statname) :
@@ -46,4 +46,4 @@ func _on_get_creature_script() :
 	return GameGlobal.cmp_resources.creascripts_book['runningaway.gd']
 	
 func get_info_as_text() -> String :
-	return 'Fleeing for '+str(ceil(duration/5))+'rounds'
+	return 'Fleeing for '+str(ceili(duration / 5.0))+'rounds'

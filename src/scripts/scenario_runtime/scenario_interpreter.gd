@@ -545,9 +545,10 @@ func make_execution_snapshot() -> Dictionary:
 		return {"status": "ok", "snapshot": snapshot()}
 	var result: Dictionary = classic_execution_state.make_snapshot()
 	if str(result.get("status", "")) == "ok":
-		result["snapshot"]["scenarioPendingCommand"] = (
-			pending_command.to_dictionary() if pending_command != null else null
-		)
+		var pending_command_snapshot: Variant = null
+		if pending_command != null:
+			pending_command_snapshot = pending_command.to_dictionary()
+		result["snapshot"]["scenarioPendingCommand"] = pending_command_snapshot
 		result["snapshot"]["classicAttachmentState"] = {
 			"queue": _classic_attachment_queue.duplicate(true),
 			"deferredInstruction": _classic_deferred_instruction.duplicate(true),
@@ -1851,6 +1852,9 @@ func _behavior_attachment_instructions(
 		anchor
 	)
 	var slot := _behavior_anchor_slot(anchor)
+	var attachment_slot: Variant = null
+	if slot >= 0:
+		attachment_slot = slot
 	var instructions: Array = []
 	for binding_value: Variant in bindings:
 		if not (binding_value is Dictionary):
@@ -1872,7 +1876,7 @@ func _behavior_attachment_instructions(
 					"hook": hook,
 					"targetKind": target_kind,
 					"recordId": str(binding.get("recordId", "")),
-					"slot": null if slot < 0 else slot,
+					"slot": attachment_slot,
 					"anchor": anchor.duplicate(true),
 					"order": int(binding.get("order", 0)),
 					"priority": int(binding.get("priority", 0)),
@@ -1999,10 +2003,9 @@ func mixed_execution_state() -> Dictionary:
 		"response",
 		{}
 	).duplicate(true)
-	var active_response: Variant = (
-		_classic_response_reference(response)
-		if not _classic_encounter_phase.is_empty() else null
-	)
+	var active_response: Variant = null
+	if not _classic_encounter_phase.is_empty():
+		active_response = _classic_response_reference(response)
 	var active_result: Variant = null
 	var enhanced_result_id := str(response.get("enhancedResultId", ""))
 	if not enhanced_result_id.is_empty():

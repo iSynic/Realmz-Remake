@@ -143,14 +143,14 @@ static func candidate_ids_for_name(
 static func school_for_spell_id(spell_id: int) -> String:
 	if spell_id < 1101:
 		return ""
-	var class_index: int = int((spell_id - 1101) / 1000) + 1
+	var class_index: int = floori((spell_id - 1101) / 1000.0) + 1
 	return str(CLASSIC_SCHOOLS.get(class_index, ""))
 
 
 static func level_for_spell_id(spell_id: int) -> int:
 	if spell_id < 1101:
 		return 0
-	return int(((spell_id - 1101) % 1000) / 100) + 1
+	return floori(((spell_id - 1101) % 1000) / 100.0) + 1
 
 
 static func school_evidence_for_character(character: Object, class_script: Variant) -> String:

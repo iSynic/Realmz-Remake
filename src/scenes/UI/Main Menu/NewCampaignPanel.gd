@@ -550,10 +550,13 @@ func _create_gameplay_option_row(
 			spin.value = float(value)
 			spin.value_changed.connect(
 				func(next_value: float) -> void:
+					var option_value: Variant = next_value
+					if schema["type"] == "integer":
+						option_value = int(next_value)
 					_set_gameplay_option(
 						domain,
 						option_id,
-						int(next_value) if schema["type"] == "integer" else next_value
+						option_value
 					)
 			)
 			row.add_child(spin)

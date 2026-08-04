@@ -3345,7 +3345,7 @@ func build_shop_inventory(
 			continue
 		if item_id == 0 or quantity < 1:
 			return _error("Classic shop has invalid stock in slot %d" % slot)
-		var category_index := slot / SHOP_CATEGORY_SIZE
+		var category_index := floori(slot / float(SHOP_CATEGORY_SIZE))
 		if category_index >= SHOP_CATEGORIES.size():
 			return _error("Classic shop stock slot %d is outside its fixed categories" % slot)
 		var item_name := ""
@@ -3433,7 +3433,7 @@ func build_shop_inventory_from_catalog(
 			continue
 		if item_id == 0 or quantity < 1:
 			return _error("Classic shop has invalid stock in slot %d" % slot)
-		var category_index := slot / SHOP_CATEGORY_SIZE
+		var category_index := floori(slot / float(SHOP_CATEGORY_SIZE))
 		if category_index >= SHOP_CATEGORIES.size():
 			return _error(
 				"Classic shop stock slot %d is outside its fixed categories" % slot

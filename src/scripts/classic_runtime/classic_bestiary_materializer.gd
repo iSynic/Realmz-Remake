@@ -1157,8 +1157,8 @@ func _materialize_campaign_icon(
 		position = Vector2i(0, int(atlas_state.get("nextY", 0)))
 		atlas_state["nextY"] = position.y + size.y
 		image_book[image_key] = {
-			"0_ref_x": position.x / 32,
-			"0_ref_y": position.y / 32,
+			"0_ref_x": floori(position.x / 32.0),
+			"0_ref_y": floori(position.y / 32.0),
 			"size": "%dx%d" % [size.x, size.y],
 		}
 	_grow_atlas(atlas_state, position.x + size.x, position.y + size.y)

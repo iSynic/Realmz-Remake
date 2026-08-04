@@ -152,4 +152,4 @@ static func _classic_spell_level(spell_id: int) -> int:
 	var normalized_id: int = absi(spell_id)
 	if normalized_id < 1101:
 		return 0
-	return int(((normalized_id - 1101) % 1000) / 100) + 1
+	return floori(((normalized_id - 1101) % 1000) / 100.0) + 1

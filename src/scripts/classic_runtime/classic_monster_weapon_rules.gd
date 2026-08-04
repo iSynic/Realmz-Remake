@@ -48,7 +48,7 @@ static func can_hit(
 	# Classic lets an unarmed attacker substitute one magic-plus point per
 	# eight character levels.
 	if _is_unarmed(weapon):
-		weapon_magic_plus = int(_value(attacker, "level", 0)) / 8
+		weapon_magic_plus = floori(int(_value(attacker, "level", 0)) / 8.0)
 	return weapon_magic_plus >= required_magic_plus
 
 

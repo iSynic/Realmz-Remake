@@ -19800,7 +19800,7 @@ func _test_classic_summon_spells() -> void:
 		_expect_equal(spell.get_aoe(3, null), [Vector2i.ZERO], "summon uses one target tile %d" % spell_id)
 		_expect_equal(
 			int(spell.school_levels.get(str(values[4]), 0)),
-			int((spell_id % 10000) / 100) % 10,
+			floori((spell_id % 10000) / 100.0) % 10,
 			"summon source school level %d" % spell_id
 		)
 

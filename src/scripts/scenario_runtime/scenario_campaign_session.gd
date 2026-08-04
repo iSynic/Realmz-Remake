@@ -563,6 +563,9 @@ func state_summary() -> Dictionary:
 			"campaignKind": super._campaign_kind(),
 			"implementationKind": IMPLEMENTATION_KIND,
 		}
+	var pending_command_snapshot: Variant = null
+	if interpreter != null and interpreter.pending_command != null:
+		pending_command_snapshot = interpreter.pending_command.to_dictionary()
 	return {
 		"campaignId": str(semantic_bundle.manifest.get("id", "")),
 		"campaignKind": REMAKE_AUTHORED_KIND,
@@ -580,11 +583,7 @@ func state_summary() -> Dictionary:
 			if interpreter != null and interpreter.scenario_script_runtime != null
 			else {}
 		),
-		"pendingCommand": (
-			interpreter.pending_command.to_dictionary()
-			if interpreter != null and interpreter.pending_command != null
-			else null
-		),
+		"pendingCommand": pending_command_snapshot,
 	}
 
 

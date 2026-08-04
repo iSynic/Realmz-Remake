@@ -44,4 +44,4 @@ func _on_time_pass(_character, seconds) :
 	duration -= seconds
 	
 func get_info_as_text() -> String :
-	return 'Invisible for '+str(ceil(duration/5))+' rounds'
+	return 'Invisible for '+str(ceili(duration / 5.0))+' rounds'

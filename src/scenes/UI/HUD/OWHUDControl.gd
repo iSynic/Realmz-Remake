@@ -490,18 +490,18 @@ func set_charactersRect_type(t : int, showdropmenu : bool = true) :
 
 func updateTimeDisplay() :
 	var time = GameGlobal.time
-	var day = time / 86400
-	var hour = (time-86400*day) / 3600
-	var minute = (time-86400*day-3600*hour) / 60
+	var day = floori(time / 86400.0)
+	var hour = floori((time-86400*day) / 3600.0)
+	var minute = floori((time-86400*day-3600*hour) / 60.0)
 	var second = (time-86400*day-3600*hour-60*minute) % 60
 	timeCntrLabel.text = "Day %02d, %02dh %02dm %02ds" % [day, hour, minute, second]
 	var ltime = GameGlobal.light_time
 	if ltime >= 86400 :
-		lightcntrLabel.text = str(ltime/86400)+' d'
+		lightcntrLabel.text = str(floori(ltime / 86400.0))+' d'
 	elif ltime >= 3600 :
-		lightcntrLabel.text = str(ltime/3600)+' h'
+		lightcntrLabel.text = str(floori(ltime / 3600.0))+' h'
 	elif ltime >= 60 :
-		lightcntrLabel.text = str(ltime/60)+' m'
+		lightcntrLabel.text = str(floori(ltime / 60.0))+' m'
 	else :
 		lightcntrLabel.text = str(ltime)+' s'
 #	lightcntrLabel.text = String(GameGlobal.light_time)+' s'
@@ -813,10 +813,6 @@ func _on_InventoryButton_pressed():
 			#
 			#enter_battle_mode()
 		
-		return
-
-
-
 func set_party_swap_enabled(enabled : bool) :
 	party_swap_enabled = enabled
 	$VBoxScreen/HBoxBot/BotUtilityPanel/CharSwapButton.disabled = not enabled

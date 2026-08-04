@@ -94,7 +94,7 @@ func _is_stock_missile_record(record: Dictionary) -> bool:
 	var fixed_target_num := int(record.get("fixedTargetNum", 0))
 	var supported_hit_count := fixed_target_num in [0, 1] \
 		or (spell_id == 4406 and fixed_target_num == 6)
-	if int(spell_id / 1000) != 4 \
+	if floori(spell_id / 1000.0) != 4 \
 			or int(record.get("queueIcon", 0)) != 0 \
 			or int(record.get("cost", 0)) != 0 \
 			or absi(int(record.get("spellClass", 0))) != 9 \

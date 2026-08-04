@@ -34,29 +34,29 @@ func _init(args : Array):
 		if ap_for_mele<=0 :
 			break
 		melee_crit_rate_bonus +=0.05
-		melee_acc_bonus+2
+		melee_acc_bonus += 2
 		ap_for_mele -= 0.5
 	while ap_for_mele>0 :
 		if ap_for_mele<=0 :
 			break
-		melee_acc_bonus+2
-		melee_crit_mult_bonus+0.1
+		melee_acc_bonus += 2
+		melee_crit_mult_bonus += 0.1
 		ap_for_mele -= 0.5
 	
 	while chara_ranged_cr+ranged_acc_bonus<1.0 :
 		if ap_for_ranged<=0 :
 			break
 		ranged_crit_rate_bonus +=0.05
-		ranged_acc_bonus+2
+		ranged_acc_bonus += 2
 		ap_for_ranged -= 0.5
 	while ap_for_ranged>0 :
 		if ap_for_ranged<=0 :
 			break
-		ranged_acc_bonus+2
-		ranged_crit_mult_bonus+0.1
+		ranged_acc_bonus += 2
+		ranged_crit_mult_bonus += 0.1
 		ap_for_ranged -= 0.5
 	magic_acc_bonus = consumed_ap * 0.05 * chara.get_stat('Intellect')
-	apr_bonus = ceil(consumed_ap/2)
+	apr_bonus = ceili(consumed_ap / 2.0)
 	duration = 2
 	
 	UI.ow_hud.creatureRect.logrect.log_other_text(chara, '  prepares themself for he next round.', null,'')

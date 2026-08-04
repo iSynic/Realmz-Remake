@@ -182,7 +182,7 @@ static func levels_for_recommended_total(
 ) -> Array[int]:
 	var normalized_size := maxi(1, party_size)
 	var normalized_total := maxi(normalized_size, recommended_total)
-	var base_level := normalized_total / normalized_size
+	var base_level := floori(normalized_total / float(normalized_size))
 	var remainder := normalized_total % normalized_size
 	var levels: Array[int] = []
 	for member_index: int in normalized_size:
@@ -221,7 +221,7 @@ static func gear_tier_for_level(level: int) -> int:
 
 
 static func maximum_spell_tier_for_level(level: int) -> int:
-	return clampi(1 + (maxi(1, level) - 1) / 4, 1, 7)
+	return clampi(1 + floori((maxi(1, level) - 1) / 4.0), 1, 7)
 
 
 static func provision(

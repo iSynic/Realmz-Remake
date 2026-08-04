@@ -43,7 +43,7 @@ func unstack(args : Array) :
 		chara.remove_trait(self)
 
 func get_saved_variables() :
-	return [ceil(duration/5)]
+	return [ceili(duration / 5.0)]
 
 
 func _on_remove_trait(character : Creature, traitscript) :
@@ -66,5 +66,5 @@ func _on_get_creature_script() :
 	
 func get_info_as_text() -> String :
 	if is_instance_valid(charmer_crea) :
-		return 'Charmed for '+str(ceil(duration/5))+'rounds by '+ charmer_crea.name
-	return 'Charmed for '+str(ceil(duration/5))+'rounds'
+		return 'Charmed for '+str(ceili(duration / 5.0))+'rounds by '+ charmer_crea.name
+	return 'Charmed for '+str(ceili(duration / 5.0))+'rounds'

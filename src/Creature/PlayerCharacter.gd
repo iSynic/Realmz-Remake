@@ -955,7 +955,7 @@ func get_selection_cost(ability) -> int:
 #	return classgd.used_resource
 
 static func get_exp_req_for_lvl(lvl : int) -> int :
-	return pow(lvl,3)*100
+	return lvl * lvl * lvl * 100
 
 ## returns  the spell level at which the character can learn spell,  or  0 if it can't.
 ## should return a value in [0,7]

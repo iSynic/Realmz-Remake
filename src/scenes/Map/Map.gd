@@ -251,7 +251,7 @@ func _ready():
 	secret_texture = ImageTexture.create_from_image(secret_image)
 
 	var raysperside : int = 16
-	var halfray : int = floor(raysperside/2)
+	var halfray : int = floori(raysperside / 2.0)
 	for x in range(0,raysperside) : #[0,1,2,3,4,5,6,7]
 		exploration_sight_dirs.append(Vector2(-halfray+x,-halfray))
 		exploration_sight_dirs.append(Vector2(halfray,-halfray+x))
@@ -364,8 +364,8 @@ func _draw() :  #map cells are  [ [used_tileset_name,t_id,true],
 #	if mapdata.is_empty() :
 #		return
 
-	cam_x = focuscharacter.tile_position_x - int((widthtiles)/2) +1
-	cam_y = focuscharacter.tile_position_y - int((heighttiles)/2)
+	cam_x = focuscharacter.tile_position_x - floori(widthtiles / 2.0) +1
+	cam_y = focuscharacter.tile_position_y - floori(heighttiles / 2.0)
 	charactersnode.position = Vector2(-cam_x*32,-cam_y*32)
 	creatures_node.position = charactersnode.position
 	images_node.position = charactersnode.position

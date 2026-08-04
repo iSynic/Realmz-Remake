@@ -17,7 +17,7 @@ static func resolved_tier(spell_id: int, source_tier: int) -> int:
 
 static func hit_dice_bounds(tier: int) -> Vector2i:
 	var rolled_upper := 6 * maxi(1, tier)
-	var lower := maxi(1, rolled_upper / 2 - 1)
+	var lower := maxi(1, floori(rolled_upper / 2.0) - 1)
 	var upper := rolled_upper
 	if upper > 27:
 		upper = 200

@@ -15,7 +15,9 @@ static func decide_action(crea : Creature) -> Array :
 		if cb.creature.curFaction != crea.curFaction :
 			barycenter += cb.creature.position
 			enemies_number +=1
-	barycenter *= (1/enemies_number)
+	if enemies_number == 0:
+		return [0, Vector2i.ZERO]
+	barycenter /= float(enemies_number)
 	#find direction away from barycenter
 	var safe_direction : Vector2 = ((crea.position-barycenter).normalized())
 	safe_direction = safe_direction.round()
@@ -61,8 +63,6 @@ static func decide_action(crea : Creature) -> Array :
 		else :
 			return [0, Vector2i.ZERO]
 			
-	return [0, Vector2i.ZERO ]
-				
 #	if not crea.scripts_memory.has("prev_dir") :
 #		crea.scripts_memory["prev_dir"] = [Vector2.UP, Vector2.RIGHT].pick_random()
 #	crea.scripts_memory["prev_dir"] = - crea.scripts_memory["prev_dir"]
@@ -122,7 +122,7 @@ static func get_closest_creas_not_of_side(crea : Creature, notside : int) -> Arr
 
 static func check_los_between_creas(crea_a : Creature, crea_b : Creature, max_range : int) -> bool :
 	var tg : TargetingLayer = GameGlobal.map.targetingLayer
-	var tiles_line_array = tg.bresenham_line(crea_a.position,crea_b.position, 0, max_range)
+	var tiles_line_array = TargetingLayer.bresenham_line(crea_a.position,crea_b.position, 0, max_range)
 	for ts_pos in tiles_line_array :
 		var tilestack : Array = GameGlobal.map.mapdata[ts_pos.x][ts_pos.y]
 		for tiledict in tilestack :

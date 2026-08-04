@@ -497,7 +497,7 @@ func pass_time(seconds : int, fatiguemultiplier : float = 1.0) :
 		}
 	)))
 	var previous_time := time
-	time += seconds *time_scale
+	time += int(seconds * time_scale)
 	var classic_field_time: bool = (
 		is_classic_runtime_active()
 		and not StateMachine.is_combat_state()
@@ -639,7 +639,7 @@ func _advance_classic_timed_encounters(
 
 func add_light_effect(p : int, t : int) :
 	light_power = max(light_power, p)
-	light_time = (light_power*light_time+p*t)/light_power
+	light_time = floori((light_power * light_time + p * t) / float(light_power))
 
 
 func add_classic_light_effect(power: int) -> void:
@@ -2179,7 +2179,11 @@ func end_battle(
 	if not (wonfledlost == 'lost' and (not StateMachine.combat_state.cur_battle_data["allow_loss"])) :
 		#if not game over...
 		print("GameGlobal end battle : last_exploration_map_name : "+last_exploration_map_name)
-		change_map(last_exploration_map_name,pos_when_battle_started.x,pos_when_battle_started.y)
+		change_map(
+			last_exploration_map_name,
+			int(pos_when_battle_started.x),
+			int(pos_when_battle_started.y)
+		)
 
 	UI.ow_hud.exit_battle_mode()
 
@@ -2285,7 +2289,7 @@ func end_battle(
 				if cmp_resources.sounds_book.has("party loss.wav") :
 					SfxPlayer.stream = cmp_resources.sounds_book["party loss.wav"]
 					SfxPlayer.play()
-				ScriptHelperFuncs.play_sound('party loss.wav', false)
+				ScriptHelperFuncsClass.play_sound('party loss.wav', false)
 				await _emit_classic_battle_lifecycle_outcomes(
 					wonfledlost,
 					scenario_defeated_characters,
@@ -2879,7 +2883,7 @@ func calculate_spell_damage(attacker : Creature, defender : Creature, spell : Sp
 		var res_name : String = dmg_spell_elem_def_stats_dict[a][0]
 		var res_stat : float = defender.get_stat(res_name)
 		if ignoreres :
-			res_stat = signi(res_stat)
+			res_stat = signf(res_stat)
 		var mul_name : String = dmg_spell_elem_def_stats_dict[a][1]
 		var mul_stat : float = defender.get_stat(mul_name)
 		spell_damage = max(0,spell_damage - res_stat)*mul_stat

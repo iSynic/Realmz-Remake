@@ -246,7 +246,7 @@ func _rebuild_resists_grid(stats : Dictionary) -> void :
 		_add_resist_value(_format_mult(mult_val), _color_for_mult(mult_val), HORIZONTAL_ALIGNMENT_RIGHT)
 
 
-func _add_resist_header(text : String, align : int) -> void :
+func _add_resist_header(text : String, align : HorizontalAlignment) -> void :
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_size_override("font_size", 11)
@@ -256,7 +256,7 @@ func _add_resist_header(text : String, align : int) -> void :
 	resists_grid.add_child(lbl)
 
 
-func _add_resist_label(text : String, color : Color, align : int) -> void :
+func _add_resist_label(text : String, color : Color, align : HorizontalAlignment) -> void :
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_size_override("font_size", 13)
@@ -266,7 +266,7 @@ func _add_resist_label(text : String, color : Color, align : int) -> void :
 	resists_grid.add_child(lbl)
 
 
-func _add_resist_value(text : String, color : Color, align : int) -> void :
+func _add_resist_value(text : String, color : Color, align : HorizontalAlignment) -> void :
 	var lbl := Label.new()
 	lbl.text = text
 	lbl.add_theme_font_size_override("font_size", 13)

@@ -31,7 +31,7 @@ func unstack(args : Array) :
 		chara.remove_trait(self)
 
 func get_saved_variables() :
-	return [ceil(duration/5)]
+	return [ceili(duration / 5.0)]
 
 func _on_get_stat(statname : String, stat : int) :
 	if ['AccuracyMelee','AccuracyRanged'].has(statname) :
@@ -68,4 +68,4 @@ func _on_get_creature_script() :
 	return [running_script, dumb_script].pick_random()
 	
 func get_info_as_text() -> String :
-	return 'Confused for '+str(ceil(duration/5))+'rounds'
+	return 'Confused for '+str(ceili(duration / 5.0))+'rounds'

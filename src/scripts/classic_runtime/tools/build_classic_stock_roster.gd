@@ -211,7 +211,7 @@ func _character_data(
 		"classicHandToHand": int(source_stats.get("handToHand", 0)),
 		"classicLuck": int(source_stats.get("luck", 0)),
 		"classicGender": int(spec.get("gender", 0)),
-		"classicAgeYears": int(spec.get("ageDays", 0)) / 365,
+		"classicAgeYears": floori(int(spec.get("ageDays", 0)) / 365.0),
 		"classicAgeDays": int(spec.get("ageDays", 0)),
 		"classicAgeGroup": int(spec.get("ageGroup", 0)),
 		"classicAgeMovementAdjustment": 0,
@@ -289,7 +289,7 @@ func _spells(
 			spell_id,
 			resource_name
 		)
-		var spell_level := int((spell_id % 1000) / 100) - 1
+		var spell_level := floori((spell_id % 1000) / 100.0) - 1
 		if spell_level < 0 or spell_level >= spell_levels.size():
 			return _error("learned spell %d has an invalid level" % spell_id)
 		spell_levels[spell_level].append(learned_entry)

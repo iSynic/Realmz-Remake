@@ -206,20 +206,16 @@ var ITEM_NO_RANGE_WEAPON : Dictionary = {"name":"NO_RANGE_WEAPON", "stats" : {},
 var current_range_weapon_instance: ItemInstance = null
 var current_range_weapon: Variant:
 	get:
-		return (
-			current_range_weapon_instance
-			if current_range_weapon_instance != null
-			else ITEM_NO_RANGE_WEAPON
-		)
+		if current_range_weapon_instance != null:
+			return current_range_weapon_instance
+		return ITEM_NO_RANGE_WEAPON
 var ITEM_NO_AMMO_WEAPON : Dictionary = {"name":"NO_AMMO_WEAPON", "stats" : {}, "charges" : 0, "charges_max" : 0, "ammo_type" : "none", "sound" : "punch_female.wav"}
 var current_ammo_weapon_instance: ItemInstance = null
 var current_ammo_weapon: Variant:
 	get:
-		return (
-			current_ammo_weapon_instance
-			if current_ammo_weapon_instance != null
-			else ITEM_NO_AMMO_WEAPON
-		)
+		if current_ammo_weapon_instance != null:
+			return current_ammo_weapon_instance
+		return ITEM_NO_AMMO_WEAPON
 var _equipment_traits_by_item: Dictionary = {}
 
 var rotating_unarmed_melee_weapons : Array = []  # for stuff like ClawClawBite  or status efefcts from attacks
@@ -911,9 +907,9 @@ func _on_time_pass(seconds : int) :
 	_advance_time_traits(seconds)
 	#now regen HP/SP :
 	var hp_regen_amount : float = max(0,seconds*max(0,get_stat("HP_regen_base"))*get_stat("HP_regen_mult") / 86400)
-	change_cur_hp(hp_regen_amount * level)
+	change_cur_hp(int(hp_regen_amount * level))
 	var sp_regen_amount : float = max(0,seconds*max(0,get_stat("SP_regen_base"))*get_stat("SP_regen_mult") / 86400)
-	change_cur_sp(sp_regen_amount * level)
+	change_cur_sp(int(sp_regen_amount * level))
 
 
 func _on_classic_time_pass(seconds: int) -> void:
@@ -1543,8 +1539,9 @@ func mark_classic_attack_attempt() -> void:
 
 
 func get_melee_weapon_for_next_attack() -> Variant:
-	var active_weapon: Variant = current_melee_weapon_instances[0] \
-		if not current_melee_weapon_instances.is_empty() else ITEM_NO_MELEE_WEAPON
+	var active_weapon: Variant = ITEM_NO_MELEE_WEAPON
+	if not current_melee_weapon_instances.is_empty():
+		active_weapon = current_melee_weapon_instances[0]
 	if not is_classic_monster_record():
 		if active_weapon is Dictionary \
 				and active_weapon == ITEM_NO_MELEE_WEAPON \

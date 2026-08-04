@@ -27,7 +27,9 @@ static func advance_time(condition: int, previous_time: int, current_time: int) 
 
 
 static func light_power(condition: int) -> int:
-	return int(condition / CONDITION_PER_POWER) + 1 if condition > 0 else 0
+	if condition <= 0:
+		return 0
+	return floori(condition / float(CONDITION_PER_POWER)) + 1
 
 
 static func remaining_seconds(condition: int, current_time: int) -> int:
