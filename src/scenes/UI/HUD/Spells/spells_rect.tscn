@@ -76,6 +76,7 @@ alignment = 1
 [node name="SpellLevelsRect" type="NinePatchRect" parent="VBoxContainer/TopContainer"]
 custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("3_qj0vv")
 patch_margin_left = 5
 patch_margin_top = 5
@@ -204,6 +205,7 @@ text = "Level 7"
 [node name="SpellsListRect" type="NinePatchRect" parent="VBoxContainer/TopContainer"]
 custom_minimum_size = Vector2(220, 0)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("3_qj0vv")
 patch_margin_left = 5
 patch_margin_top = 5
@@ -235,6 +237,7 @@ alignment = 1
 [node name="PowerLevelsRect" type="NinePatchRect" parent="VBoxContainer/MiddleContainer"]
 custom_minimum_size = Vector2(100, 0)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("3_qj0vv")
 patch_margin_left = 5
 patch_margin_top = 5
@@ -366,6 +369,7 @@ layout_mode = 2
 [node name="SpellInfoRect" type="NinePatchRect" parent="VBoxContainer/MiddleContainer"]
 custom_minimum_size = Vector2(220, 0)
 layout_mode = 2
+texture_filter = 1
 texture = ExtResource("3_qj0vv")
 patch_margin_left = 5
 patch_margin_top = 5
