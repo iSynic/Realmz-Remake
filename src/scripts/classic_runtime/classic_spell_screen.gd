@@ -4,6 +4,7 @@ extends RefCounted
 const META_KEY := "classic_spell_screen_level"
 const BESTIARY_FIELD := "classicSpellScreenLevel"
 const TEMPORARY_TRAIT_NAME := "t_classic_spell_screen.gd"
+const EQUIPMENT_TRAIT_NAME := "p_classic_equipment_spell_screen.gd"
 const FIRST_CONDITION_INDEX := 16
 const LAST_CONDITION_INDEX := 20
 const SECONDS_PER_HOUR := 3600
@@ -52,7 +53,22 @@ static func level(character: Object) -> int:
 	if character == null:
 		return 0
 	var innate_level := clampi(int(character.get_meta(META_KEY, 0)), 0, 5)
-	return maxi(innate_level, temporary_level(character))
+	return maxi(innate_level, maxi(temporary_level(character), equipment_level(character)))
+
+
+static func equipment_level(character: Object) -> int:
+	if character == null:
+		return 0
+	var traits: Variant = character.get("traits")
+	if not (traits is Array):
+		return 0
+	var result := 0
+	for trait_value: Variant in traits:
+		if trait_value is Object \
+				and str(trait_value.get("name")) == EQUIPMENT_TRAIT_NAME \
+				and trait_value.has_method("screen_level"):
+			result = maxi(result, clampi(int(trait_value.screen_level()), 0, 5))
+	return result
 
 
 static func temporary_level(character: Object) -> int:

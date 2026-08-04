@@ -27,6 +27,10 @@ const CustomSpellSupportScript = preload(
 const OnHitConditionScript = preload(
 	"res://scripts/classic_runtime/classic_item_on_hit_condition.gd"
 )
+const SpellScreenScript = preload(
+	"res://scripts/classic_runtime/classic_spell_screen.gd"
+)
+const EQUIPMENT_SPELL_SCREEN_TRAIT := "p_classic_equipment_spell_screen.gd"
 
 static var _spell_mapping: Dictionary = {}
 static var _spell_catalog: Dictionary = {}
@@ -62,7 +66,9 @@ static func enrich_definition_source(
 		_apply_stored_spell(result, record, handled_fields, custom_spell_overrides)
 		_apply_on_hit_condition(result, record, handled_fields)
 		_apply_equipped_condition(result, record, handled_fields)
+		_apply_attack_bonus(result, record, handled_fields)
 		_apply_special_ability_modifiers(result, record, handled_fields)
+		_apply_inert_special_fields(result, record, handled_fields)
 	_update_materialization(result, handled_fields)
 	return result
 
@@ -93,6 +99,9 @@ static func handles_special_field(record: Dictionary, field_name: String) -> boo
 	var condition := equipped_condition_behavior(record)
 	if not condition.is_empty() and field_name in ["special1", "special2"]:
 		return true
+	var attack_bonus := equipped_attack_bonus(record)
+	if not attack_bonus.is_empty() and field_name in ["special1", "special2"]:
+		return true
 	var on_hit_condition := OnHitConditionScript.descriptor(record)
 	if not on_hit_condition.is_empty():
 		if field_name in ["special1", "special2", "special3", "special5"]:
@@ -105,7 +114,9 @@ static func handles_special_field(record: Dictionary, field_name: String) -> boo
 		return true
 	if field_name == "special4" and ability_modifiers.has("special4"):
 		return true
-	return field_name == "special5" and not ability_modifiers.is_empty()
+	if field_name == "special5" and not ability_modifiers.is_empty():
+		return true
+	return inert_special_fields(record).has(field_name)
 
 
 static func stored_spell_behavior(
@@ -200,8 +211,17 @@ static func equipped_condition_behavior(record: Dictionary) -> Dictionary:
 		return {}
 	var condition_index := int(record.get("special1", 0)) - 20
 	var condition_change := int(record.get("special2", 0))
-	if condition_change >= 0 \
-			or not ConditionRulesScript.CONDITION_TRAITS.has(condition_index):
+	if condition_change == 0:
+		return {}
+	var screen_level := SpellScreenScript.condition_level(condition_index)
+	if screen_level > 0:
+		return {
+			"conditionIndex": condition_index,
+			"conditionName": "Level %d Spell Screen" % screen_level,
+			"trait": EQUIPMENT_SPELL_SCREEN_TRAIT,
+			"power": screen_level,
+		}
+	if not ConditionRulesScript.CONDITION_TRAITS.has(condition_index):
 		return {}
 	var definition: Dictionary = ConditionRulesScript.CONDITION_TRAITS[
 		condition_index
@@ -212,6 +232,33 @@ static func equipped_condition_behavior(record: Dictionary) -> Dictionary:
 		"trait": str(definition.get("permanent", "")).get_file(),
 		"power": maxi(1, absi(condition_change)),
 	}
+
+
+static func equipped_attack_bonus(record: Dictionary) -> Dictionary:
+	if absi(int(record.get("type", 0))) not in EQUIPMENT_TYPES \
+			or int(record.get("special1", 0)) != 122:
+		return {}
+	var bonus := int(record.get("special2", 0))
+	return {"bonus": bonus} if bonus != 0 else {}
+
+
+static func inert_special_fields(record: Dictionary) -> Array[String]:
+	var fields: Array[String] = []
+	var classic_type := absi(int(record.get("type", 0)))
+	var special1 := int(record.get("special1", 0))
+	var special2 := int(record.get("special2", 0))
+	if classic_type not in EQUIPMENT_TYPES \
+			and special1 >= 20 and special1 < 60 \
+			and special2 != 0:
+		fields.append_array(["special1", "special2"])
+	var special5 := int(record.get("special5", 0))
+	var is_door_activation := classic_type == 23 or special1 == -23
+	if special5 != 0 \
+			and not is_door_activation \
+			and OnHitConditionScript.descriptor(record).is_empty() \
+			and special_ability_modifiers(record).is_empty():
+		fields.append("special5")
+	return fields
 
 
 static func special_ability_modifiers(record: Dictionary) -> Dictionary:
@@ -282,6 +329,30 @@ static func _apply_equipped_condition(
 	handled_fields.append("special2")
 
 
+static func _apply_attack_bonus(
+	result: Dictionary,
+	record: Dictionary,
+	handled_fields: Array[String]
+) -> void:
+	var behavior := equipped_attack_bonus(record)
+	if behavior.is_empty():
+		return
+	var bonus := int(behavior["bonus"])
+	var stats: Dictionary = result.get("stats", {}).duplicate(true) \
+		if result.get("stats", {}) is Dictionary else {}
+	stats["MaxActions"] = int(stats.get("MaxActions", 0)) + bonus
+	result["stats"] = stats
+	var summary := str(result.get("stats_mini", "")).strip_edges()
+	var bonus_text := "%s%d Actions / Turn" % ["+" if bonus > 0 else "", bonus]
+	result["stats_mini"] = bonus_text if summary.is_empty() \
+		else "%s, %s" % [summary, bonus_text]
+	var extra_data: Dictionary = result.get("extra_data", {}).duplicate(true) \
+		if result.get("extra_data", {}) is Dictionary else {}
+	extra_data["classicAttackBonus"] = bonus
+	result["extra_data"] = extra_data
+	handled_fields.append_array(["special1", "special2"])
+
+
 static func _apply_on_hit_condition(
 	result: Dictionary,
 	record: Dictionary,
@@ -317,6 +388,24 @@ static func _apply_special_ability_modifiers(
 	extra_data["classicSpecialAbilityModifiers"] = modifiers
 	result["extra_data"] = extra_data
 	handled_fields.append("special5")
+
+
+static func _apply_inert_special_fields(
+	result: Dictionary,
+	record: Dictionary,
+	handled_fields: Array[String]
+) -> void:
+	var inert_fields := inert_special_fields(record)
+	if inert_fields.is_empty():
+		return
+	var values := {}
+	for field_name: String in inert_fields:
+		values[field_name] = int(record.get(field_name, 0))
+		handled_fields.append(field_name)
+	var extra_data: Dictionary = result.get("extra_data", {}).duplicate(true) \
+		if result.get("extra_data", {}) is Dictionary else {}
+	extra_data["classicInertSpecialFields"] = values
+	result["extra_data"] = extra_data
 
 
 static func _ensure_spell_catalog() -> void:

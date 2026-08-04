@@ -12,7 +12,7 @@ const ITEM_BOOK_PATH := "Items/stuff_book.json"
 const ITEM_IMAGE_BOOK_PATH := "Items/img_pack.json"
 const ITEM_ATLAS_PATH := "Items/textureAtlas.png"
 const SHARED_ITEM_BOOK_PATH := "res://shared_assets/items/stuff_book.json"
-const MATERIALIZATION_VERSION := 11
+const MATERIALIZATION_VERSION := 12
 const ITEM_ATLAS_CELL_SIZE := 34
 const ITEM_IMAGE_SIZE := 32
 const ITEM_IMAGE_INSET := 1
@@ -484,15 +484,15 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 		if small_damage != 0:
 			unsupported_fields.append("vSmall")
 		if magic_plus != 0:
-			unsupported_fields.append("damage")
+			# Classic uses this signed byte for whichever item a monster has active,
+			# even when that item is not a player-equippable weapon type.
+			fields["extra_data"] = {"classicMagicPlus": magic_plus}
 	elif classic_type in [10, 15]:
 		if small_damage < 0:
 			unsupported_fields.append("vSmall")
-		if magic_plus < 0:
-			unsupported_fields.append("damage")
-		if small_damage > 0 or large_damage > 0 or magic_plus > 0:
+		if small_damage > 0 or large_damage > 0 or magic_plus != 0:
 			fields["extra_data"] = {
-				"classicMagicPlus": maxi(0, magic_plus),
+				"classicMagicPlus": magic_plus,
 				"classicWeaponDamage": {
 					"small": maxi(0, small_damage),
 					"large": maxi(0, large_damage),
@@ -522,14 +522,13 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 				"large": large_damage,
 			},
 		}
-		if magic_plus < 0:
-			unsupported_fields.append("damage")
-		elif magic_plus > 0:
+		if magic_plus != 0:
 			# One Remake accuracy point is five percentage points, matching Classic.
 			stats["AccuracyMelee"] = magic_plus
 			stats["Bonus_Physical_dmg"] = magic_plus
-			stats_summary.append("+%d%% Melee Hit" % (magic_plus * 5))
-			stats_summary.append("+%d Physical Damage" % magic_plus)
+			var magic_sign := "+" if magic_plus > 0 else ""
+			stats_summary.append("%s%d%% Melee Hit" % [magic_sign, magic_plus * 5])
+			stats_summary.append("%s%d Physical Damage" % [magic_sign, magic_plus])
 
 	var weapon_kind := int(record.get("blunt", 0))
 	if weapon_kind != 0 and classic_type == 2:
@@ -555,7 +554,7 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 
 	var armor_rating := int(record.get("ac", 0))
 	if armor_rating != 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type):
-		unsupported_fields.append("ac")
+		_add_inert_equipment_modifier(fields, "ac", armor_rating)
 	elif armor_rating != 0:
 		stats["EvasionMelee"] = armor_rating
 		stats["EvasionRanged"] = armor_rating
@@ -578,7 +577,7 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 
 	var strength_modifier := int(record.get("st", 0))
 	if strength_modifier != 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type):
-		unsupported_fields.append("st")
+		_add_inert_equipment_modifier(fields, "st", strength_modifier)
 	elif strength_modifier != 0:
 		stats["Strength"] = strength_modifier
 		var sign_prefix := "+" if strength_modifier > 0 else ""
@@ -589,7 +588,7 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 
 	var spell_point_modifier := int(record.get("spellPoints", 0))
 	if spell_point_modifier != 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type):
-		unsupported_fields.append("spellPoints")
+		_add_inert_equipment_modifier(fields, "spellPoints", spell_point_modifier)
 	elif spell_point_modifier != 0:
 		# Classic changes current and maximum spell points by the same amount.
 		stats["maxSP"] = spell_point_modifier
@@ -604,7 +603,7 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 
 	var movement_modifier := int(record.get("movement", 0))
 	if movement_modifier != 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type):
-		unsupported_fields.append("movement")
+		_add_inert_equipment_modifier(fields, "movement", movement_modifier)
 	elif movement_modifier != 0:
 		stats["MaxMovement"] = movement_modifier
 		var movement_sign_prefix := "+" if movement_modifier > 0 else ""
@@ -619,7 +618,11 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 
 	var magic_resistance_modifier := int(record.get("magicResistance", 0))
 	if magic_resistance_modifier != 0 and not SLOT_BY_CLASSIC_TYPE.has(classic_type):
-		unsupported_fields.append("magicResistance")
+		_add_inert_equipment_modifier(
+			fields,
+			"magicResistance",
+			magic_resistance_modifier
+		)
 	elif magic_resistance_modifier != 0:
 		fields["classicMagicResistance"] = magic_resistance_modifier
 		var resistance_sign_prefix := "+" if magic_resistance_modifier > 0 else ""
@@ -646,6 +649,25 @@ func _native_item_fields(record: Dictionary, classic_type: int) -> Dictionary:
 		"unsupportedFields": unsupported_fields,
 		"fidelityFallbacks": fidelity_fallbacks,
 	}
+
+
+func _add_inert_equipment_modifier(
+	fields: Dictionary,
+	field_name: String,
+	value: int
+) -> void:
+	var extra_data: Dictionary = fields.get("extra_data", {}).duplicate(true) \
+		if fields.get("extra_data", {}) is Dictionary else {}
+	var inert_modifiers: Dictionary = extra_data.get(
+		"classicInertEquipmentModifiers",
+		{}
+	).duplicate(true) if extra_data.get(
+		"classicInertEquipmentModifiers",
+		{}
+	) is Dictionary else {}
+	inert_modifiers[field_name] = value
+	extra_data["classicInertEquipmentModifiers"] = inert_modifiers
+	fields["extra_data"] = extra_data
 
 
 func _native_restrictions(record: Dictionary) -> Dictionary:

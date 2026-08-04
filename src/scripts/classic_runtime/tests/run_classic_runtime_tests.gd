@@ -7392,11 +7392,25 @@ func _test_classic_item_materializer() -> void:
 	)
 	var negative_magic_plus_record := weapon_record.duplicate(true)
 	negative_magic_plus_record["damage"] = -1
+	var negative_magic_plus_item: Dictionary = materializer._native_item(
+		negative_magic_plus_record,
+		[]
+	)
+	_expect_equal(
+		negative_magic_plus_item.get("extra_data", {}).get("classicMagicPlus"),
+		-1,
+		"negative Classic weapon magic-plus retains its signed source value"
+	)
+	_expect_equal(
+		negative_magic_plus_item.get("stats", {}).get("AccuracyMelee"),
+		-1,
+		"negative Classic weapon magic-plus reduces native melee accuracy"
+	)
 	_expect(
-		materializer._native_item(negative_magic_plus_record, []).get(
+		not negative_magic_plus_item.get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("damage"),
-		"negative Classic weapon magic-plus remains an explicit blocker"
+		"signed Classic weapon magic-plus remains launchable"
 	)
 	var negative_strength_record := weapon_record.duplicate(true)
 	negative_strength_record["st"] = -2
@@ -7547,57 +7561,77 @@ func _test_classic_item_materializer() -> void:
 		).get("unsupportedFields", []).has("heat"),
 		"non-melee elemental bytes remain inert as in Classic combat"
 	)
+	var non_weapon_element_item: Dictionary = materializer._native_item(
+		non_weapon_element_record,
+		[]
+	)
+	_expect_equal(
+		non_weapon_element_item.get("extra_data", {}).get("classicMagicPlus"),
+		2,
+		"non-melee items retain the signed bonus used by Classic monster attacks"
+	)
 	_expect(
-		materializer._native_item(non_weapon_element_record, []).get(
+		not non_weapon_element_item.get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("damage"),
-		"magic-plus on a non-melee item remains an explicit blocker"
+		"a Classic monster-active magic-plus does not block non-melee items"
 	)
 	var non_equipment_armor_record: Dictionary = bundle.documents[
 		"content"
 	]["scenarioItems"][0].duplicate(true)
 	non_equipment_armor_record["ac"] = 6
+	var non_equipment_armor_item: Dictionary = materializer._native_item(
+		non_equipment_armor_record,
+		[]
+	)
 	_expect(
-		materializer._native_item(non_equipment_armor_record, []).get(
+		not non_equipment_armor_item.get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("ac"),
-		"armor on a non-equippable Classic item remains an explicit blocker"
+		"inert armor on a non-equippable Classic item does not block it"
+	)
+	_expect_equal(
+		non_equipment_armor_item.get("extra_data", {}).get(
+			"classicInertEquipmentModifiers", {}
+		).get("ac"),
+		6,
+		"inert non-equipment armor remains inspectable"
 	)
 	var non_equipment_strength_record := non_equipment_armor_record.duplicate(true)
 	non_equipment_strength_record["ac"] = 0
 	non_equipment_strength_record["st"] = 2
 	_expect(
-		materializer._native_item(non_equipment_strength_record, []).get(
+		not materializer._native_item(non_equipment_strength_record, []).get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("st"),
-		"strength on a non-equippable Classic item remains an explicit blocker"
+		"inert strength on a non-equippable Classic item does not block it"
 	)
 	var non_equipment_spell_point_record := non_equipment_armor_record.duplicate(true)
 	non_equipment_spell_point_record["ac"] = 0
 	non_equipment_spell_point_record["spellPoints"] = 5
 	_expect(
-		materializer._native_item(non_equipment_spell_point_record, []).get(
+		not materializer._native_item(non_equipment_spell_point_record, []).get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("spellPoints"),
-		"spell points on a non-equippable Classic item remain an explicit blocker"
+		"inert spell points on a non-equippable Classic item do not block it"
 	)
 	var non_equipment_movement_record := non_equipment_armor_record.duplicate(true)
 	non_equipment_movement_record["ac"] = 0
 	non_equipment_movement_record["movement"] = 4
 	_expect(
-		materializer._native_item(non_equipment_movement_record, []).get(
+		not materializer._native_item(non_equipment_movement_record, []).get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("movement"),
-		"movement on a non-equippable Classic item remains an explicit blocker"
+		"inert movement on a non-equippable Classic item does not block it"
 	)
 	var non_equipment_magic_resistance_record := non_equipment_armor_record.duplicate(true)
 	non_equipment_magic_resistance_record["ac"] = 0
 	non_equipment_magic_resistance_record["magicResistance"] = 5
 	_expect(
-		materializer._native_item(non_equipment_magic_resistance_record, []).get(
+		not materializer._native_item(non_equipment_magic_resistance_record, []).get(
 			"classicMaterialization", {}
 		).get("unsupportedFields", []).has("magicResistance"),
-		"magic resistance on a non-equippable Classic item remains a blocker"
+		"inert resistance on a non-equippable Classic item does not block it"
 	)
 	var non_equipment_restriction_record := non_equipment_armor_record.duplicate(true)
 	non_equipment_restriction_record["ac"] = 0
@@ -7757,6 +7791,75 @@ func _test_classic_item_materializer() -> void:
 		[["p_classic_tangled.gd", [1]]],
 		"equipped Classic conditions use the permanent source-backed trait"
 	)
+	var positive_condition_record := armor_record.duplicate(true)
+	positive_condition_record["special1"] = 41
+	positive_condition_record["special2"] = 2
+	var positive_condition_item: Dictionary = materializer._native_item(
+		positive_condition_record,
+		[]
+	)
+	_expect_equal(
+		positive_condition_item.get("traits"),
+		[["p_classic_strong.gd", [2]]],
+		"positive Classic equipment conditions remain active while worn"
+	)
+	var equipment_screen_record := armor_record.duplicate(true)
+	equipment_screen_record["special1"] = 38
+	equipment_screen_record["special2"] = -1
+	var equipment_screen_item: Dictionary = materializer._native_item(
+		equipment_screen_record,
+		[]
+	)
+	_expect_equal(
+		equipment_screen_item.get("traits"),
+		[["p_classic_equipment_spell_screen.gd", [3]]],
+		"Classic equipment spell screens retain their exact protected level"
+	)
+	var attack_bonus_record := armor_record.duplicate(true)
+	attack_bonus_record["special1"] = 122
+	attack_bonus_record["special2"] = 2
+	var attack_bonus_item: Dictionary = materializer._native_item(
+		attack_bonus_record,
+		[]
+	)
+	_expect_equal(
+		attack_bonus_item.get("stats", {}).get("MaxActions"),
+		2,
+		"Classic attack-bonus equipment adds its signed actions-per-turn value"
+	)
+	_expect_equal(
+		attack_bonus_item.get("extra_data", {}).get("classicAttackBonus"),
+		2,
+		"Classic attack-bonus equipment retains its source value"
+	)
+	var inert_condition_record := non_equipment_armor_record.duplicate(true)
+	inert_condition_record["ac"] = 0
+	inert_condition_record["special1"] = 49
+	inert_condition_record["special2"] = -1
+	var inert_condition_item: Dictionary = materializer._native_item(
+		inert_condition_record,
+		[]
+	)
+	_expect_equal(
+		inert_condition_item.get("extra_data", {}).get(
+			"classicInertSpecialFields"
+		),
+		{"special1": 49, "special2": -1},
+		"condition bytes on non-equipment remain inspectable but inert"
+	)
+	var inert_special5_record := armor_record.duplicate(true)
+	inert_special5_record["special5"] = 59
+	var inert_special5_item: Dictionary = materializer._native_item(
+		inert_special5_record,
+		[]
+	)
+	_expect_equal(
+		inert_special5_item.get("extra_data", {}).get(
+			"classicInertSpecialFields"
+		),
+		{"special5": 59},
+		"unused Classic special5 bytes remain explicit without causing fallback"
+	)
 	var on_hit_record := weapon_record.duplicate(true)
 	on_hit_record["special1"] = -10
 	on_hit_record["special2"] = 2
@@ -7908,7 +8011,7 @@ func _test_classic_item_materializer() -> void:
 	DirAccess.make_dir_recursive_absolute(unsupported_root)
 	var unsupported_bundle = BundleScript.new()
 	unsupported_bundle.load_from_directory(PROVIDENCE_AUTHORITATIVE_FIXTURE)
-	unsupported_bundle.documents["content"]["scenarioItems"][0]["damage"] = 1
+	unsupported_bundle.documents["content"]["scenarioItems"][0]["vSmall"] = 1
 	unsupported_bundle.documents["encounters"]["complexEncounters"][0][
 		"callable"
 	] = true
@@ -16633,6 +16736,23 @@ func _test_classic_spell_screen_contract() -> void:
 		SpellScreenScript.temporary_duration(restored, 2),
 		4,
 		"saved temporary screen counters restore without flattening"
+	)
+	var equipment_screen := SpellScreenTestCharacter.new("Equipment screen")
+	var equipment_screen_trait = load(
+		"res://shared_assets/traits/p_classic_equipment_spell_screen.gd"
+	)
+	equipment_screen.add_trait(equipment_screen_trait, [2])
+	equipment_screen.add_trait(equipment_screen_trait, [4])
+	_expect_equal(
+		SpellScreenScript.level(equipment_screen),
+		4,
+		"the strongest independently removable equipment screen is active"
+	)
+	equipment_screen.remove_trait(equipment_screen.traits[1])
+	_expect_equal(
+		SpellScreenScript.level(equipment_screen),
+		2,
+		"removing one screen item restores the next equipped screen"
 	)
 	var projected := SpellScreenTestCharacter.new("Projected")
 	GodotAdapterScript.new()._set_classic_monster_identity(
