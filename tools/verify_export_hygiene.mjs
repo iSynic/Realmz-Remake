@@ -4,6 +4,15 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectPath = path.join(repositoryRoot, "src", "project.godot");
+const projectText = fs.readFileSync(projectPath, "utf8");
+if (projectText.includes('res://addons/godot-openmpt/plugin.cfg')) {
+  throw new Error(
+    "OpenMPT's optional editor importer must remain disabled; " +
+      "Realmz loads tracker files directly through AudioStreamMPT.",
+  );
+}
+
 const presetPath = path.join(repositoryRoot, "src", "export_presets.cfg");
 const presetText = fs.readFileSync(presetPath, "utf8");
 const sections = presetText

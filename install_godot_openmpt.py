@@ -246,9 +246,9 @@ def verify_installation(target_dir, platform_info, version):
     print()
     print_status("Next steps:")
     print("1. Open your Godot project")
-    print("2. Go to Project -> Project Settings -> Plugins")
-    print("3. Find 'Godot OpenMPT' and enable it")
-    print("4. The plugin should now be ready to use")
+    print("2. Let Godot discover the OpenMPT GDExtension during project startup")
+    print("3. Leave the optional 'Godot OpenMPT' editor importer disabled")
+    print("4. Realmz loads tracker bytes directly through AudioStreamMPT")
 
     return True
 

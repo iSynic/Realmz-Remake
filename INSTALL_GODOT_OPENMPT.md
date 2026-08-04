@@ -55,10 +55,12 @@ python3 install_godot_openmpt.py --force
 Once the installation is complete:
 
 1. Open your Godot project
-2. Go to **Project → Project Settings → Plugins**
-3. Find "Godot OpenMPT" in the plugin list
-4. Enable the plugin by checking the box next to it
-5. The plugin is now ready to use!
+2. Allow Godot to discover `openmpt.gdextension` during project startup
+3. Leave the optional "Godot OpenMPT" editor importer disabled
+
+Realmz reads tracker files as bytes and constructs `AudioStreamMPT` directly.
+The upstream editor importer is unnecessary for playback and is incompatible
+with the bundled Windows binary under Godot 4.7.1.
 
 ## Supported File Formats
 
