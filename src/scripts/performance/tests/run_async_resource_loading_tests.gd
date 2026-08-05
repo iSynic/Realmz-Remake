@@ -9,6 +9,15 @@ func _ready() -> void:
 
 
 func _run() -> void:
+	if OS.get_cmdline_user_args().has("--export-smoke"):
+		_expect(
+			ResourceLoader.list_directory("res://addons/godot_mcp/").is_empty(),
+			"the local Godot MCP integration is excluded from exports",
+		)
+		_expect(
+			not ResourceLoader.exists("res://addons/godot_mcp/plugin.gd"),
+			"the proprietary Godot MCP script is absent from the PCK",
+		)
 	var resources: CampaignResources = $Resources
 	if not UI.main_menu.initial_profile_ready:
 		await UI.main_menu.initial_profile_loaded
@@ -22,6 +31,15 @@ func _run() -> void:
 	_expect(not resources.items_book.is_empty(), "shared item images are materialized")
 	await resources.load_sound_resources_async("res://shared_assets/sounds/")
 	_expect(not resources.sounds_book.is_empty(), "shared sounds remain available")
+	_expect(
+		resources.sounds_book.has("target error.wav"),
+		"a representative shared sound survives export discovery",
+	)
+	if resources.sounds_book.has("target error.wav"):
+		SfxPlayer.stream = resources.sounds_book["target error.wav"]
+		SfxPlayer.play()
+		await get_tree().process_frame
+		_expect(SfxPlayer.playing, "the native SFX player starts shared audio")
 	await resources.load_bestiary_resources_async("res://shared_assets/Bestiary/")
 	_expect(not resources.crea_book.is_empty(), "shared bestiary loads asynchronously")
 

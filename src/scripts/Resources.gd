@@ -2218,7 +2218,12 @@ func load_sound_resources_async(path: String) -> void:
 
 func _sound_source_names(path: String) -> Array[String]:
 	var sound_names: Array[String] = []
-	for filename_value: Variant in Utils.FileHandler.list_files_in_directory(path):
+	var source_names: Array = []
+	if path.begins_with("res://"):
+		source_names.assign(ResourceLoader.list_directory(path))
+	else:
+		source_names = Utils.FileHandler.list_files_in_directory(path)
+	for filename_value: Variant in source_names:
 		var filename := str(filename_value)
 		var lower_name := filename.to_lower()
 		if (
