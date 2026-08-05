@@ -1166,6 +1166,7 @@ func set_selected_creature(c : Creature) : # for battle, any creature on field n
 
 func _on_mouse_enter_combat_crea_button(creabutton : CombatCreaButton) :
 	var map = GameGlobal.map
+	combatBRPanel.remember_debug_target(creabutton)
 	for cb in map.creatures_node.get_children() :
 		cb.bgsprite.visible = cb.creature == selected_character
 	creabutton.bgsprite.show()

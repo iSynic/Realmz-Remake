@@ -91,6 +91,11 @@ func enter(_msg : Dictionary = {}) -> void:
 		print("CBAnimState : cur action : "+str(cur_action)+" , left : "+str(combat_state.action_queue.size()))
 		pass
 		match cur_action["type"] :
+			"DebugResolveDeaths" :
+				# Debug controls still use the normal death, reward, and victory pass.
+				# This queued marker ensures that pass runs without inventing an attack.
+				if not OS.is_debug_build():
+					continue
 			"TurnUndead" :
 				await perform_turn_undead(cur_action)
 				if current_entry != entry_serial:

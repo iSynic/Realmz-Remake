@@ -19,6 +19,7 @@ var hud : OW_HUD
 ]
 
 var escape_allowed : bool = true
+var debug_target_button: CombatCreaButton
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
@@ -102,7 +103,6 @@ func _on_debug_finish_pressed() -> void:
 func _on_debug_win_pressed() -> void:
 	if not _debug_action_available():
 		return
-	var defeated_any := false
 	for cb: CombatCreaButton in (
 		StateMachine.combat_state.all_battle_creatures_btns.duplicate()
 	):
@@ -110,19 +110,17 @@ func _on_debug_win_pressed() -> void:
 				and cb.creature.curFaction != 0 \
 				and cb.creature.get_stat("curHP") > 0:
 			cb.creature.change_cur_hp(-999999999)
-			defeated_any = true
-	if defeated_any:
-		StateMachine.transition_to("Combat/CbAnimation")
+	_queue_debug_death_resolution()
 
 
 func _on_debug_kill_pressed() -> void:
 	if not _debug_action_available():
 		return
-	var target := _debug_target_button()
-	if not is_instance_valid(target) or target.creature.get_stat("curHP") <= 0:
+	var target := _resolve_debug_target()
+	if target == null:
 		return
 	target.creature.change_cur_hp(-999999999)
-	StateMachine.transition_to("Combat/CbAnimation")
+	_queue_debug_death_resolution()
 
 
 func _on_turn_order_button_toggled(toggled_on: bool) -> void:
@@ -138,15 +136,40 @@ func _debug_action_available() -> bool:
 	)
 
 
-func _debug_target_button() -> CombatCreaButton:
+func remember_debug_target(candidate: CombatCreaButton) -> void:
+	if not OS.is_debug_build() or not _is_live_hostile(candidate):
+		return
+	debug_target_button = candidate
+	var kill_button := debugControls.get_node("DebugKill") as Button
+	kill_button.tooltip_text = "Kill %s" % candidate.creature.name
+
+
+func _resolve_debug_target() -> CombatCreaButton:
+	if _is_live_hostile(debug_target_button):
+		return debug_target_button
 	for cb: CombatCreaButton in StateMachine.combat_state.all_battle_creatures_btns:
-		if is_instance_valid(cb) and cb.creature == hud.selected_character:
+		if _is_live_hostile(cb):
+			debug_target_button = cb
 			return cb
-	var displayed: Variant = hud.creatureRect.my_crea_button
-	if is_instance_valid(displayed) \
-			and StateMachine.combat_state.all_battle_creatures_btns.has(displayed):
-		return displayed as CombatCreaButton
-	return StateMachine.cb_decide_state.current_active_creabutton
+	return null
+
+
+func _is_live_hostile(candidate: CombatCreaButton) -> bool:
+	return (
+		is_instance_valid(candidate)
+		and StateMachine.combat_state.all_battle_creatures_btns.has(candidate)
+		and candidate.creature != null
+		and candidate.creature.curFaction != 0
+		and candidate.creature.get_stat("curHP") > 0
+	)
+
+
+func _queue_debug_death_resolution() -> void:
+	_set_debug_buttons_enabled(false)
+	StateMachine.combat_state.add_to_action_queue([{
+		"type": "DebugResolveDeaths",
+	}])
+	StateMachine.transition_to("Combat/CbAnimation")
 
 
 func _set_debug_buttons_enabled(enabled: bool) -> void:

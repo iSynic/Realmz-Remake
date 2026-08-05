@@ -110,6 +110,8 @@ func _run_smoke() -> void:
 	_saved_shops = GameGlobal.shops_dict
 	_saved_pool = GameGlobal.money_pool.duplicate()
 	_test_combat_ui_layout()
+	_test_debug_combat_targeting()
+	_test_treasure_ui_layout()
 	_test_inventory_equipment_ui(resources)
 	_test_shop_purchase_and_sale_ui(resources)
 	_test_loot_transfer_ui(resources)
@@ -158,6 +160,63 @@ func _test_combat_ui_layout() -> void:
 			),
 		"debug combat buttons use their dedicated handlers",
 	)
+
+
+func _test_treasure_ui_layout() -> void:
+	var treasure = UI.ow_hud.treasureControl
+	var treasure_done: Button = treasure.get_node("BotRightLootInfo/ButtonDone")
+	var treasure_money: Button = treasure.get_node("BotRightLootInfo/MoneyButton")
+	var treasure_pool: Button = treasure.get_node("BotRightLootInfo/PoolButton")
+	var treasure_share: Button = treasure.get_node("BotRightLootInfo/ShareButton")
+	_expect(
+		treasure_done.size.is_equal_approx(treasure_pool.size)
+			and treasure_done.size.is_equal_approx(treasure_share.size)
+			and is_equal_approx(treasure_done.position.y, treasure_pool.position.y)
+			and is_equal_approx(treasure_done.position.y, treasure_share.position.y)
+			and is_equal_approx(treasure_done.position.y, treasure_money.position.y)
+			and is_equal_approx(
+				treasure_done.size.y,
+				treasure_money.size.y * treasure_money.scale.y,
+			),
+		"treasure Done matches the Money, Pool, and Share action row",
+	)
+
+
+func _test_debug_combat_targeting() -> void:
+	var combat_panel = UI.ow_hud.combatBRPanel
+	var combat_state = StateMachine.combat_state
+	var saved_roster: Array = combat_state.all_battle_creatures_btns.duplicate()
+	var saved_target: CombatCreaButton = combat_panel.debug_target_button
+	var party_button := CombatCreaButton.new()
+	party_button.creature = _player("Debug Party Member")
+	party_button.creature.curFaction = 0
+	party_button.creature.stats["curHP"] = 10
+	var hostile_button := CombatCreaButton.new()
+	hostile_button.creature = Creature.new()
+	hostile_button.creature.name = "Debug Hostile"
+	hostile_button.creature.curFaction = 1
+	hostile_button.creature.stats["curHP"] = 10
+	combat_state.all_battle_creatures_btns = [party_button, hostile_button]
+	combat_panel.debug_target_button = null
+	combat_panel.remember_debug_target(party_button)
+	_expect(
+		combat_panel._resolve_debug_target() == hostile_button,
+		"debug Kill Target never resolves to a party member",
+	)
+	combat_panel.remember_debug_target(hostile_button)
+	_expect(
+		combat_panel._resolve_debug_target() == hostile_button,
+		"debug Kill Target retains the last inspected living hostile",
+	)
+	hostile_button.creature.stats["curHP"] = 0
+	_expect(
+		combat_panel._resolve_debug_target() == null,
+		"debug Kill Target rejects defeated hostiles",
+	)
+	combat_state.all_battle_creatures_btns = saved_roster
+	combat_panel.debug_target_button = saved_target
+	party_button.free()
+	hostile_button.free()
 
 
 func _test_inventory_equipment_ui(resources: CampaignResources) -> void:
