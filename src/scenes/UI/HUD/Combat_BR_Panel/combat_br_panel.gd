@@ -8,6 +8,8 @@ var hud : OW_HUD
 @onready var finishbutton : Button = $FinishButton
 @onready var preparebutton : Button = $PrepareButton
 @onready var turnundeadbutton : Button = $TurnUndeadButton
+@onready var turnorderButton : CheckButton = $TurnOrderButton
+@onready var debugControls : VBoxContainer = $DebugControls
 @onready var buttons : Array = [
 	autobutton,
 	spellbutton,
@@ -20,7 +22,7 @@ var escape_allowed : bool = true
 
 # Called when the node enters the scene tree for the first time.
 func _ready():
-	pass # Replace with function body.
+	debugControls.visible = OS.is_debug_build()
 
 
 func prepare_for_creab( creab : CombatCreaButton ) :
@@ -40,20 +42,23 @@ func prepare_for_creab( creab : CombatCreaButton ) :
 		b.disabled = not controllable
 	spellbutton.disabled = creab.creature.spells.is_empty()
 	turnundeadbutton.disabled = not turnundeadbutton.visible
+	_set_debug_buttons_enabled(StateMachine._state_name == "CbDecideAction")
 	
 func set_buttons_enabled(enabled : bool) -> void :
-		for b in get_children() :
-			if b.is_class("BaseButton"):
-				if b == inventorybutton :
-					b.disabled = false
-				else :
-					b.disabled = not enabled
+	for b in get_children() :
+		if b.is_class("BaseButton") and b != turnorderButton:
+			if b == inventorybutton :
+				b.disabled = false
+			else :
+				b.disabled = not enabled
+	_set_debug_buttons_enabled(enabled)
 
 func enable_all(crea : Creature) :
 	for b in get_children() :
-		if b.is_class("BaseButton"):
+		if b.is_class("BaseButton") and b != turnorderButton:
 			b.disabled = false
 	spellbutton.disabled = (crea.spells.size()==0)
+	_set_debug_buttons_enabled(true)
 
 func _on_finish_button_pressed():
 	hud.creatureRect._on_mouse_entered()
@@ -88,16 +93,66 @@ func _on_SpellButton_pressed():
 		hud._on_SpellButton_pressed()
 
 
-func _on_debug_win_pressed():
-	for cb in StateMachine.combat_state.all_battle_creatures_btns :
-		if cb.creature.curFaction!=0 :
+func _on_debug_finish_pressed() -> void:
+	if not _debug_action_available():
+		return
+	StateMachine.cb_decide_state.end_active_creature_turn(false)
+
+
+func _on_debug_win_pressed() -> void:
+	if not _debug_action_available():
+		return
+	var defeated_any := false
+	for cb: CombatCreaButton in (
+		StateMachine.combat_state.all_battle_creatures_btns.duplicate()
+	):
+		if is_instance_valid(cb) \
+				and cb.creature.curFaction != 0 \
+				and cb.creature.get_stat("curHP") > 0:
 			cb.creature.change_cur_hp(-999999999)
-	pass # Replace with function body.
+			defeated_any = true
+	if defeated_any:
+		StateMachine.transition_to("Combat/CbAnimation")
 
 
-func _on_debug_kill_pressed():
-	hud.selected_character.change_cur_hp(-100)
-	pass # Replace with function body.
+func _on_debug_kill_pressed() -> void:
+	if not _debug_action_available():
+		return
+	var target := _debug_target_button()
+	if not is_instance_valid(target) or target.creature.get_stat("curHP") <= 0:
+		return
+	target.creature.change_cur_hp(-999999999)
+	StateMachine.transition_to("Combat/CbAnimation")
+
+
+func _on_turn_order_button_toggled(toggled_on: bool) -> void:
+	if is_instance_valid(hud):
+		hud._on_turn_order_button_toggled(toggled_on)
+
+
+func _debug_action_available() -> bool:
+	return (
+		OS.is_debug_build()
+		and StateMachine._state_name == "CbDecideAction"
+		and is_instance_valid(StateMachine.cb_decide_state.current_active_creabutton)
+	)
+
+
+func _debug_target_button() -> CombatCreaButton:
+	for cb: CombatCreaButton in StateMachine.combat_state.all_battle_creatures_btns:
+		if is_instance_valid(cb) and cb.creature == hud.selected_character:
+			return cb
+	var displayed: Variant = hud.creatureRect.my_crea_button
+	if is_instance_valid(displayed) \
+			and StateMachine.combat_state.all_battle_creatures_btns.has(displayed):
+		return displayed as CombatCreaButton
+	return StateMachine.cb_decide_state.current_active_creabutton
+
+
+func _set_debug_buttons_enabled(enabled: bool) -> void:
+	for child: Node in debugControls.get_children():
+		if child is BaseButton:
+			child.disabled = not enabled
 
 
 func _on_guard_button_pressed():

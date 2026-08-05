@@ -8,11 +8,20 @@ const ACTION_BACK := &"move_down"
 const ACTION_TURN_LEFT := &"move_left"
 const ACTION_TURN_RIGHT := &"move_right"
 
+const CURSOR_FORWARD := preload("res://shared_assets/cursors/forward.png")
+const CURSOR_BACK := preload("res://shared_assets/cursors/reverse.png")
+const CURSOR_TURN_LEFT := preload("res://shared_assets/cursors/left.png")
+const CURSOR_TURN_RIGHT := preload("res://shared_assets/cursors/right.png")
+
+
 func _ready() -> void:
-	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	mouse_exited.connect(_on_mouse_exited)
 
 
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion:
+		_set_preview_cursor(_action_at_position(event.position))
+		return
 	if not (event is InputEventMouseButton):
 		return
 	var mouse_event := event as InputEventMouseButton
@@ -23,20 +32,6 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	accept_event()
 	navigation_requested.emit(action)
-
-
-func _get_tooltip(at_position: Vector2) -> String:
-	match _action_at_position(at_position):
-		ACTION_FORWARD:
-			return "Move forward (Up / 8)"
-		ACTION_BACK:
-			return "Move backward (Down / 2)"
-		ACTION_TURN_LEFT:
-			return "Turn left (Left / 4)"
-		ACTION_TURN_RIGHT:
-			return "Turn right (Right / 6)"
-		_:
-			return ""
 
 
 func _action_at_position(local_position: Vector2) -> StringName:
@@ -54,3 +49,32 @@ func _action_at_position(local_position: Vector2) -> StringName:
 	if local_position.y < size.y * (2.0 / 3.0):
 		return ACTION_FORWARD
 	return ACTION_BACK
+
+
+func _set_preview_cursor(action: StringName) -> void:
+	var cursor_spec := _cursor_spec(action)
+	if cursor_spec.is_empty():
+		return
+	Input.set_custom_mouse_cursor(
+		cursor_spec["texture"],
+		Input.CURSOR_ARROW,
+		cursor_spec["hotspot"]
+	)
+
+
+func _cursor_spec(action: StringName) -> Dictionary:
+	match action:
+		ACTION_FORWARD:
+			return {"texture": CURSOR_FORWARD, "hotspot": Vector2(8.0, 0.0)}
+		ACTION_BACK:
+			return {"texture": CURSOR_BACK, "hotspot": Vector2(8.0, 15.0)}
+		ACTION_TURN_LEFT:
+			return {"texture": CURSOR_TURN_LEFT, "hotspot": Vector2(0.0, 8.0)}
+		ACTION_TURN_RIGHT:
+			return {"texture": CURSOR_TURN_RIGHT, "hotspot": Vector2(15.0, 8.0)}
+		_:
+			return {}
+
+
+func _on_mouse_exited() -> void:
+	Input.set_custom_mouse_cursor(UI.cursor_sword)

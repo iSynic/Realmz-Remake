@@ -421,26 +421,8 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = -2
 
-[node name="TurnOrderButton" type="CheckButton" parent="." unique_id=367044556]
-layout_mode = 0
-offset_left = 263.0
-offset_top = 21.0
-offset_right = 403.0
-offset_bottom = 45.0
-theme_override_colors/font_color = Color(1, 0.980392, 0, 1)
-theme_override_colors/font_focus_color = Color(1, 0.980392, 0, 1)
-theme_override_colors/font_pressed_color = Color(1, 0.980392, 0, 1)
-theme_override_colors/font_hover_color = Color(1, 0.980392, 0, 1)
-theme_override_colors/font_hover_pressed_color = Color(1, 0.980392, 0, 1)
-theme_override_colors/font_disabled_color = Color(1, 0.980392, 0, 1)
-theme_override_colors/font_outline_color = Color(1, 0.980392, 0, 1)
-theme_override_fonts/font = ExtResource("2_ufhxe")
-theme_override_font_sizes/font_size = 12
-text = "Show Turn Order"
-
 [connection signal="mouse_entered" from="." to="." method="_on_mouse_entered"]
 [connection signal="timeout" from="HBoxContainer/CreaInfoRect/StatusesControl/StatusTimer" to="." method="_on_status_timer_timeout"]
 [connection signal="pressed" from="HBoxContainer/CreaInfoRect/WeaponsBoxContainer/MeleeControl/MeleeButton" to="." method="_on_melee_button_pressed"]
 [connection signal="pressed" from="HBoxContainer/CreaInfoRect/WeaponsBoxContainer/RangeControl/RangeButton" to="." method="_on_range_button_pressed"]
 [connection signal="pressed" from="HBoxContainer/CreaInfoRect/WeaponsBoxContainer/AmmoControl/AmmoButton" to="." method="_on_ammo_button_pressed"]
-[connection signal="toggled" from="TurnOrderButton" to="." method="_on_turn_order_button_toggled"]

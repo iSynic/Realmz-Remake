@@ -1123,7 +1123,7 @@ func enter_battle_mode() :
 	creatureRect.show()
 	combatBRPanel.show()
 	combatBRPanel.set_buttons_enabled(true)
-	if creatureRect.turnorderButton.button_pressed :
+	if combatBRPanel.turnorderButton.button_pressed :
 		turnorderPanel.show()
 		turnorderPanel.update_display()
 	

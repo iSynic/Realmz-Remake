@@ -6801,6 +6801,20 @@ func _test_classic_dungeon_view_model() -> void:
 		&"move_down",
 		"dungeon image lower center moves backward"
 	)
+	var cursor_expectations := {
+		&"move_up": "forward.png",
+		&"move_down": "reverse.png",
+		&"move_left": "left.png",
+		&"move_right": "right.png",
+	}
+	for action: StringName in cursor_expectations:
+		var cursor_spec: Dictionary = navigation_overlay._cursor_spec(action)
+		var cursor_texture := cursor_spec.get("texture") as Texture2D
+		_expect(
+			cursor_texture != null \
+				and cursor_texture.resource_path.ends_with(cursor_expectations[action]),
+			"dungeon %s region previews its matching directional cursor" % action
+		)
 	navigation_overlay.free()
 
 

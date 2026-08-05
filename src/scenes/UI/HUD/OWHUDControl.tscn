@@ -192,7 +192,11 @@ offset_bottom = 0.0
 [node name="TurnOrderPanel" parent="VBoxScreen/HBoxTop/MapArea" unique_id=1109674977 instance=ExtResource("11_6j1vb")]
 visible = false
 layout_mode = 1
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 1.0
 offset_top = 0.0
+offset_right = 72.0
 offset_bottom = 0.0
 
 [node name="MinimapsRect" parent="VBoxScreen/HBoxTop/MapArea" unique_id=435143942 instance=ExtResource("12_rykdu")]

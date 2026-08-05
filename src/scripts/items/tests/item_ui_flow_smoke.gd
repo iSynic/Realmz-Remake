@@ -109,6 +109,7 @@ func _run_smoke() -> void:
 	_saved_shop_name = GameGlobal.currentShop
 	_saved_shops = GameGlobal.shops_dict
 	_saved_pool = GameGlobal.money_pool.duplicate()
+	_test_combat_ui_layout()
 	_test_inventory_equipment_ui(resources)
 	_test_shop_purchase_and_sale_ui(resources)
 	_test_loot_transfer_ui(resources)
@@ -120,6 +121,43 @@ func _run_smoke() -> void:
 	await _test_manual_encounter_dispatch()
 	_restore_globals()
 	_finish()
+
+
+func _test_combat_ui_layout() -> void:
+	var hud := UI.ow_hud
+	var combat_panel = hud.combatBRPanel
+	_expect(
+		combat_panel.turnorderButton.get_parent() == combat_panel,
+		"Turn Order toggle belongs to the lower-right combat action panel",
+	)
+	var order_panel: TurnOrderPanel = hud.turnorderPanel
+	_expect(
+		order_panel.get_node("ScrollContainer/VBoxContainer") is VBoxContainer,
+		"turn order uses a vertical combatant strip",
+	)
+	_expect(
+		is_equal_approx(order_panel.anchor_bottom, 1.0)
+			and is_equal_approx(order_panel.offset_right, 72.0),
+		"turn order occupies a bounded left-side viewport rail",
+	)
+	var debug_controls: VBoxContainer = combat_panel.debugControls
+	_expect_equal(
+		debug_controls.get_child_count(),
+		3,
+		"debug combat actions share one aligned control stack",
+	)
+	_expect(
+		debug_controls.get_node("DebugFinish").pressed.is_connected(
+			combat_panel._on_debug_finish_pressed
+		)
+			and debug_controls.get_node("DebugWin").pressed.is_connected(
+				combat_panel._on_debug_win_pressed
+			)
+			and debug_controls.get_node("DebugKill").pressed.is_connected(
+				combat_panel._on_debug_kill_pressed
+			),
+		"debug combat buttons use their dedicated handlers",
+	)
 
 
 func _test_inventory_equipment_ui(resources: CampaignResources) -> void:

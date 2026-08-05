@@ -367,6 +367,10 @@ func _process_classic_dungeon_held_input() -> void:
 	_classic_dungeon_repeat_remaining = CLASSIC_DUNGEON_REPEAT_INTERVAL
 
 func set_arrow_mouse_cursor(_delta : float) :
+	# The dungeon viewport owns its directional cursor. Reusing the overhead-map
+	# projection here makes forward/back previews depend on hidden map geometry.
+	if _classic_dungeon_presentation_active():
+		return
 	# When a full-screen overlay panel (bestiary/char-stats, inventory, etc.) is
 	# up, the directional arrow cursor isn't meaningful — we're not navigating
 	# the map. Use the default sword cursor over the panel instead.
