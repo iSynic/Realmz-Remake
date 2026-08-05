@@ -223,6 +223,10 @@ var map_boats_dict : Dictionary = {}
 
 signal battle_end
 signal profile_ready(profile_name: String, success: bool)
+signal classic_dungeon_view_changed(snapshot: Dictionary)
+# Emitted by ExAnim after its authoritative movement path resolves.
+@warning_ignore("unused_signal")
+signal exploration_step_resolved(result: Dictionary)
 
 
 func _lazy_resource(path: String) -> Resource:
@@ -1016,6 +1020,19 @@ func register_classic_runtime_host(host: Object) -> void:
 			"playthrough_finished",
 			playthrough_finished_callback
 		)
+	var dungeon_view_callback := Callable(
+		self,
+		"_on_classic_dungeon_view_changed"
+	)
+	if classic_runtime_host.has_signal("classic_dungeon_view_changed") \
+			and not classic_runtime_host.is_connected(
+				"classic_dungeon_view_changed",
+				dungeon_view_callback
+			):
+		classic_runtime_host.connect(
+			"classic_dungeon_view_changed",
+			dungeon_view_callback
+		)
 
 
 func emit_classic_lifecycle_event(hook: String, request := {}) -> Dictionary:
@@ -1154,6 +1171,16 @@ func _disconnect_classic_runtime_host_signals(host: Object) -> void:
 				playthrough_finished_callback
 			):
 		host.disconnect("playthrough_finished", playthrough_finished_callback)
+	var dungeon_view_callback := Callable(
+		self,
+		"_on_classic_dungeon_view_changed"
+	)
+	if host.has_signal("classic_dungeon_view_changed") \
+			and host.is_connected(
+				"classic_dungeon_view_changed",
+				dungeon_view_callback
+			):
+		host.disconnect("classic_dungeon_view_changed", dungeon_view_callback)
 
 
 func _on_classic_runtime_command_started(
@@ -1167,6 +1194,10 @@ func _on_classic_runtime_command_started(
 
 func _on_classic_runtime_playthrough_finished(_result: Dictionary) -> void:
 	_refresh_classic_camping_controls()
+
+
+func _on_classic_dungeon_view_changed(snapshot: Dictionary) -> void:
+	classic_dungeon_view_changed.emit(snapshot)
 
 
 func _refresh_classic_camping_controls() -> void:
@@ -1228,6 +1259,92 @@ func resolve_classic_dungeon_movement(
 		"handled": true,
 		"allowed": false,
 		"message": "Registered Classic runtime host returned an invalid movement response",
+	}
+
+
+func get_dungeon_view_snapshot(radius: int = 6) -> Dictionary:
+	if (
+		not is_instance_valid(classic_runtime_host)
+		or not classic_runtime_host.has_method("get_dungeon_view_snapshot")
+	):
+		return {"status": "ok", "active": false}
+	var result: Variant = classic_runtime_host.call(
+		"get_dungeon_view_snapshot",
+		radius
+	)
+	return result if result is Dictionary else {
+		"status": "error",
+		"active": false,
+		"message": "Registered Classic runtime host returned an invalid dungeon view",
+	}
+
+
+func rotate_dungeon_heading(delta: int) -> Dictionary:
+	if (
+		not is_instance_valid(classic_runtime_host)
+		or not classic_runtime_host.has_method("rotate_dungeon_heading")
+	):
+		return {"status": "ok", "handled": false, "changed": false}
+	var result: Variant = classic_runtime_host.call("rotate_dungeon_heading", delta)
+	return result if result is Dictionary else {
+		"status": "error",
+		"handled": true,
+		"changed": false,
+		"message": "Registered Classic runtime host returned an invalid dungeon turn",
+	}
+
+
+func toggle_dungeon_view() -> Dictionary:
+	if (
+		not is_instance_valid(classic_runtime_host)
+		or not classic_runtime_host.has_method("toggle_dungeon_view")
+	):
+		return {"status": "ok", "handled": false, "changed": false}
+	var wizard_eye_active := exploration_sight_ignores_blocking_tiles()
+	var result: Variant = classic_runtime_host.call(
+		"toggle_dungeon_view",
+		wizard_eye_active
+	)
+	return result if result is Dictionary else {
+		"status": "error",
+		"handled": true,
+		"changed": false,
+		"message": "Registered Classic runtime host returned an invalid view toggle",
+	}
+
+
+func refresh_dungeon_view() -> Dictionary:
+	if (
+		not is_instance_valid(classic_runtime_host)
+		or not classic_runtime_host.has_method("refresh_dungeon_view")
+	):
+		return {"status": "ok", "active": false}
+	var result: Variant = classic_runtime_host.call("refresh_dungeon_view")
+	return result if result is Dictionary else {
+		"status": "error",
+		"active": false,
+		"message": "Registered Classic runtime host could not refresh the dungeon view",
+	}
+
+
+func sync_classic_runtime_location(
+	map_identity: String,
+	position: Vector2i
+) -> Dictionary:
+	if (
+		classic_campaign_session == null
+		or not classic_campaign_session.has_method("sync_native_location")
+	):
+		return {"status": "ok", "handled": false}
+	var result: Variant = classic_campaign_session.call("sync_native_location", {
+		"mapName": map_identity,
+		"x": position.x,
+		"y": position.y,
+	})
+	return result if result is Dictionary else {
+		"status": "error",
+		"handled": true,
+		"message": "Classic runtime rejected the resolved exploration location",
 	}
 
 

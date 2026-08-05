@@ -16,6 +16,9 @@ const EnginePluginPortScript = preload(
 const SemanticStateScript = preload(
 	"res://scripts/scenario_runtime/scenario_semantic_state.gd"
 )
+const ClassicDungeonViewModelScript = preload(
+	"res://scripts/classic_runtime/classic_dungeon_view_model.gd"
+)
 
 const ENHANCED_DISPATCH_TRIGGER_ID := "__scenario_enhanced_global_dispatch__"
 
@@ -24,6 +27,7 @@ signal command_finished(command: String, response: Dictionary)
 signal playthrough_completed(result: Dictionary)
 signal playthrough_stopped(result: Dictionary)
 signal playthrough_finished(result: Dictionary)
+signal classic_dungeon_view_changed(snapshot: Dictionary)
 
 var runtime: ClassicRuntime
 var command_adapter: Object
@@ -1775,6 +1779,7 @@ func activate_start_location(force_reload := false) -> Dictionary:
 		if str(reveal_result.get("status", "")) == "error":
 			return reveal_result
 		response["dungeonOverhead"] = reveal_result
+		refresh_dungeon_view()
 		return response
 	return {}
 
@@ -1813,6 +1818,70 @@ func reveal_dungeon_overhead(position: Vector2i) -> Dictionary:
 	return response if response is Dictionary else {
 		"status": "error",
 		"message": "Classic dungeon-overhead adapter returned an invalid response",
+	}
+
+
+func get_dungeon_view_snapshot(radius: int = 6) -> Dictionary:
+	if runtime == null or runtime.bundle == null or runtime.runtime_state == null:
+		return {"status": "ok", "active": false}
+	return ClassicDungeonViewModelScript.build_snapshot(
+		runtime.bundle,
+		runtime.runtime_state,
+		radius
+	)
+
+
+func refresh_dungeon_view(radius: int = 6) -> Dictionary:
+	var snapshot := get_dungeon_view_snapshot(radius)
+	classic_dungeon_view_changed.emit(snapshot)
+	return snapshot
+
+
+func rotate_dungeon_heading(delta: int) -> Dictionary:
+	var snapshot := get_dungeon_view_snapshot()
+	if str(snapshot.get("status", "")) == "error":
+		return snapshot
+	if not bool(snapshot.get("active", false)):
+		return {"status": "ok", "handled": false, "changed": false, "snapshot": snapshot}
+	var state: Object = runtime.runtime_state
+	var old_heading := ClassicDungeonViewModelScript.normalize_heading(
+		int(state.get("heading"))
+	)
+	var new_heading := ClassicDungeonViewModelScript.rotated_heading(old_heading, delta)
+	state.call("set_heading", new_heading)
+	return {
+		"status": "ok",
+		"handled": true,
+		"changed": new_heading != old_heading,
+		"snapshot": refresh_dungeon_view(),
+	}
+
+
+func toggle_dungeon_view(allow_wizard_eye := false) -> Dictionary:
+	var snapshot := get_dungeon_view_snapshot()
+	if str(snapshot.get("status", "")) == "error":
+		return snapshot
+	if not bool(snapshot.get("active", false)):
+		return {"status": "ok", "handled": false, "changed": false, "snapshot": snapshot}
+	var state: Object = runtime.runtime_state
+	if not bool(state.get("multi_view")) and not allow_wizard_eye:
+		return {
+			"status": "ok",
+			"handled": true,
+			"changed": false,
+			"reason": "fixed-3d",
+			"snapshot": snapshot,
+		}
+	var old_view_type := int(state.get("view_type"))
+	var new_view_type := ClassicDungeonViewModelScript.VIEW_MAP \
+		if old_view_type == ClassicDungeonViewModelScript.VIEW_3D \
+		else ClassicDungeonViewModelScript.VIEW_3D
+	state.set("view_type", new_view_type)
+	return {
+		"status": "ok",
+		"handled": true,
+		"changed": true,
+		"snapshot": refresh_dungeon_view(),
 	}
 
 
@@ -2087,6 +2156,7 @@ func _resume_after_command(command: String, _payload: Dictionary, response: Dict
 				"Classic dungeon overhead could not be revealed"
 			)), command)
 			return
+	refresh_dungeon_view()
 	runtime.finish_command(response)
 
 
