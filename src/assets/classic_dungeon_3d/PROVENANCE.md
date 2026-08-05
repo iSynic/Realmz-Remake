@@ -12,7 +12,12 @@ the 3D geometry: their baked perspective and dense ordered dithering are not
 suitable as surface materials under a moving camera. The committed atlas is a
 remake-owned, low-resolution recreation with tileable masonry and floor
 patterns, a redrawn wooden door, cut-stone trim, a stair portal, and pillar
-stone, all restricted to colors sampled from the listed Classic PICTs.
+stone. The wall surface was replaced with a SpriteCook-generated material
+swatch using a deliberately restrained slate, brown-gray, and moss palette;
+the selected source asset and hash are recorded in `spritecook-assets.json`.
+The remaining doorway, arch, and floor colors were desaturated into the same
+neutral stone and dark-walnut range so features remain distinct without the
+earlier high-contrast olive and red presentation.
 
 | Atlas region | Classic source | Crop |
 |---|---:|---:|
@@ -39,5 +44,5 @@ Decoded reference SHA-256 values:
 
 Committed output SHA-256 values:
 
-- `classic_dungeon_atlas.png`: `2666d35dcf3f2c4c9cc2db379443a211b3fed31af36c2a816096e62ade0c03f3`
+- `classic_dungeon_atlas.png`: `183d57647bf1ba70eb392417e6c8c804fc6f7ecd86ba115e71a4fc9f4ef640c9`
 - `classic_dungeon_palette.png`: `3f5bb0f15f895a9609509fa96d70d0629537070416273127dbd5385f33d61ff2`

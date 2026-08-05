@@ -84,21 +84,32 @@ static func build(snapshot: Dictionary, atlas: Texture2D) -> Dictionary:
 					surface, center, direction, color
 				)
 
+	var pillar_corners: Dictionary = {}
 	for cell_value: Variant in snapshot.get("cells", []):
 		if not (cell_value is Dictionary):
 			continue
 		var cell: Dictionary = cell_value
-		if not bool(cell.get("pillar", false)):
+		if not bool(cell.get("pillar", false)) or not _is_open_cell(cell):
 			continue
 		var offset: Vector2i = cell.get("offset", Vector2i.ZERO)
 		var fade := _distance_fade(offset)
 		var color := Color(fade, fade, fade, 1.0)
 		var center := Vector3(float(offset.x), 0.0, float(offset.y))
-		for direction: Vector2i in [Vector2i.UP, Vector2i.RIGHT, Vector2i.DOWN, Vector2i.LEFT]:
-			if _is_open_cell(cells_by_offset.get(offset + direction)):
-				triangle_count += _add_wall_pilaster(
-					surface, center, direction, color
-				)
+		for corner: Vector2i in [
+			Vector2i(-1, -1),
+			Vector2i(1, -1),
+			Vector2i(1, 1),
+			Vector2i(-1, 1),
+		]:
+			var corner_key := offset * 2 + corner
+			if pillar_corners.has(corner_key):
+				continue
+			pillar_corners[corner_key] = true
+			triangle_count += _add_corner_pillar(
+				surface,
+				center + Vector3(float(corner.x), 0.0, float(corner.y)) * 0.44,
+				color
+			)
 
 	surface.index()
 	var mesh := surface.commit()
@@ -131,10 +142,8 @@ render_mode unshaded, cull_disabled, depth_draw_opaque;
 uniform sampler2D atlas : source_color, filter_nearest, repeat_disable;
 void fragment() {
 	vec4 texel = texture(atlas, UV);
-	if (texel.a < 0.5) { discard; }
 	vec3 stepped = texel.rgb * COLOR.rgb;
 	ALBEDO = floor(stepped * 15.0 + 0.5) / 15.0;
-	ALPHA = texel.a;
 }
 """
 	var material := ShaderMaterial.new()
@@ -224,33 +233,24 @@ static func _add_wall_boundary(
 	)
 
 
-static func _add_wall_pilaster(
+static func _add_corner_pillar(
 	surface: SurfaceTool,
-	wall_center: Vector3,
-	direction: Vector2i,
+	corner_position: Vector3,
 	color: Color
 ) -> int:
-	var face_offset := Vector3(
-		float(direction.x) * 0.505,
-		0.0,
-		float(direction.y) * 0.505
-	)
-	var shaft_size := Vector3(0.04, ROOM_HEIGHT, 0.14)
-	var cap_size := Vector3(0.05, 0.08, 0.18)
-	if direction.y != 0:
-		shaft_size = Vector3(0.14, ROOM_HEIGHT, 0.04)
-		cap_size = Vector3(0.18, 0.08, 0.05)
+	var shaft_size := Vector3(0.10, ROOM_HEIGHT, 0.10)
+	var cap_size := Vector3(0.14, 0.07, 0.14)
 	var count := _add_box(
 		surface,
-		wall_center + face_offset + Vector3(0.0, ROOM_HEIGHT * 0.5, 0.0),
+		corner_position + Vector3(0.0, ROOM_HEIGHT * 0.5, 0.0),
 		shaft_size,
 		PILLAR_UV,
 		color
 	)
-	for height: float in [0.04, ROOM_HEIGHT - 0.04]:
+	for height: float in [0.035, ROOM_HEIGHT - 0.035]:
 		count += _add_box(
 			surface,
-			wall_center + face_offset + Vector3(0.0, height, 0.0),
+			corner_position + Vector3(0.0, height, 0.0),
 			cap_size,
 			PILLAR_UV,
 			color
@@ -267,19 +267,19 @@ static func _add_door(
 	if east_west:
 		return _add_quad(
 			surface,
-			center + Vector3(0.0, 0.0, -0.48),
-			center + Vector3(0.0, 0.0, 0.48),
-			center + Vector3(0.0, 1.35, 0.48),
-			center + Vector3(0.0, 1.35, -0.48),
+			center + Vector3(0.0, 0.0, -0.36),
+			center + Vector3(0.0, 0.0, 0.36),
+			center + Vector3(0.0, 1.23, 0.36),
+			center + Vector3(0.0, 1.23, -0.36),
 			DOOR_UV,
 			color
 		)
 	return _add_quad(
 		surface,
-		center + Vector3(-0.48, 0.0, 0.0),
-		center + Vector3(0.48, 0.0, 0.0),
-		center + Vector3(0.48, 1.35, 0.0),
-		center + Vector3(-0.48, 1.35, 0.0),
+		center + Vector3(-0.36, 0.0, 0.0),
+		center + Vector3(0.36, 0.0, 0.0),
+		center + Vector3(0.36, 1.23, 0.0),
+		center + Vector3(-0.36, 1.23, 0.0),
 		DOOR_UV,
 		color
 	)
@@ -293,22 +293,22 @@ static func _add_doorway(
 	color: Color
 ) -> int:
 	var count := 0
-	var post_size := Vector3(0.12, 1.35, 0.16)
-	var post_a := center + Vector3(-0.44, 0.675, 0.0)
-	var post_b := center + Vector3(0.44, 0.675, 0.0)
-	var lintel_size := Vector3(1.0, 0.15, 0.16)
+	var wing_size := Vector3(0.14, ROOM_HEIGHT, 0.16)
+	var wing_a := center + Vector3(-0.43, ROOM_HEIGHT * 0.5, 0.0)
+	var wing_b := center + Vector3(0.43, ROOM_HEIGHT * 0.5, 0.0)
+	var header_size := Vector3(0.72, ROOM_HEIGHT - 1.23, 0.16)
 	if east_west:
-		post_size = Vector3(0.16, 1.35, 0.12)
-		post_a = center + Vector3(0.0, 0.675, -0.44)
-		post_b = center + Vector3(0.0, 0.675, 0.44)
-		lintel_size = Vector3(0.16, 0.15, 1.0)
-	count += _add_box(surface, post_a, post_size, ARCH_UV, color)
-	count += _add_box(surface, post_b, post_size, ARCH_UV, color)
+		wing_size = Vector3(0.16, ROOM_HEIGHT, 0.14)
+		wing_a = center + Vector3(0.0, ROOM_HEIGHT * 0.5, -0.43)
+		wing_b = center + Vector3(0.0, ROOM_HEIGHT * 0.5, 0.43)
+		header_size = Vector3(0.16, ROOM_HEIGHT - 1.23, 0.72)
+	count += _add_box(surface, wing_a, wing_size, WALL_UV, color)
+	count += _add_box(surface, wing_b, wing_size, WALL_UV, color)
 	count += _add_box(
 		surface,
-		center + Vector3(0.0, 1.425, 0.0),
-		lintel_size,
-		ARCH_UV,
+		center + Vector3(0.0, (ROOM_HEIGHT + 1.23) * 0.5, 0.0),
+		header_size,
+		WALL_UV,
 		color
 	)
 	if not door_open:

@@ -24,6 +24,10 @@ func _ready() -> void:
 			var field := 0
 			if absi(x) >= 2 or y == -6 or y == 6:
 				field = 0x0001
+			# A door belongs in a wall run. Keeping its neighboring squares open
+			# makes a valid one-square door look like a freestanding prop.
+			if y == -2 and absi(x) == 1:
+				field = 0x0001
 			if Vector2i(x, y) == Vector2i(0, -2):
 				field = 0x0002
 			elif Vector2i(x, y) == Vector2i(-1, -3):
