@@ -40,8 +40,25 @@ func _init() -> void :
 # real keyboard key stays held. is_action_pressed(action) excludes echo events,
 # so keyboard auto-repeat doesn't double-fire here.
 func _input(event : InputEvent) -> void :
+	if (
+		event is InputEventKey
+		and event.pressed
+		and not event.echo
+		and event.keycode == KEY_SPACE
+		and _state_name == "Exploration"
+		and _classic_dungeon_snapshot_active()
+		and not _is_overlay_panel_visible()
+	):
+		var toggle_result := GameGlobal.toggle_dungeon_view()
+		if bool(toggle_result.get("handled", false)):
+			get_viewport().set_input_as_handled()
+		return
 	for action in MOVE_ACTIONS :
 		if event.is_action_pressed(action) :
+			if _classic_dungeon_navigation_active():
+				request_classic_dungeon_navigation(action)
+				get_viewport().set_input_as_handled()
+				return
 			var arr : Array = get_dir_input_from_kb()
 			if arr[1] :
 				send_dir_input(arr[0], true)
@@ -216,7 +233,9 @@ func _process(delta):
 		
 		var maybe_input : Vector2i = Vector2i.ZERO
 		var current_map: Map = GameGlobal.map
-		if is_instance_valid(current_map) and current_map.mouseinside :
+		if is_instance_valid(current_map) \
+				and current_map.mouseinside \
+				and not _classic_dungeon_navigation_active():
 			#if Input.is_action_pressed("RightClick") :
 				#send_dir_input(Vector2i.ZERO, false)
 			var targoffset : Vector2 = current_map.focuscharacter.get_pixel_position()
@@ -234,6 +253,11 @@ func _process(delta):
 				#print("gamestate l150 send_dir_input ", maybe_input, " w offset ", targoffset)
 				send_dir_input(maybe_input, false)
 			#print("maybe_input ", maybe_input)
+		if maybe_input == Vector2i.ZERO and _classic_dungeon_navigation_active():
+			var held_action := _pressed_move_action()
+			if not held_action.is_empty():
+				request_classic_dungeon_navigation(held_action)
+				maybe_input = Vector2i(1, 1)
 		if maybe_input == Vector2i.ZERO :
 			var maybe_input_array : Array = StateMachine.get_dir_input_from_kb()
 			if maybe_input_array[1] :
@@ -251,6 +275,67 @@ func send_dir_input(input : Vector2, is_keyboard : bool) :
 			if not cb_decide_state.current_active_creabutton.creature.is_crea_player_controlled() :
 				return
 		state._on_dir_input_received(input,is_keyboard )
+
+
+func request_classic_dungeon_navigation(action: StringName) -> void:
+	var dungeon_view := _classic_dungeon_viewport()
+	if dungeon_view == null or not dungeon_view.has_method("begin_navigation"):
+		return
+	var gate: Dictionary = dungeon_view.call("begin_navigation", action)
+	if not bool(gate.get("handled", false)) or not bool(gate.get("accepted", false)):
+		return
+	if action == &"move_left" or action == &"move_right":
+		var turn_delta := -1 if action == &"move_left" else 1
+		var turn_result := GameGlobal.rotate_dungeon_heading(turn_delta)
+		if str(turn_result.get("status", "")) == "error" \
+				or not bool(turn_result.get("handled", false)):
+			dungeon_view.call("cancel_navigation")
+		return
+	var snapshot := GameGlobal.get_dungeon_view_snapshot()
+	if not bool(snapshot.get("active", false)):
+		dungeon_view.call("cancel_navigation")
+		return
+	var heading := int(snapshot.get("heading", 1))
+	var movement := Vector2i.UP
+	match heading:
+		2:
+			movement = Vector2i.RIGHT
+		3:
+			movement = Vector2i.DOWN
+		4:
+			movement = Vector2i.LEFT
+	if action == &"move_down":
+		movement = -movement
+	elif action != &"move_up":
+		dungeon_view.call("cancel_navigation")
+		return
+	send_dir_input(Vector2(movement), true)
+
+
+func _classic_dungeon_navigation_active() -> bool:
+	var dungeon_view := _classic_dungeon_viewport()
+	return dungeon_view != null \
+		and dungeon_view.has_method("is_navigation_active") \
+		and bool(dungeon_view.call("is_navigation_active"))
+
+
+func _classic_dungeon_snapshot_active() -> bool:
+	return bool(GameGlobal.get_dungeon_view_snapshot().get("active", false))
+
+
+func _classic_dungeon_viewport() -> Object:
+	# Input polling must not instantiate the lazily loaded HUD at startup.
+	var hud: Variant = UI.get("_ow_hud") if UI != null else null
+	if hud == null:
+		return null
+	return hud.get("classicDungeonViewport")
+
+
+func _pressed_move_action() -> StringName:
+	for action: StringName in MOVE_ACTIONS:
+		if Input.is_action_pressed(action):
+			return action
+	return &""
 
 func set_arrow_mouse_cursor(_delta : float) :
 	# When a full-screen overlay panel (bestiary/char-stats, inventory, etc.) is

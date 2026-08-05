@@ -101,8 +101,33 @@ func enter(_msg : Dictionary = {}) -> void:
 						"toX": destination_position.x,
 						"toY": destination_position.y,
 					})
+					_emit_exploration_step_resolved(
+						Vector2i(playerposx, playerposy),
+						destination_position,
+						map_name_before_step,
+						GameGlobal.currentmap_name,
+						true,
+						Vector2i(input)
+					)
+				else:
+					_emit_exploration_step_resolved(
+						Vector2i(playerposx, playerposy),
+						Vector2i(playerposx, playerposy),
+						map_name_before_step,
+						GameGlobal.currentmap_name,
+						false,
+						Vector2i(input)
+					)
 				continue
 			# Native campaigns do not define cross-map adjacency here.
+			_emit_exploration_step_resolved(
+				Vector2i(playerposx, playerposy),
+				Vector2i(playerposx, playerposy),
+				map_name_before_step,
+				GameGlobal.currentmap_name,
+				false,
+				Vector2i(input)
+			)
 			continue
 		var tilestack : Array = GameGlobal.map.mapdata[attempted_tile.x][attempted_tile.y]
 #		print(tilestack)
@@ -160,9 +185,50 @@ func enter(_msg : Dictionary = {}) -> void:
 					)))
 			if GameGlobal.map.mapboats.has(new_pos) :
 				GameGlobal.map.on_step_on_boat(new_pos)
+		var resolved_position := Vector2i(
+			mapfocuschar.tile_position_x,
+			mapfocuschar.tile_position_y
+		)
+		_emit_exploration_step_resolved(
+			Vector2i(playerposx, playerposy),
+			resolved_position,
+			map_name_before_step,
+			GameGlobal.currentmap_name,
+			resolved_position != Vector2i(playerposx, playerposy) \
+				or GameGlobal.currentmap_name != map_name_before_step,
+			Vector2i(input)
+		)
 	
 	#print(get_stack())
 	if StateMachine.state.name == "ExMenus" :
 		print("ExAnim exit, current state is ", StateMachine.state.name)
 	else :
 		StateMachine.transition_to("Exploration")
+
+
+func _emit_exploration_step_resolved(
+	original_position: Vector2i,
+	final_position: Vector2i,
+	original_map_identity: String,
+	map_identity: String,
+	success: bool,
+	input: Vector2i
+) -> void:
+	var sync_result := GameGlobal.sync_classic_runtime_location(
+		map_identity,
+		final_position
+	)
+	if str(sync_result.get("status", "")) == "error":
+		push_error(str(sync_result.get(
+			"message",
+			"Classic runtime location could not be synchronized"
+		)))
+	GameGlobal.exploration_step_resolved.emit({
+		"originalPosition": original_position,
+		"finalPosition": final_position,
+		"originalMapIdentity": original_map_identity,
+		"mapIdentity": map_identity,
+		"success": success,
+		"input": input,
+	})
+	GameGlobal.refresh_dungeon_view()
