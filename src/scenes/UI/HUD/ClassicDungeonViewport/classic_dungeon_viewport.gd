@@ -13,6 +13,7 @@ const ATLAS := preload(
 )
 
 @onready var _display: TextureRect = $Display
+@onready var _navigation_overlay: ClassicDungeonNavigationOverlay = $NavigationOverlay
 @onready var _subviewport: SubViewport = $SubViewport
 @onready var _camera: Camera3D = $SubViewport/World/Camera3D
 @onready var _geometry: MeshInstance3D = $SubViewport/World/Geometry
@@ -38,6 +39,7 @@ func _ready() -> void:
 		GameGlobal.exploration_step_resolved.connect(_on_step_resolved)
 	if not StateMachine.state_changed.is_connected(_on_game_state_changed):
 		StateMachine.state_changed.connect(_on_game_state_changed)
+	_navigation_overlay.navigation_requested.connect(_on_navigation_requested)
 	resized.connect(_layout_internal_view)
 	call_deferred(&"refresh_from_runtime")
 	call_deferred(&"_layout_internal_view")
@@ -53,11 +55,19 @@ func refresh_from_runtime() -> void:
 
 func is_navigation_active() -> bool:
 	return (
-		visible
+		is_presentation_active()
 		and bool(_snapshot.get("active", false))
 		and int(_snapshot.get("viewType", -1)) == 1
 		and StateMachine._state_name == "Exploration"
 		and not _hud_has_blocking_overlay()
+	)
+
+
+func is_presentation_active() -> bool:
+	return (
+		visible
+		and _snapshot_requests_3d()
+		and bool(StateMachine.is_exploration_state())
 	)
 
 
@@ -86,16 +96,15 @@ func cancel_navigation() -> void:
 
 func _on_snapshot_changed(snapshot: Dictionary) -> void:
 	_snapshot = snapshot.duplicate(true)
-	var show_3d := (
-		bool(_snapshot.get("active", false))
-		and int(_snapshot.get("viewType", -1)) == 1
-		and StateMachine._state_name == "Exploration"
+	var show_3d: bool = (
+		_snapshot_requests_3d()
+		and bool(StateMachine.is_exploration_state())
 	)
 	visible = show_3d
 	_subviewport.render_target_update_mode = (
 		SubViewport.UPDATE_ALWAYS if show_3d else SubViewport.UPDATE_DISABLED
 	)
-	if StateMachine._state_name == "Exploration":
+	if StateMachine.is_exploration_state():
 		_set_native_map_visible(not show_3d)
 	if not show_3d:
 		return
@@ -192,41 +201,31 @@ func _layout_internal_view() -> void:
 	var display_size := Vector2(INTERNAL_SIZE) * _display_scale
 	_display.size = display_size
 	_display.position = (size - display_size) * 0.5
+	_navigation_overlay.size = display_size
+	_navigation_overlay.position = _display.position
 
 
-func _gui_input(event: InputEvent) -> void:
-	if not (event is InputEventMouseButton):
+func _on_navigation_requested(action: StringName) -> void:
+	if not is_navigation_active():
 		return
-	var mouse_event := event as InputEventMouseButton
-	if mouse_event.button_index != MOUSE_BUTTON_LEFT \
-			or not mouse_event.pressed \
-			or not is_navigation_active():
-		return
-	var display_rect := Rect2(_display.position, _display.size)
-	if not display_rect.has_point(mouse_event.position):
-		return
-	var normalized: Vector2 = (mouse_event.position - _display.position) / _display.size
-	var action := &""
-	if normalized.y < 0.33:
-		action = &"move_up"
-	elif normalized.y > 0.67:
-		action = &"move_down"
-	elif normalized.x < 0.5:
-		action = &"move_left"
-	else:
-		action = &"move_right"
-	accept_event()
 	StateMachine.request_classic_dungeon_navigation(action)
 
 
 func _on_game_state_changed(_previous: String, _current: String) -> void:
-	if _current != "Exploration":
+	if not StateMachine.is_exploration_state():
 		visible = false
 		_subviewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		_set_native_map_visible(true)
 		cancel_navigation()
 		return
 	refresh_from_runtime()
+
+
+func _snapshot_requests_3d() -> bool:
+	return (
+		bool(_snapshot.get("active", false))
+		and int(_snapshot.get("viewType", -1)) == 1
+	)
 
 
 func _hud_has_blocking_overlay() -> bool:

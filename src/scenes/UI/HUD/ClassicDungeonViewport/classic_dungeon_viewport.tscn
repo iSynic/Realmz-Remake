@@ -1,6 +1,7 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scenes/UI/HUD/ClassicDungeonViewport/classic_dungeon_viewport.gd" id="1_view"]
+[ext_resource type="Script" path="res://scenes/UI/HUD/ClassicDungeonViewport/classic_dungeon_navigation_overlay.gd" id="2_navigation"]
 
 [sub_resource type="Environment" id="Environment_dungeon"]
 background_mode = 1
@@ -41,6 +42,13 @@ mouse_filter = 2
 texture_filter = 1
 expand_mode = 1
 stretch_mode = 0
+
+[node name="NavigationOverlay" type="Control" parent="."]
+layout_mode = 0
+offset_right = 320.0
+offset_bottom = 180.0
+mouse_filter = 0
+script = ExtResource("2_navigation")
 
 [node name="SubViewport" type="SubViewport" parent="."]
 own_world_3d = true

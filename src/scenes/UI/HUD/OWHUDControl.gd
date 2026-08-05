@@ -165,6 +165,7 @@ var selected_character = null
 	classicPlayerMapRect,
 	pictureRect,
 	textRect.choicesContainer,
+	textRect.disablerButton,
 	temple_rect,
 	abilitesmngtMenu,
 	spellcastMenu,

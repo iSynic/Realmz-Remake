@@ -99,6 +99,9 @@ const ClassicDungeonViewModelScript = preload(
 const ClassicDungeonMeshBuilderScript = preload(
 	"res://scenes/UI/HUD/ClassicDungeonViewport/classic_dungeon_mesh_builder.gd"
 )
+const ClassicDungeonNavigationOverlayScript = preload(
+	"res://scenes/UI/HUD/ClassicDungeonViewport/classic_dungeon_navigation_overlay.gd"
+)
 const ClassicConfusionScript = preload(
 	"res://scripts/classic_runtime/classic_confusion.gd"
 )
@@ -6775,6 +6778,30 @@ func _test_classic_dungeon_view_model() -> void:
 		int(geometry.get("buildUsec", 999999)) < 8000,
 		"dungeon fixture rebuild stays within the eight-millisecond budget"
 	)
+
+	var navigation_overlay := ClassicDungeonNavigationOverlayScript.new() as Control
+	navigation_overlay.size = Vector2(320.0, 180.0)
+	_expect_equal(
+		navigation_overlay._action_at_position(Vector2(20.0, 20.0)),
+		&"move_left",
+		"dungeon image left third turns left at every height"
+	)
+	_expect_equal(
+		navigation_overlay._action_at_position(Vector2(300.0, 160.0)),
+		&"move_right",
+		"dungeon image right third turns right at every height"
+	)
+	_expect_equal(
+		navigation_overlay._action_at_position(Vector2(160.0, 80.0)),
+		&"move_up",
+		"dungeon image upper center moves forward"
+	)
+	_expect_equal(
+		navigation_overlay._action_at_position(Vector2(160.0, 160.0)),
+		&"move_down",
+		"dungeon image lower center moves backward"
+	)
+	navigation_overlay.free()
 
 
 func _dungeon_snapshot_cell(snapshot: Dictionary, position: Vector2i) -> Dictionary:

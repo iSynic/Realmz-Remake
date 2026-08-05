@@ -31,6 +31,11 @@ const MOVE_ACTIONS : Array[StringName] = [
 	&"move_up", &"move_down", &"move_left", &"move_right",
 	&"move_upleft", &"move_upright", &"move_downleft", &"move_downright",
 ]
+const CLASSIC_DUNGEON_REPEAT_DELAY := 0.30
+const CLASSIC_DUNGEON_REPEAT_INTERVAL := 0.14
+
+var _classic_dungeon_held_action := &""
+var _classic_dungeon_repeat_remaining := 0.0
 
 func _init() -> void :
 	add_to_group("state_machine")
@@ -54,8 +59,15 @@ func _input(event : InputEvent) -> void :
 			get_viewport().set_input_as_handled()
 		return
 	for action in MOVE_ACTIONS :
+		if event.is_action_released(action):
+			if action == _classic_dungeon_held_action:
+				_classic_dungeon_held_action = &""
+				_classic_dungeon_repeat_remaining = 0.0
+			return
 		if event.is_action_pressed(action) :
 			if _classic_dungeon_navigation_active():
+				_classic_dungeon_held_action = action
+				_classic_dungeon_repeat_remaining = CLASSIC_DUNGEON_REPEAT_DELAY
 				request_classic_dungeon_navigation(action)
 				get_viewport().set_input_as_handled()
 				return
@@ -222,6 +234,15 @@ func get_dir_input_from_mouse(_delta, offset : Vector2)->Vector2 :
 # Called every frame. 'delta' is the elapsed time since the previous frame.
 func _process(delta):
 	time_since_last_dir_input += delta
+	_classic_dungeon_repeat_remaining = maxf(
+		0.0,
+		_classic_dungeon_repeat_remaining - delta
+	)
+	if _classic_dungeon_presentation_active():
+		if _classic_dungeon_navigation_active():
+			_process_classic_dungeon_held_input()
+		state._state_process(delta)
+		return
 
 	#print("game_state process :  state_name : ", state.name)
 	#if StateMachine.state == StateMachine.ex_menu_state :
@@ -253,11 +274,6 @@ func _process(delta):
 				#print("gamestate l150 send_dir_input ", maybe_input, " w offset ", targoffset)
 				send_dir_input(maybe_input, false)
 			#print("maybe_input ", maybe_input)
-		if maybe_input == Vector2i.ZERO and _classic_dungeon_navigation_active():
-			var held_action := _pressed_move_action()
-			if not held_action.is_empty():
-				request_classic_dungeon_navigation(held_action)
-				maybe_input = Vector2i(1, 1)
 		if maybe_input == Vector2i.ZERO :
 			var maybe_input_array : Array = StateMachine.get_dir_input_from_kb()
 			if maybe_input_array[1] :
@@ -319,6 +335,13 @@ func _classic_dungeon_navigation_active() -> bool:
 		and bool(dungeon_view.call("is_navigation_active"))
 
 
+func _classic_dungeon_presentation_active() -> bool:
+	var dungeon_view := _classic_dungeon_viewport()
+	return dungeon_view != null \
+		and dungeon_view.has_method("is_presentation_active") \
+		and bool(dungeon_view.call("is_presentation_active"))
+
+
 func _classic_dungeon_snapshot_active() -> bool:
 	return bool(GameGlobal.get_dungeon_view_snapshot().get("active", false))
 
@@ -331,11 +354,17 @@ func _classic_dungeon_viewport() -> Object:
 	return hud.get("classicDungeonViewport")
 
 
-func _pressed_move_action() -> StringName:
-	for action: StringName in MOVE_ACTIONS:
-		if Input.is_action_pressed(action):
-			return action
-	return &""
+func _process_classic_dungeon_held_input() -> void:
+	if _classic_dungeon_held_action.is_empty():
+		return
+	if not Input.is_action_pressed(_classic_dungeon_held_action):
+		_classic_dungeon_held_action = &""
+		_classic_dungeon_repeat_remaining = 0.0
+		return
+	if _classic_dungeon_repeat_remaining > 0.0:
+		return
+	request_classic_dungeon_navigation(_classic_dungeon_held_action)
+	_classic_dungeon_repeat_remaining = CLASSIC_DUNGEON_REPEAT_INTERVAL
 
 func set_arrow_mouse_cursor(_delta : float) :
 	# When a full-screen overlay panel (bestiary/char-stats, inventory, etc.) is
