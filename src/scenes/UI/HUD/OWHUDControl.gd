@@ -87,6 +87,9 @@ var selected_character = null
 @onready var textRect = $VBoxScreen/HBoxBot/TextRect
 
 @onready var mapAreaControl : Control = $VBoxScreen/HBoxTop/MapArea
+@onready var classicDungeonViewport: ClassicDungeonViewport = (
+	$VBoxScreen/HBoxTop/MapArea/ClassicDungeonViewport
+)
 @onready var inventoryRect = $VBoxScreen/HBoxTop/MapArea/InventoryRect#$InventoryRect
 @onready var bestiaryRect = $BestiaryRect
 @onready var characterStatRect = $CharacterStatRect
@@ -360,6 +363,13 @@ func restore_gameplay_focus() -> void:
 		focus_target = campButton
 	if is_instance_valid(focus_target) and focus_target.focus_mode != FOCUS_NONE:
 		focus_target.call_deferred(&"grab_focus")
+
+
+func has_blocking_overlay_visible() -> bool:
+	for overlay: CanvasItem in _blocking_overlays:
+		if overlay.visible:
+			return true
+	return false
 
 func _on_blocking_overlay_visibility_changed() -> void:
 	_sync_action_dock_focus_with_overlays()

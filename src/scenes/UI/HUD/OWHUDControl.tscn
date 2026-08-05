@@ -1,4 +1,4 @@
-[gd_scene load_steps=85 format=3 uid="uid://bcm4yk3e2uv7"]
+[gd_scene load_steps=86 format=3 uid="uid://bcm4yk3e2uv7"]
 
 [ext_resource type="PackedScene" uid="uid://y2mh6jttjyop" path="res://scenes/UI/HUD/Multiple Choices/ChoicesButton.tscn" id="1"]
 [ext_resource type="Texture2D" uid="uid://d4bw02w60ropk" path="res://shared_assets/UI/StonePatternRect9.png" id="2"]
@@ -61,6 +61,7 @@
 [ext_resource type="Texture2D" path="res://scenes/UI/HUD/Button_Search.png" id="85_search_button"]
 [ext_resource type="Texture2D" path="res://scenes/UI/HUD/Button_AreaSearch.png" id="86_area_search_button"]
 [ext_resource type="Texture2D" path="res://scenes/UI/HUD/Button_EncounterAction.png" id="87_encounter_action"]
+[ext_resource type="PackedScene" path="res://scenes/UI/HUD/ClassicDungeonViewport/classic_dungeon_viewport.tscn" id="88_dungeon_view"]
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_kbh82"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_n8nai"]
@@ -141,6 +142,9 @@ theme_override_constants/separation = 0
 layout_mode = 2
 size_flags_horizontal = 3
 mouse_filter = 2
+
+[node name="ClassicDungeonViewport" parent="VBoxScreen/HBoxTop/MapArea" instance=ExtResource("88_dungeon_view")]
+layout_mode = 1
 
 [node name="ChoicesVBoxContainer" type="VBoxContainer" parent="VBoxScreen/HBoxTop/MapArea" unique_id=1529946091]
 visible = false

@@ -93,6 +93,12 @@ const ClassicRandomRectangleScript = preload(
 const ClassicDungeonBattleTerrainScript = preload(
 	"res://scripts/classic_runtime/classic_dungeon_battle_terrain.gd"
 )
+const ClassicDungeonViewModelScript = preload(
+	"res://scripts/classic_runtime/classic_dungeon_view_model.gd"
+)
+const ClassicDungeonMeshBuilderScript = preload(
+	"res://scenes/UI/HUD/ClassicDungeonViewport/classic_dungeon_mesh_builder.gd"
+)
 const ClassicConfusionScript = preload(
 	"res://scripts/classic_runtime/classic_confusion.gd"
 )
@@ -2677,6 +2683,14 @@ func _ready() -> void:
 		_test_standard_character_rules()
 		_finish()
 		return
+	if OS.get_cmdline_user_args().has("--dungeon-view-only"):
+		_test_classic_dungeon_view_model()
+		_finish()
+		return
+	if OS.get_cmdline_user_args().has("--dungeon-geometry-corpus"):
+		_test_installed_classic_dungeon_geometry_corpus()
+		_finish()
+		return
 	var bundle = BundleScript.new()
 	_expect(bundle.load_from_directory(FIXTURE), "CoB fixture loads: %s" % bundle.last_error)
 	if not bundle.last_error.is_empty():
@@ -2695,6 +2709,7 @@ func _ready() -> void:
 	_test_classic_character_rule_profile()
 	_test_native_character_creation_spell_selection()
 	_test_classic_map_materializer()
+	_test_classic_dungeon_view_model()
 	_test_classic_dungeon_battle_terrain()
 	_test_classic_boat_materialization()
 	_test_classic_item_materializer()
@@ -6579,6 +6594,293 @@ func _test_classic_map_materializer() -> void:
 		OK,
 		"materializer test cleans its workspace"
 	)
+
+
+func _test_classic_dungeon_view_model() -> void:
+	var bundle = BundleScript.new()
+	var tiles: Array = []
+	tiles.resize(25)
+	tiles.fill(0)
+	tiles[1 * 5 + 2] = 0x0001
+	tiles[2 * 5 + 3] = 0x0002
+	tiles[3 * 5 + 2] = 0x0004
+	tiles[2 * 5 + 1] = 0x2001
+	tiles[1 * 5 + 1] = 0x0010
+	bundle.maps_by_id["dungeon:3"] = {
+		"id": "dungeon:3",
+		"levelType": "dungeon",
+		"levelIndex": 3,
+		"width": 5,
+		"height": 5,
+		"tiles": tiles,
+	}
+	var state = StateScript.new()
+	state.level_type = "dungeon"
+	state.level_index = 3
+	state.x = 2
+	state.y = 2
+	state.heading = 1
+	state.multi_view = true
+	state.view_type = StateScript.VIEW_3D
+	state.compass_enabled = false
+
+	var snapshot: Dictionary = ClassicDungeonViewModelScript.build_snapshot(
+		bundle,
+		state,
+		2
+	)
+	_expect_equal(snapshot.get("status"), "ok", "Classic dungeon view snapshot builds")
+	_expect_equal(snapshot.get("origin"), Vector2i(2, 2), "dungeon view keeps party origin")
+	_expect_equal(snapshot.get("heading"), 1, "dungeon view keeps Classic heading")
+	_expect_equal(snapshot.get("multiView"), true, "dungeon view keeps multi-view state")
+	_expect_equal(snapshot.get("compassEnabled"), false, "dungeon view keeps compass state")
+	_expect_equal(snapshot.get("cells", []).size(), 25, "radius-two dungeon view is five square")
+	_expect_equal(
+		_dungeon_snapshot_cell(snapshot, Vector2i(2, 1)).get("frontSurface"),
+		ClassicDungeonViewModelScript.SURFACE_WALL,
+		"north-facing wall matches SetViewVariables"
+	)
+	_expect_equal(
+		_dungeon_snapshot_cell(snapshot, Vector2i(3, 2)).get("frontSurface"),
+		ClassicDungeonViewModelScript.SURFACE_DOOR,
+		"north view recognizes the source north-south door flag"
+	)
+	_expect_equal(
+		_dungeon_snapshot_cell(snapshot, Vector2i(3, 2)).get("sideSurface"),
+		ClassicDungeonViewModelScript.SURFACE_NONE,
+		"north view does not invent a side surface for a north-south door"
+	)
+	_expect_equal(
+		_dungeon_snapshot_cell(snapshot, Vector2i(2, 3)).get("sideSurface"),
+		ClassicDungeonViewModelScript.SURFACE_ARCH,
+		"north view recognizes the source east-west side-door flag"
+	)
+	_expect_equal(
+		_dungeon_snapshot_cell(snapshot, Vector2i(1, 2)).get("frontSurface"),
+		ClassicDungeonViewModelScript.SURFACE_ARCH,
+		"revealed passage overrides its wall presentation"
+	)
+	_expect_equal(
+		_dungeon_snapshot_cell(snapshot, Vector2i(1, 1)).get("pillar"),
+		true,
+		"dungeon snapshot retains corner-pillar fields"
+	)
+
+	for heading: int in range(1, 5):
+		_expect_equal(
+			ClassicDungeonViewModelScript.rotated_heading(heading, 4),
+			heading,
+			"four dungeon turns preserve heading %d" % heading
+		)
+	_expect_equal(
+		ClassicDungeonViewModelScript.heading_vector(1),
+		Vector2i.UP,
+		"Classic heading 1 faces north"
+	)
+	_expect_equal(
+		ClassicDungeonViewModelScript.heading_vector(2),
+		Vector2i.RIGHT,
+		"Classic heading 2 faces east"
+	)
+	_expect_equal(
+		ClassicDungeonViewModelScript.heading_vector(3),
+		Vector2i.DOWN,
+		"Classic heading 3 faces south"
+	)
+	_expect_equal(
+		ClassicDungeonViewModelScript.heading_vector(4),
+		Vector2i.LEFT,
+		"Classic heading 4 faces west"
+	)
+	_expect_equal(
+		ClassicDungeonViewModelScript.front_surface(0x0002, 3),
+		ClassicDungeonViewModelScript.SURFACE_DOOR,
+		"south view uses the north-south door orientation"
+	)
+	_expect_equal(
+		ClassicDungeonViewModelScript.front_surface(0x0004, 2),
+		ClassicDungeonViewModelScript.SURFACE_DOOR,
+		"east view uses the east-west door orientation"
+	)
+	_expect_equal(
+		ClassicDungeonViewModelScript.front_surface(0x200b, 1),
+		ClassicDungeonViewModelScript.SURFACE_STAIR,
+		"Classic front feature precedence ends with stairs"
+	)
+	state.set_tile("dungeon", 3, 2, 1, 0x2001)
+	var overridden: Dictionary = ClassicDungeonViewModelScript.build_snapshot(bundle, state, 2)
+	_expect_equal(
+		_dungeon_snapshot_cell(overridden, Vector2i(2, 1)).get("frontSurface"),
+		ClassicDungeonViewModelScript.SURFACE_ARCH,
+		"runtime field overrides are visible in the dungeon snapshot"
+	)
+	state.x = 0
+	state.y = 0
+	var boundary: Dictionary = ClassicDungeonViewModelScript.build_snapshot(bundle, state, 2)
+	var boundary_cell: Dictionary = _dungeon_snapshot_cell(boundary, Vector2i(-1, 0))
+	_expect_equal(boundary_cell.get("inBounds"), false, "dungeon snapshot marks map boundaries")
+	_expect_equal(
+		boundary_cell.get("frontSurface"),
+		ClassicDungeonViewModelScript.SURFACE_WALL,
+		"dungeon map boundaries are visually sealed"
+	)
+	state.level_type = "land"
+	_expect_equal(
+		ClassicDungeonViewModelScript.build_snapshot(bundle, state).get("active"),
+		false,
+		"dungeon presentation remains inactive on land maps"
+	)
+
+	state.level_type = "dungeon"
+	state.x = 2
+	state.y = 2
+	state.heading = 1
+	state.multi_view = true
+	state.view_type = StateScript.VIEW_3D
+	var host = HostScript.new()
+	host.runtime.use_shared_campaign(bundle, state)
+	var turn_result: Dictionary = host.rotate_dungeon_heading(1)
+	_expect_equal(turn_result.get("changed"), true, "dungeon host accepts a free turn")
+	_expect_equal(state.heading, 2, "dungeon host commits the authoritative heading")
+	var toggle_result: Dictionary = host.toggle_dungeon_view()
+	_expect_equal(toggle_result.get("changed"), true, "multi-view dungeon toggles overhead")
+	_expect_equal(state.view_type, StateScript.VIEW_MAP, "multi-view toggle selects the map")
+	state.require_3d_view()
+	var fixed_result: Dictionary = host.toggle_dungeon_view()
+	_expect_equal(fixed_result.get("changed"), false, "fixed-3D dungeon rejects map toggle")
+	var wizard_result: Dictionary = host.toggle_dungeon_view(true)
+	_expect_equal(wizard_result.get("changed"), true, "Wizard Eye permits an overhead toggle")
+	host.free()
+
+	var render_snapshot: Dictionary = ClassicDungeonViewModelScript.build_snapshot(
+		bundle,
+		state,
+		2
+	)
+	var atlas := load(
+		"res://assets/classic_dungeon_3d/classic_dungeon_atlas.png"
+	) as Texture2D
+	var geometry: Dictionary = ClassicDungeonMeshBuilderScript.build(
+		render_snapshot,
+		atlas
+	)
+	var mesh := geometry.get("mesh") as ArrayMesh
+	_expect(mesh != null, "source-derived dungeon fixture builds merged 3D geometry")
+	_expect_equal(
+		mesh.get_surface_count() if mesh != null else 0,
+		1,
+		"dungeon fixture uses one merged material surface"
+	)
+	_expect(
+		int(geometry.get("buildUsec", 999999)) < 8000,
+		"dungeon fixture rebuild stays within the eight-millisecond budget"
+	)
+
+
+func _dungeon_snapshot_cell(snapshot: Dictionary, position: Vector2i) -> Dictionary:
+	for cell_value: Variant in snapshot.get("cells", []):
+		if cell_value is Dictionary and cell_value.get("position") == position:
+			return cell_value
+	return {}
+
+
+func _test_installed_classic_dungeon_geometry_corpus() -> void:
+	var campaigns_root := ProjectSettings.globalize_path("res://Campaigns")
+	var campaign_directories := DirAccess.get_directories_at(campaigns_root)
+	campaign_directories.sort()
+	var atlas := load(
+		"res://assets/classic_dungeon_3d/classic_dungeon_atlas.png"
+	) as Texture2D
+	var campaign_count := 0
+	var dungeon_count := 0
+	var render_count := 0
+	var max_build_usec := 0
+	for directory: String in campaign_directories:
+		var campaign_root := campaigns_root.path_join(directory)
+		var manifest_path := campaign_root.path_join("campaign.json")
+		if not FileAccess.file_exists(manifest_path):
+			continue
+		var manifest: Variant = JSON.parse_string(
+			FileAccess.get_file_as_string(manifest_path)
+		)
+		if not (manifest is Dictionary) \
+				or str(manifest.get("campaignKind", "")) != "classic-interpreted":
+			continue
+		campaign_count += 1
+		var bundle = BundleScript.new()
+		if not bundle.load_from_directory(campaign_root):
+			_expect(false, "%s corpus bundle loads: %s" % [directory, bundle.last_error])
+			continue
+		var map_ids: Array = bundle.maps_by_id.keys()
+		map_ids.sort()
+		for map_id_value: Variant in map_ids:
+			var map_record: Dictionary = bundle.maps_by_id[map_id_value]
+			if str(map_record.get("levelType", "")) != "dungeon":
+				continue
+			dungeon_count += 1
+			var state = StateScript.new()
+			state.level_type = "dungeon"
+			state.level_index = int(map_record.get("levelIndex", 0))
+			var origin := _dungeon_corpus_origin(map_record)
+			state.x = origin.x
+			state.y = origin.y
+			state.multi_view = true
+			state.view_type = StateScript.VIEW_3D
+			for heading: int in range(1, 5):
+				state.heading = heading
+				var snapshot: Dictionary = ClassicDungeonViewModelScript.build_snapshot(
+					bundle,
+					state
+				)
+				var geometry: Dictionary = ClassicDungeonMeshBuilderScript.build(
+					snapshot,
+					atlas
+				)
+				var mesh := geometry.get("mesh") as ArrayMesh
+				max_build_usec = maxi(
+					max_build_usec,
+					int(geometry.get("buildUsec", 0))
+				)
+				if mesh == null or mesh.get_surface_count() > 6:
+					_expect(
+						false,
+						"%s %s heading %d builds bounded dungeon geometry"
+						% [directory, map_id_value, heading]
+					)
+					continue
+				render_count += 1
+	_expect(campaign_count >= 13, "installed Classic corpus includes all campaigns")
+	_expect(dungeon_count > 0, "installed Classic corpus includes dungeon maps")
+	_expect_equal(
+		render_count,
+		dungeon_count * 4,
+		"every installed Classic dungeon renders at all four headings"
+	)
+	_expect(
+		max_build_usec < 8000,
+		"installed dungeon geometry stays within the eight-millisecond budget"
+	)
+	print(
+		"Classic dungeon geometry corpus: %d campaigns, %d dungeons, %d views, %.2f ms max"
+		% [campaign_count, dungeon_count, render_count, float(max_build_usec) / 1000.0]
+	)
+
+
+func _dungeon_corpus_origin(map_record: Dictionary) -> Vector2i:
+	var width := int(map_record.get("width", 0))
+	var height := int(map_record.get("height", 0))
+	var tiles: Variant = map_record.get("tiles", [])
+	if width <= 0 or height <= 0 or not (tiles is Array):
+		return Vector2i.ZERO
+	var center := Vector2i(floori(width / 2.0), floori(height / 2.0))
+	if center.y * width + center.x < tiles.size() \
+			and (int(tiles[center.y * width + center.x]) & 0x0001) == 0:
+		return center
+	for y: int in range(height):
+		for x: int in range(width):
+			if (int(tiles[y * width + x]) & 0x0001) == 0:
+				return Vector2i(x, y)
+	return center
 
 
 func _test_classic_dungeon_battle_terrain() -> void:
